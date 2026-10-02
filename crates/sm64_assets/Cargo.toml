@@ -7,6 +7,7 @@ description = "Import user-owned SM64 decomp output into runtime-friendly Rust d
 
 [dependencies]
 sm64_core.workspace = true
+regex = "1"
 
 [lints]
 workspace = true
