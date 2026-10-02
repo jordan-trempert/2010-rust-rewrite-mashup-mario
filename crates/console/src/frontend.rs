@@ -1,6 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use frame::{UiMenuDvars, UiMenuRequest, UiPartyState};
+use frame::{AppScreen, UiDraw, UiMenuDvars, UiMenuRequest, UiPartyState};
 use ui::frontend::maps::{map_label, map_preview, pack_maps};
 use ui::frontend::rules::{MATCH_CONFIG, host_rules, seed_rules, selected_game};
 
@@ -102,6 +102,8 @@ pub(crate) fn route(
     mut party: ResMut<UiPartyState>,
     mut menus: MessageWriter<UiMenuRequest>,
     mut transition: ResMut<session::SessionSwapRequest>,
+    mut app_screen: ResMut<AppScreen>,
+    mut ui_draw: ResMut<UiDraw>,
     maps: Res<ui::MenuMapList>,
     settings: Res<frame::GameSettings>,
     localize: Option<Res<asset_game::LocalizeCatalog>>,
@@ -215,21 +217,37 @@ pub(crate) fn route(
                         return Err("Only the lobby host can start a match".into());
                     }
                     let (map, mode) = selected_game(&dvars, &maps)?;
-                    commands.insert_resource(host_rules(&dvars));
-                    if state.public {
-                        services.submit(net::MasterMenuAction::StartMatch {
-                            map,
-                            mode: mode.token().into(),
-                        })?;
+                    if let Some(request) = sm64_bevy::Sm64LaunchRequest::from_map_key(&map) {
+                        if state.public {
+                            return Err("SM64 maps are currently local-only".into());
+                        }
+                        commands.insert_resource(request);
+                        commands.remove_resource::<frame::HostMatchRules>();
+                        commands.remove_resource::<sim::HostGameModeSelection>();
+                        *party = UiPartyState::default();
+                        *app_screen = AppScreen::InGame;
+                        ui_draw.0 = false;
+                        menus.write(UiMenuRequest::Close("lobby_game_setup".into()));
+                        menus.write(UiMenuRequest::Close("game_map_select".into()));
+                        menus.write(UiMenuRequest::Close("game_lobby".into()));
+                        echo.write(format!("menu: starting {map} via SM64 runtime"));
                     } else {
-                        let id = transition
-                            .request_zone(map.clone())
-                            .map_err(|error| error.to_string())?;
-                        commands.insert_resource(mode);
-                        echo.write(format!(
-                            "menu: starting {map} {} (swap #{id})",
-                            mode.token()
-                        ));
+                        commands.insert_resource(host_rules(&dvars));
+                        if state.public {
+                            services.submit(net::MasterMenuAction::StartMatch {
+                                map,
+                                mode: mode.token().into(),
+                            })?;
+                        } else {
+                            let id = transition
+                                .request_zone(map.clone())
+                                .map_err(|error| error.to_string())?;
+                            commands.insert_resource(mode);
+                            echo.write(format!(
+                                "menu: starting {map} {} (swap #{id})",
+                                mode.token()
+                            ));
+                        }
                     }
                 }
                 "ui_vote_skip" => services.submit(net::MasterMenuAction::VoteToSkip)?,
