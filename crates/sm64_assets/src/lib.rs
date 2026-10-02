@@ -7,7 +7,7 @@ mod texture_sources;
 
 pub use collision_source::{CollisionParseError, ParsedCollision, SpecialObject, parse_collision_source};
 pub use level_script::{AreaSettings, MarioSpawn, load_area_settings, load_mario_spawn, parse_area_settings, parse_mario_spawn};
-pub use render_geometry::{ParsedRenderGeometry, RenderBatch, RenderVertex, load_level_render_geometry};
+pub use render_geometry::{ParsedRenderGeometry, RenderBatch, RenderVertex, load_level_render_geometry, load_model_display_lists};
 pub use surface_names::{surface_type_by_name, terrain_type_by_name};
 
 use std::path::{Path, PathBuf};
