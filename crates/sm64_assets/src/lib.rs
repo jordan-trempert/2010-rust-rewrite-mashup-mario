@@ -2,6 +2,7 @@ mod collision_source;
 mod level_script;
 mod render_geometry;
 mod surface_names;
+mod texture_sources;
 
 pub use collision_source::{CollisionParseError, ParsedCollision, SpecialObject, parse_collision_source};
 pub use level_script::{AreaSettings, MarioSpawn, load_area_settings, load_mario_spawn, parse_area_settings, parse_mario_spawn};
@@ -38,3 +39,5 @@ pub fn load_level_collision(
 ) -> Result<ParsedCollision, CollisionParseError> {
     load_collision_file(collision_path(decomp_root, level, area))
 }
+
+pub use texture_sources::load_texture_sources;
