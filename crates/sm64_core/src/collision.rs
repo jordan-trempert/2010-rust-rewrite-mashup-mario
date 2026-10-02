@@ -8,10 +8,21 @@ pub const CELL_HEIGHT_LIMIT: f32 = 20000.0;
 
 #[derive(Clone, Debug, Default)]
 pub struct CollisionWorld {
-    /// Surfaces are retained in load order. The decomp's spatial lists are
-    /// ordered, and many queries intentionally return the first matching surface.
     pub surfaces: Vec<Surface>,
+    static_order: Vec<SurfaceId>,
+    dynamic_order: Vec<SurfaceId>,
+    pub environment_regions: Vec<EnvironmentRegion>,
     pub water_level: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvironmentRegion {
+    pub kind: i16,
+    pub lo_x: i16,
+    pub lo_z: i16,
+    pub hi_x: i16,
+    pub hi_z: i16,
+    pub height: i16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,16 +32,34 @@ pub struct SurfaceHit {
 }
 
 impl CollisionWorld {
-    pub fn clear(&mut self) { self.surfaces.clear(); }
+    pub fn clear(&mut self) {
+        self.surfaces.clear();
+        self.static_order.clear();
+        self.dynamic_order.clear();
+        self.environment_regions.clear();
+    }
 
-    pub fn push_surface(&mut self, mut surface: Surface) -> SurfaceId {
-        // surface_load.c marks near-X-facing walls for YZ projection.
+    pub fn push_surface(&mut self, surface: Surface) -> SurfaceId {
+        self.push_surface_kind(surface, false)
+    }
+
+    pub fn push_dynamic_surface(&mut self, surface: Surface) -> SurfaceId {
+        self.push_surface_kind(surface, true)
+    }
+
+    fn push_surface_kind(&mut self, mut surface: Surface, dynamic: bool) -> SurfaceId {
         if surface.normal.y.abs() <= 0.01 && surface.normal.x.abs() > 0.707 {
             surface.flags |= SURFACE_FLAG_X_PROJECTION as i8;
         }
         let id=SurfaceId(self.surfaces.len() as u32);
         self.surfaces.push(surface);
+        let target=if dynamic {&mut self.dynamic_order}else{&mut self.static_order};
+        insert_surface_order(target, &self.surfaces, id);
         id
+    }
+
+    pub fn push_environment_region(&mut self, region: EnvironmentRegion) {
+        self.environment_regions.push(region);
     }
 
     pub fn surface(&self,id:SurfaceId)->Option<&Surface> { self.surfaces.get(id.0 as usize) }
@@ -40,7 +69,9 @@ impl CollisionWorld {
         let x=x_pos as i16 as i32;
         let y=y_pos as i16 as i32;
         let z=z_pos as i16 as i32;
-        for (index,s) in self.surfaces.iter().enumerate() {
+        for id in self.dynamic_order.iter().chain(self.static_order.iter()).copied() {
+            let index=id.0 as usize;
+            let s=&self.surfaces[index];
             if s.normal.y <= 0.01 {continue;}
             let x1=s.vertex1[0] as i32; let z1=s.vertex1[2] as i32;
             let x2=s.vertex2[0] as i32; let z2=s.vertex2[2] as i32;
@@ -62,7 +93,9 @@ impl CollisionWorld {
         let x=x_pos as i16 as i32;
         let y=y_pos as i16 as i32;
         let z=z_pos as i16 as i32;
-        for (index,s) in self.surfaces.iter().enumerate() {
+        for id in self.dynamic_order.iter().chain(self.static_order.iter()).copied() {
+            let index=id.0 as usize;
+            let s=&self.surfaces[index];
             if s.normal.y >= -0.01 {continue;}
             let x1=s.vertex1[0] as i32; let z1=s.vertex1[2] as i32;
             let x2=s.vertex2[0] as i32; let z2=s.vertex2[2] as i32;
@@ -89,7 +122,9 @@ impl CollisionWorld {
         let mut referenced: [Option<SurfaceId>;4]=[None;4];
         let mut num_walls=0usize;
 
-        for (index,s) in self.surfaces.iter().enumerate() {
+        for id in self.dynamic_order.iter().chain(self.static_order.iter()).copied() {
+            let index=id.0 as usize;
+            let s=&self.surfaces[index];
             if s.normal.y.abs()>0.01 {continue;}
             if y<s.lower_y as f32 || y>s.upper_y as f32 {continue;}
             let offset=s.normal.x*x+s.normal.y*y+s.normal.z*z+s.origin_offset;
@@ -115,8 +150,42 @@ impl CollisionWorld {
         if num_walls==0 {None}else{referenced[num_walls-1]}
     }
 
-    #[inline]
-    pub fn water_level(&self,_x:f32,_z:f32)->f32 {self.water_level.unwrap_or(FLOOR_LOWER_LIMIT)}
+    pub fn water_level(&self,x:f32,z:f32)->f32 {
+        for r in &self.environment_regions {
+            if r.kind < 50
+                && r.lo_x as f32 < x && x < r.hi_x as f32
+                && r.lo_z as f32 < z && z < r.hi_z as f32 {
+                return r.height as f32;
+            }
+        }
+        self.water_level.unwrap_or(FLOOR_LOWER_LIMIT)
+    }
+
+    pub fn poison_gas_level(&self,x:f32,z:f32)->f32 {
+        for r in &self.environment_regions {
+            if r.kind >= 50 && r.kind % 10 == 0
+                && r.lo_x as f32 < x && x < r.hi_x as f32
+                && r.lo_z as f32 < z && z < r.hi_z as f32 {
+                return r.height as f32;
+            }
+        }
+        FLOOR_LOWER_LIMIT
+    }
+}
+
+fn insert_surface_order(order:&mut Vec<SurfaceId>, surfaces:&[Surface], id:SurfaceId) {
+    let s=&surfaces[id.0 as usize];
+    let (class,priority)=if s.normal.y>0.01 {(0i8,s.vertex1[1] as i32)}
+        else if s.normal.y< -0.01 {(2i8,-(s.vertex1[1] as i32))}
+        else {(1i8,0)};
+    let pos=order.iter().position(|other|{
+        let o=&surfaces[other.0 as usize];
+        let (oc,op)=if o.normal.y>0.01 {(0i8,o.vertex1[1] as i32)}
+            else if o.normal.y< -0.01 {(2i8,-(o.vertex1[1] as i32))}
+            else {(1i8,0)};
+        class<oc || (class==oc && priority>op)
+    }).unwrap_or(order.len());
+    order.insert(pos,id);
 }
 
 fn wall_inside_x_projection(y:f32,z:f32,s:&Surface)->bool {
