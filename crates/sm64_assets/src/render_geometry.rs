@@ -246,6 +246,16 @@ fn parse_display_list(body: &str) -> Result<Vec<GfxCommand>, CollisionParseError
             if let Some(symbol) = parts.last() {
                 commands.push(GfxCommand::SetTexture(symbol.trim().to_owned()));
             }
+        } else if let Some(args) = macro_args(line, "gsDPLoadTextureBlock") {
+            let parts = split_args(args);
+            if let Some(symbol) = parts.first() {
+                commands.push(GfxCommand::SetTexture(symbol.trim().to_owned()));
+            }
+            if parts.len() >= 5 {
+                let width=parse_i32(parts[3]).ok().filter(|v|*v>0).unwrap_or(32) as u32;
+                let height=parse_i32(parts[4]).ok().filter(|v|*v>0).unwrap_or(32) as u32;
+                commands.push(GfxCommand::SetTileSize([width,height]));
+            }
         } else if let Some(args) = macro_args(line, "gsSPTexture") {
             if args.split(',').last().is_some_and(|value|value.trim()=="G_OFF") {
                 commands.push(GfxCommand::ClearTexture);
