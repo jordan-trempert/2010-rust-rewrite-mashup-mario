@@ -41,6 +41,8 @@ pub struct MarioState {
     pub floor_height: f32,
     pub floor_angle: i16,
     pub water_level: i16,
+    /// Area terrain type mirrored from the original Area pointer.
+    pub terrain_type: i16,
     pub interact_obj: Option<ObjectId>,
     pub held_obj: Option<ObjectId>,
     pub used_obj: Option<ObjectId>,
@@ -100,6 +102,7 @@ impl Default for MarioState {
             floor_height: 0.0,
             floor_angle: 0,
             water_level: 0,
+            terrain_type: crate::TERRAIN_GRASS as i16,
             interact_obj: None,
             held_obj: None,
             used_obj: None,
