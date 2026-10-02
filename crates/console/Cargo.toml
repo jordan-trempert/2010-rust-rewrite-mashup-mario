@@ -25,6 +25,7 @@ session = { path = "../session" }
 render_fx.workspace = true
 replay = { path = "../replay" }
 sim = { path = "../sim" }
+sm64_bevy.workspace = true
 bots = { path = "../bots" }
 hud = { path = "../hud" }
 entity_iw4.workspace = true
