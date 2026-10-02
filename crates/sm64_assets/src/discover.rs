@@ -24,7 +24,11 @@ pub fn discover_levels(
         }
     }
 
-    levels.sort_by_key(|name|level_sort_key(name));
+    levels.sort_by(|a,b| {
+        let (a_group,_) = level_sort_key(a);
+        let (b_group,_) = level_sort_key(b);
+        a_group.cmp(&b_group).then_with(||a.cmp(b))
+    });
     Ok(levels)
 }
 
