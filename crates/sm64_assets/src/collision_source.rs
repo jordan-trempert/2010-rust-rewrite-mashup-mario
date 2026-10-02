@@ -32,7 +32,8 @@ pub fn parse_collision_source(source:&str)->Result<ParsedCollision,CollisionPars
     let mut surface_type:Option<i16>=None;
 
     for (line_no,raw) in source.lines().enumerate() {
-        let line=strip_comments(raw).trim();
+        let cleaned=strip_comments(raw);
+        let line=cleaned.trim();
         if line.is_empty() {continue;}
         if let Some(args)=macro_args(line,"COL_VERTEX") {
             let n=parse_numbers(args,line_no)?;
@@ -103,8 +104,21 @@ fn water_kind(name:&str)->Option<i16>{
     }
 }
 
-fn strip_comments(line:&str)->&str {
-    line.split("//").next().unwrap_or(line)
+fn strip_comments(line:&str)->String {
+    let no_line=line.split("//").next().unwrap_or(line);
+    let mut out=String::with_capacity(no_line.len());
+    let mut rest=no_line;
+    loop {
+        let Some(start)=rest.find("/*") else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let after=&rest[start+2..];
+        let Some(end)=after.find("*/") else { break; };
+        rest=&after[end+2..];
+    }
+    out
 }
 
 fn macro_args<'a>(line:&'a str,name:&str)->Option<&'a str>{
