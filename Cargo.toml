@@ -90,6 +90,7 @@ bevy = { version = "0.19", default-features = false, features = [
     "bevy_text",
     "bevy_render",
     "bevy_core_pipeline",
+    "bevy_pbr",
     "bevy_log",
     "bevy_sprite",
     "bevy_sprite_render",
