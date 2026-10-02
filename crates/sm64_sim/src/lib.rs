@@ -43,7 +43,12 @@ impl Sm64World {
         if let Some(floor)=self.mario.floor {
             let _=floor;
             if self.mario.pos[1] < self.mario.floor_height { self.mario.pos[1]=self.mario.floor_height; }
-            sm64_core::mario_action::set_mario_action(&mut self.mario,&self.collision,ACT_IDLE,0);
+            let initial=if self.mario.pos[1] <= self.mario.water_level as f32-100.0 {
+                ACT_WATER_IDLE
+            } else {
+                ACT_IDLE
+            };
+            sm64_core::mario_action::set_mario_action(&mut self.mario,&self.collision,initial,0);
         }
     }
 
