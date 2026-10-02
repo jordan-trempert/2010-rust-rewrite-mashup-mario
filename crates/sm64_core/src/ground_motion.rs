@@ -132,3 +132,16 @@ pub fn update_sliding(m:&mut MarioState, world:&CollisionWorld, stop_speed:f32)-
     }
     false
 }
+
+pub fn should_begin_sliding(m:&MarioState, world:&CollisionWorld)->bool {
+    if m.input & INPUT_ABOVE_SLIDE as u16 == 0 {return false;}
+    let slide_level=(m.terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE;
+    let moving_backward=m.forward_vel<=-1.0;
+    slide_level || moving_backward || crate::surface_props::mario_facing_downhill(m,false)
+}
+
+#[inline]
+pub fn analog_stick_held_back(m:&MarioState)->bool {
+    let d=m.intended_yaw.wrapping_sub(m.face_angle[1]);
+    d < -0x471C || d > 0x471C
+}
