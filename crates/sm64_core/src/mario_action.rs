@@ -4,19 +4,6 @@ use crate::mario::MarioState;
 use crate::mario_step::mario_set_forward_vel;
 use crate::surface_types::*;
 
-fn floor_class(m:&MarioState, world:&CollisionWorld)->i32 {
-    let Some(id)=m.floor else { return SURFACE_CLASS_DEFAULT; };
-    let Some(f)=world.surface(id) else { return SURFACE_CLASS_DEFAULT; };
-    match f.surface_type as i32 {
-        SURFACE_NOT_SLIPPERY | SURFACE_HARD_NOT_SLIPPERY | SURFACE_SWITCH => SURFACE_CLASS_NOT_SLIPPERY,
-        SURFACE_SLIPPERY | SURFACE_NOISE_SLIPPERY | SURFACE_HARD_SLIPPERY | SURFACE_NO_CAM_COL_SLIPPERY => SURFACE_CLASS_SLIPPERY,
-        SURFACE_VERY_SLIPPERY | SURFACE_ICE | SURFACE_HARD_VERY_SLIPPERY
-        | SURFACE_NOISE_VERY_SLIPPERY_73 | SURFACE_NOISE_VERY_SLIPPERY_74
-        | SURFACE_NOISE_VERY_SLIPPERY | SURFACE_NO_CAM_COL_VERY_SLIPPERY => SURFACE_CLASS_VERY_SLIPPERY,
-        _ => SURFACE_CLASS_DEFAULT,
-    }
-}
-
 #[inline]
 fn set_y_vel_based_on_fspeed(m:&mut MarioState, initial:f32, multiplier:f32) {
     m.vel[1]=initial + m.forward_vel*multiplier;
@@ -62,7 +49,7 @@ fn setup_airborne(m:&mut MarioState, mut action:u32, action_arg:u32)->u32 {
 fn setup_moving(m:&mut MarioState, world:&CollisionWorld, action:u32)->u32 {
     if action==ACT_WALKING {
         let mag=m.intended_mag.min(8.0);
-        if floor_class(m,world)!=SURFACE_CLASS_VERY_SLIPPERY && m.forward_vel>=0.0 && m.forward_vel<mag {
+        if crate::surface_props::mario_get_floor_class(m,world)!=SURFACE_CLASS_VERY_SLIPPERY && m.forward_vel>=0.0 && m.forward_vel<mag {
             m.forward_vel=mag;
         }
     } else if action==ACT_HOLD_WALKING {
