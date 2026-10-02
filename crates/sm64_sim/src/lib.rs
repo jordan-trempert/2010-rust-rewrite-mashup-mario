@@ -63,47 +63,51 @@ impl Sm64World {
 
     fn update_inputs(&mut self, input:Sm64Input) {
         use sm64_core::*;
-        let m=&mut self.mario;
-        m.particle_flags=0;
-        m.input=0;
-        // Original code clears transient high flag bits on every frame.
-        m.flags &= 0x00FF_FFFF;
+        {
+            let m=&mut self.mario;
+            m.particle_flags=0;
+            m.input=0;
+            // Original code clears transient high flag bits on every frame.
+            m.flags &= 0x00FF_FFFF;
 
-        let a_pressed=input.button_a && !self.previous_input.button_a;
-        let b_pressed=input.button_b && !self.previous_input.button_b;
-        let z_pressed=input.button_z && !self.previous_input.button_z;
+            let a_pressed=input.button_a && !self.previous_input.button_a;
+            let b_pressed=input.button_b && !self.previous_input.button_b;
+            let z_pressed=input.button_z && !self.previous_input.button_z;
 
-        if a_pressed { m.input|=INPUT_A_PRESSED as u16; m.frames_since_a=0; }
-        else if m.frames_since_a<0xFF {m.frames_since_a+=1;}
-        if input.button_a {m.input|=INPUT_A_DOWN as u16;}
+            if a_pressed { m.input|=INPUT_A_PRESSED as u16; m.frames_since_a=0; }
+            else if m.frames_since_a<0xFF {m.frames_since_a+=1;}
+            if input.button_a {m.input|=INPUT_A_DOWN as u16;}
 
-        if m.squish_timer==0 {
-            if b_pressed {m.input|=INPUT_B_PRESSED as u16; m.frames_since_b=0;}
-            else if m.frames_since_b<0xFF {m.frames_since_b+=1;}
-            if input.button_z {m.input|=INPUT_Z_DOWN as u16;}
-            if z_pressed {m.input|=INPUT_Z_PRESSED as u16;}
-        }
+            if m.squish_timer==0 {
+                if b_pressed {m.input|=INPUT_B_PRESSED as u16; m.frames_since_b=0;}
+                else if m.frames_since_b<0xFF {m.frames_since_b+=1;}
+                if input.button_z {m.input|=INPUT_Z_DOWN as u16;}
+                if z_pressed {m.input|=INPUT_Z_PRESSED as u16;}
+            }
 
-        let sx=input.stick_x as f32;
-        let sy=input.stick_y as f32;
-        let raw_mag=(sx*sx+sy*sy).sqrt().min(64.0);
-        // update_mario_joystick_inputs squares the normalized controller magnitude.
-        let mag=(raw_mag/64.0)*(raw_mag/64.0)*64.0;
-        m.intended_mag=if m.squish_timer==0 {mag/2.0}else{mag/8.0};
-        if m.intended_mag>0.0 {
-            m.intended_yaw=sm64_core::math::atan2s(-sy,sx).wrapping_add(input.camera_yaw);
-            m.input|=INPUT_NONZERO_ANALOG as u16;
-        } else {
-            m.intended_yaw=m.face_angle[1];
+            let sx=input.stick_x as f32;
+            let sy=input.stick_y as f32;
+            let raw_mag=(sx*sx+sy*sy).sqrt().min(64.0);
+            let mag=(raw_mag/64.0)*(raw_mag/64.0)*64.0;
+            m.intended_mag=if m.squish_timer==0 {mag/2.0}else{mag/8.0};
+            if m.intended_mag>0.0 {
+                m.intended_yaw=sm64_core::math::atan2s(-sy,sx).wrapping_add(input.camera_yaw);
+                m.input|=INPUT_NONZERO_ANALOG as u16;
+            } else {
+                m.intended_yaw=m.face_angle[1];
+            }
         }
 
         self.refresh_geometry();
 
-        if m.input & ((INPUT_NONZERO_ANALOG|INPUT_A_PRESSED) as u16)==0 {
-            m.input|=INPUT_UNKNOWN_5 as u16;
+        {
+            let m=&mut self.mario;
+            if m.input & ((INPUT_NONZERO_ANALOG|INPUT_A_PRESSED) as u16)==0 {
+                m.input|=INPUT_UNKNOWN_5 as u16;
+            }
+            if m.wall_kick_timer>0 {m.wall_kick_timer-=1;}
+            if m.double_jump_timer>0 {m.double_jump_timer-=1;}
         }
-        if m.wall_kick_timer>0 {m.wall_kick_timer-=1;}
-        if m.double_jump_timer>0 {m.double_jump_timer-=1;}
     }
 
     fn refresh_geometry(&mut self) {
