@@ -111,7 +111,7 @@ pub fn default_plugins_with_quiet_log(mut window: WindowPlugin) -> bevy::app::Pl
     let plugins = DefaultPlugins
         .set(window)
         .set(LogPlugin {
-            filter: "warn,iw4l=info".into(),
+            filter: "warn,iw4l=info,sm64_bevy=info,sm64_sim=info".into(),
             level: bevy::log::Level::WARN,
             ..default()
         })
