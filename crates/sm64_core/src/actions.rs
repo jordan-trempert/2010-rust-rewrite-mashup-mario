@@ -12,10 +12,18 @@ pub fn execute_mario_action(m:&mut MarioState, world:&CollisionWorld) {
     let mut guard=0;
     while in_loop && guard<32 {
         guard+=1;
-        in_loop=match m.action & ACT_GROUP_MASK {
+        let group=m.action & ACT_GROUP_MASK;
+        if matches!(group,ACT_GROUP_STATIONARY|ACT_GROUP_MOVING|ACT_GROUP_AIRBORNE)
+            && m.pos[1] < m.water_level as f32-100.0
+        {
+            in_loop=crate::submerged::set_water_plunge_action(m,world);
+            continue;
+        }
+        in_loop=match group {
             ACT_GROUP_STATIONARY => execute_stationary(m,world),
             ACT_GROUP_MOVING => execute_moving(m,world),
             ACT_GROUP_AIRBORNE => execute_airborne(m,world),
+            ACT_GROUP_SUBMERGED => crate::submerged::execute_submerged(m,world),
             _ => false,
         };
     }
