@@ -54,7 +54,7 @@ impl Surface {
         ];
         let mut n = crate::math::vec3f_cross(a, b);
         let mag = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
-        if mag == 0.0 { return None; }
+        if mag < 0.0001 { return None; }
         n[0] /= mag; n[1] /= mag; n[2] /= mag;
         let origin_offset = -(n[0] * v1[0] as f32 + n[1] * v1[1] as f32 + n[2] * v1[2] as f32);
         Some(Self {
