@@ -42,9 +42,11 @@ pub fn parse_collision_source(source:&str)->Result<ParsedCollision,CollisionPars
         } else if let Some(args)=macro_args(line,"COL_TRI_INIT") {
             let parts=split_args(args);
             let Some(name)=parts.first() else {return Err(err(line_no,"COL_TRI_INIT missing surface type"));};
-            surface_type=surface_type_by_name(name)
-                .or_else(||parse_i16(name).ok())
-                .ok_or_else(||err(line_no,&format!("unknown surface type {name}")))?;
+            surface_type=Some(
+                surface_type_by_name(name)
+                    .or_else(||parse_i16(name).ok())
+                    .ok_or_else(||err(line_no,&format!("unknown surface type {name}")))?
+            );
         } else if let Some(args)=macro_args(line,"COL_TRI_SPECIAL") {
             let n=parse_numbers(args,line_no)?;
             if n.len()!=4 {return Err(err(line_no,"COL_TRI_SPECIAL expects v1,v2,v3,force"));}
