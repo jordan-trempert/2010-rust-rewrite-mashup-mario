@@ -3,8 +3,8 @@ use crate::collision::CollisionWorld;
 use crate::mario::MarioState;
 use crate::surface_types::*;
 
-pub fn mario_get_floor_class(m:&MarioState, world:&CollisionWorld, terrain_type:i16)->i32 {
-    let mut class=if (terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE {
+pub fn mario_get_floor_class(m:&MarioState, world:&CollisionWorld)->i32 {
+    let mut class=if (m.terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE {
         SURFACE_CLASS_VERY_SLIPPERY
     } else {
         SURFACE_CLASS_DEFAULT
@@ -34,12 +34,12 @@ pub fn mario_facing_downhill(m:&MarioState, turn_yaw:bool)->bool {
     d > -0x4000 && d < 0x4000
 }
 
-pub fn mario_floor_is_slippery(m:&MarioState, world:&CollisionWorld, terrain_type:i16)->bool {
+pub fn mario_floor_is_slippery(m:&MarioState, world:&CollisionWorld)->bool {
     let Some(floor)=m.floor.and_then(|id|world.surface(id)) else {return false;};
-    if (terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE && floor.normal.y<0.9998477 {
+    if (m.terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE && floor.normal.y<0.9998477 {
         return true;
     }
-    let norm_y=match mario_get_floor_class(m,world,terrain_type) {
+    let norm_y=match mario_get_floor_class(m,world) {
         SURFACE_CLASS_VERY_SLIPPERY => 0.9848077,
         SURFACE_CLASS_SLIPPERY => 0.9396926,
         SURFACE_CLASS_NOT_SLIPPERY => 0.0,
@@ -48,12 +48,12 @@ pub fn mario_floor_is_slippery(m:&MarioState, world:&CollisionWorld, terrain_typ
     floor.normal.y<=norm_y
 }
 
-pub fn mario_floor_is_slope(m:&MarioState, world:&CollisionWorld, terrain_type:i16)->bool {
+pub fn mario_floor_is_slope(m:&MarioState, world:&CollisionWorld)->bool {
     let Some(floor)=m.floor.and_then(|id|world.surface(id)) else {return false;};
-    if (terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE && floor.normal.y<0.9998477 {
+    if (m.terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE && floor.normal.y<0.9998477 {
         return true;
     }
-    let norm_y=match mario_get_floor_class(m,world,terrain_type) {
+    let norm_y=match mario_get_floor_class(m,world) {
         SURFACE_CLASS_VERY_SLIPPERY => 0.9961947,
         SURFACE_CLASS_SLIPPERY => 0.9848077,
         SURFACE_CLASS_NOT_SLIPPERY => 0.9396926,
@@ -62,10 +62,10 @@ pub fn mario_floor_is_slope(m:&MarioState, world:&CollisionWorld, terrain_type:i
     floor.normal.y<=norm_y
 }
 
-pub fn mario_floor_is_steep(m:&MarioState, world:&CollisionWorld, terrain_type:i16)->bool {
+pub fn mario_floor_is_steep(m:&MarioState, world:&CollisionWorld)->bool {
     if mario_facing_downhill(m,false) {return false;}
     let Some(floor)=m.floor.and_then(|id|world.surface(id)) else {return false;};
-    let norm_y=match mario_get_floor_class(m,world,terrain_type) {
+    let norm_y=match mario_get_floor_class(m,world) {
         SURFACE_CLASS_VERY_SLIPPERY => 0.9659258,
         SURFACE_CLASS_SLIPPERY => 0.9396926,
         SURFACE_CLASS_NOT_SLIPPERY => 0.8660254,
