@@ -53,6 +53,7 @@ impl Sm64World {
 
     pub fn step(&mut self, input: Sm64Input) -> Sm64Snapshot {
         self.tick=self.tick.wrapping_add(1);
+        self.mario.global_timer=self.tick as u32;
         self.update_inputs(input);
         if self.mario.floor.is_some() {
             sm64_core::actions::execute_mario_action(&mut self.mario,&self.collision);
@@ -87,8 +88,11 @@ impl Sm64World {
 
             let sx=input.stick_x as f32;
             let sy=input.stick_y as f32;
+            m.stick_x=sx;
+            m.stick_y=sy;
             let raw_mag=(sx*sx+sy*sy).sqrt().min(64.0);
             let mag=(raw_mag/64.0)*(raw_mag/64.0)*64.0;
+            m.stick_mag=raw_mag;
             m.intended_mag=if m.squish_timer==0 {mag/2.0}else{mag/8.0};
             if m.intended_mag>0.0 {
                 m.intended_yaw=sm64_core::math::atan2s(-sy,sx).wrapping_add(input.camera_yaw);
