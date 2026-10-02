@@ -10,6 +10,25 @@ use bevy::{
 };
 use sm64_sim::{SM64_TICK_SECONDS, Sm64Input, Sm64Snapshot, Sm64World};
 
+const MARIO_MODEL_ROOTS:&[(&str,&str)]=&[
+    ("MARIO_BUTT","mario_butt"),
+    ("MARIO_TORSO","mario_torso"),
+    ("MARIO_HEAD","mario_cap_on_eyes_front"),
+    ("MARIO_LEFT_ARM","mario_left_arm"),
+    ("MARIO_LEFT_FOREARM","mario_left_forearm_shared_dl"),
+    ("MARIO_LEFT_HAND","mario_left_hand_closed"),
+    ("MARIO_RIGHT_ARM","mario_right_arm"),
+    ("MARIO_RIGHT_FOREARM","mario_right_forearm_shared_dl"),
+    ("MARIO_RIGHT_HAND","mario_right_hand_closed"),
+    ("MARIO_LEFT_THIGH","mario_left_thigh"),
+    ("MARIO_LEFT_LEG","mario_left_leg_shared_dl"),
+    ("MARIO_LEFT_FOOT","mario_left_foot"),
+    ("MARIO_RIGHT_THIGH","mario_right_thigh"),
+    ("MARIO_RIGHT_LEG","mario_right_leg_shared_dl"),
+    ("MARIO_RIGHT_FOOT","mario_right_foot"),
+];
+
+
 pub struct Sm64Plugin;
 
 #[derive(Resource, Debug, Clone, Copy)]
@@ -194,6 +213,22 @@ fn launch_requested_sm64_map(
             HashMap::new()
         }
     };
+    let mario_geometry=match sm64_assets::load_model_display_lists(
+        &root,
+        "actors/mario/model.inc.c",
+        MARIO_MODEL_ROOTS,
+    ) {
+        Ok(geometry)=>Some(geometry),
+        Err(error)=>{
+            warn!("SM64 Mario model load failed; using cuboid fallback: {error}");
+            None
+        }
+    };
+    let mario_texture_sources=sm64_assets::load_actor_texture_sources(&root,"mario")
+        .unwrap_or_else(|error|{
+            warn!("SM64 Mario texture resolution failed: {error}");
+            HashMap::new()
+        });
 
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
@@ -209,6 +244,8 @@ fn launch_requested_sm64_map(
             &parsed.world,
             render_geometry.as_ref(),
             &texture_sources,
+            mario_geometry.as_ref(),
+            &mario_texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
         );
     }
@@ -243,6 +280,8 @@ fn spawn_debug_scene(
     world:&sm64_core::CollisionWorld,
     render_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
     texture_sources:&HashMap<String,std::path::PathBuf>,
+    mario_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
+    mario_texture_sources:&HashMap<String,std::path::PathBuf>,
     mario_spawn:[f32;3],
 ) {
     if let Some(geometry)=render_geometry.filter(|geometry|geometry.triangle_count>0) {
@@ -258,17 +297,37 @@ fn spawn_debug_scene(
         spawn_collision_fallback(commands,meshes,materials,world);
     }
 
-    commands.spawn((
-        Name::new("SM64 Mario debug marker"),
-        Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color:Color::srgb(0.9,0.12,0.08),
-            unlit:true,
-            ..default()
-        })),
-        Transform::from_xyz(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]),
+    let mario_root=commands.spawn((
+        Name::new("SM64 Mario"),
+        Transform::from_xyz(mario_spawn[0],mario_spawn[1],mario_spawn[2]),
+        Visibility::default(),
         Sm64MarioPresentation,
-    ));
+    )).id();
+
+    if let Some(geometry)=mario_geometry.filter(|geometry|geometry.triangle_count>0) {
+        spawn_mario_geometry(
+            commands,
+            meshes,
+            materials,
+            images,
+            mario_root,
+            geometry,
+            mario_texture_sources,
+        );
+    } else {
+        commands.spawn((
+            Name::new("SM64 Mario fallback"),
+            Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color:Color::srgb(0.9,0.12,0.08),
+                unlit:true,
+                ..default()
+            })),
+            Transform::from_xyz(0.0,80.0,0.0),
+            ChildOf(mario_root),
+            Sm64DebugWorld,
+        ));
+    }
 
     let target=Vec3::new(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]);
     let camera_pos=target+Vec3::new(0.0,650.0,1200.0);
@@ -372,6 +431,142 @@ fn spawn_display_list_geometry(
             })),
             Sm64DebugWorld,
         ));
+    }
+}
+
+
+fn spawn_mario_geometry(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    mario_root:Entity,
+    geometry:&sm64_assets::ParsedRenderGeometry,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
+) {
+    let mut texture_cache=HashMap::<String,Handle<Image>>::new();
+
+    for (batch_index,batch) in geometry.batches.iter().enumerate() {
+        if batch.vertices.len()<3 {continue;}
+        let mut positions=Vec::<[f32;3]>::with_capacity(batch.vertices.len());
+        let mut normals=Vec::<[f32;3]>::with_capacity(batch.vertices.len());
+        let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
+
+        for triangle in batch.vertices.chunks_exact(3) {
+            let a=Vec3::from_array(triangle[0].position);
+            let b=Vec3::from_array(triangle[1].position);
+            let d=Vec3::from_array(triangle[2].position);
+            let face_normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y);
+            for vertex in triangle {
+                positions.push(vertex.position);
+                // Mario's Vtx payload stores signed normals in the RGB bytes
+                // while lighting is active. Prefer them over a flat face normal.
+                let n=Vec3::new(
+                    vertex.attributes[0] as i8 as f32,
+                    vertex.attributes[1] as i8 as f32,
+                    vertex.attributes[2] as i8 as f32,
+                ).try_normalize().unwrap_or(face_normal);
+                normals.push(n.to_array());
+                let [width,height]=batch.texture_size.unwrap_or([32,32]);
+                uvs.push([
+                    vertex.texcoord[0] as f32/(32.0*width.max(1) as f32),
+                    vertex.texcoord[1] as f32/(32.0*height.max(1) as f32),
+                ]);
+            }
+        }
+
+        let mesh=Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+        let texture_handle=batch.texture_symbol.as_ref().and_then(|symbol|{
+            if let Some(handle)=texture_cache.get(symbol) {
+                return Some(handle.clone());
+            }
+            let path=texture_sources.get(symbol)?;
+            match load_sm64_png(path,images) {
+                Ok(handle)=>{
+                    texture_cache.insert(symbol.clone(),handle.clone());
+                    Some(handle)
+                }
+                Err(error)=>{
+                    warn!("Mario texture {} could not load from {}: {error}",symbol,path.display());
+                    None
+                }
+            }
+        });
+        let base_color=if texture_handle.is_some() {
+            Color::WHITE
+        } else {
+            mario_batch_color(batch)
+        };
+
+        commands.spawn((
+            Name::new(format!("SM64 Mario {} batch {}",batch.layer,batch_index)),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color,
+                base_color_texture:texture_handle,
+                perceptual_roughness:1.0,
+                unlit:true,
+                cull_mode:None,
+                ..default()
+            })),
+            Transform::from_translation(mario_part_translation(&batch.layer)),
+            ChildOf(mario_root),
+            Sm64DebugWorld,
+        ));
+    }
+}
+
+fn mario_part_translation(layer:&str)->Vec3 {
+    match layer {
+        "MARIO_BUTT"=>Vec3::ZERO,
+        "MARIO_TORSO"=>Vec3::new(68.0,0.0,0.0),
+        "MARIO_HEAD"=>Vec3::new(155.0,0.0,0.0),
+        "MARIO_LEFT_ARM"=>Vec3::new(135.0,-10.0,79.0),
+        "MARIO_LEFT_FOREARM"=>Vec3::new(200.0,-10.0,79.0),
+        "MARIO_LEFT_HAND"=>Vec3::new(260.0,-10.0,79.0),
+        "MARIO_RIGHT_ARM"=>Vec3::new(136.0,-10.0,-79.0),
+        "MARIO_RIGHT_FOREARM"=>Vec3::new(201.0,-10.0,-79.0),
+        "MARIO_RIGHT_HAND"=>Vec3::new(261.0,-10.0,-79.0),
+        "MARIO_LEFT_THIGH"=>Vec3::new(13.0,-8.0,42.0),
+        "MARIO_LEFT_LEG"=>Vec3::new(102.0,-8.0,42.0),
+        "MARIO_LEFT_FOOT"=>Vec3::new(169.0,-8.0,42.0),
+        "MARIO_RIGHT_THIGH"=>Vec3::new(13.0,-8.0,-42.0),
+        "MARIO_RIGHT_LEG"=>Vec3::new(102.0,-8.0,-42.0),
+        "MARIO_RIGHT_FOOT"=>Vec3::new(169.0,-8.0,-42.0),
+        _=>Vec3::ZERO,
+    }
+}
+
+fn mario_batch_color(batch:&sm64_assets::RenderBatch)->Color {
+    if let Some(light)=batch.light_symbol.as_deref() {
+        return match light {
+            "mario_blue_lights_group"=>Color::srgb(0.0,0.0,1.0),
+            "mario_red_lights_group"=>Color::srgb(1.0,0.0,0.0),
+            "mario_white_lights_group"=>Color::WHITE,
+            "mario_brown1_lights_group"=>Color::srgb(0x72 as f32/255.0,0x1c as f32/255.0,0x0e as f32/255.0),
+            "mario_beige_lights_group"=>Color::srgb(0xfe as f32/255.0,0xc1 as f32/255.0,0x79 as f32/255.0),
+            "mario_brown2_lights_group"=>Color::srgb(0x73 as f32/255.0,0x06 as f32/255.0,0.0),
+            _=>debug_texture_color(Some(light),0),
+        };
+    }
+
+    if batch.layer.contains("ARM") || batch.layer.contains("FOREARM") {
+        Color::srgb(1.0,0.0,0.0)
+    } else if batch.layer.contains("HAND") {
+        Color::WHITE
+    } else if batch.layer.contains("FOOT") {
+        Color::srgb(0x72 as f32/255.0,0x1c as f32/255.0,0x0e as f32/255.0)
+    } else if batch.layer.contains("HEAD") {
+        Color::srgb(0xfe as f32/255.0,0xc1 as f32/255.0,0x79 as f32/255.0)
+    } else {
+        Color::srgb(0.0,0.0,1.0)
     }
 }
 
@@ -511,7 +706,7 @@ fn sync_mario_presentation(
     for mut transform in &mut query {
         transform.translation=Vec3::new(
             snapshot.mario.pos[0],
-            snapshot.mario.pos[1]+80.0,
+            snapshot.mario.pos[1],
             snapshot.mario.pos[2],
         );
         let yaw=snapshot.mario.face_angle[1] as u16 as f32
