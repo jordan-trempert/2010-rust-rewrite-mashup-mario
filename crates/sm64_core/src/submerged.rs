@@ -117,7 +117,7 @@ fn update_swimming_yaw(m:&mut MarioState) {
     } else if target<0 {
         if m.angle_vel[1]>0 {
             m.angle_vel[1]=m.angle_vel[1].wrapping_sub(0x40);
-            if m.angle_vel[1]<-0x10 {m.angle_vel[1]=-0x10;}
+            if m.angle_vel[1] < -0x10 {m.angle_vel[1]=-0x10;}
         } else {
             m.angle_vel[1]=approach_i32(m.angle_vel[1] as i32,target as i32,0x20,0x10) as i16;
         }
