@@ -6,6 +6,7 @@ pub mod mario;
 pub mod mario_step;
 pub mod math;
 pub mod surface;
+mod trig_tables;
 pub mod types;
 
 pub use action::*;
