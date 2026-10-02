@@ -4,6 +4,7 @@ use crate::mario::MarioState;
 use crate::mario_action::set_mario_action;
 use crate::mario_step::{mario_set_forward_vel, perform_air_step, perform_ground_step, stationary_ground_step};
 use crate::math::{approach_f32, approach_i32, coss, sins};
+use crate::ground_motion::{analog_stick_held_back, apply_slope_accel, should_begin_sliding, update_sliding};
 
 pub fn execute_mario_action(m:&mut MarioState, world:&CollisionWorld) {
     if m.action==ACT_UNINITIALIZED { return; }
@@ -49,6 +50,9 @@ fn execute_moving(m:&mut MarioState, world:&CollisionWorld)->bool {
     match m.action {
         ACT_WALKING => act_walking(m,world),
         ACT_DECELERATING => act_decelerating(m,world),
+        ACT_BEGIN_SLIDING => act_begin_sliding(m,world,false),
+        ACT_CROUCH_SLIDE => act_crouch_slide(m,world),
+        ACT_BUTT_SLIDE => act_butt_slide(m,world),
         _ => {
             perform_ground_step(m,world);
             false
@@ -67,13 +71,17 @@ fn update_walking_speed(m:&mut MarioState, world:&CollisionWorld) {
     let delta=m.intended_yaw.wrapping_sub(m.face_angle[1]) as i32;
     let approached=approach_i32(delta,0,0x800,0x800) as i16;
     m.face_angle[1]=m.intended_yaw.wrapping_sub(approached);
-    mario_set_forward_vel(m,m.forward_vel);
+    apply_slope_accel(m,world);
 }
 
 fn act_walking(m:&mut MarioState, world:&CollisionWorld)->bool {
+    if should_begin_sliding(m,world) {return set_mario_action(m,world,ACT_BEGIN_SLIDING,0);}
     if m.input & INPUT_A_PRESSED as u16 != 0 { return set_mario_action(m,world,ACT_JUMP,0); }
+    if m.input & INPUT_UNKNOWN_5 as u16 != 0 { return set_mario_action(m,world,ACT_DECELERATING,0); }
+    if analog_stick_held_back(m) && m.forward_vel>=16.0 {
+        return set_mario_action(m,world,ACT_TURNING_AROUND,0);
+    }
     if m.input & INPUT_Z_PRESSED as u16 != 0 { return set_mario_action(m,world,ACT_CROUCH_SLIDE,0); }
-    if m.input & INPUT_NONZERO_ANALOG as u16 == 0 { return set_mario_action(m,world,ACT_DECELERATING,0); }
     m.action_state=0;
     update_walking_speed(m,world);
     match perform_ground_step(m,world) {
@@ -151,6 +159,50 @@ fn act_common_air(m:&mut MarioState, world:&CollisionWorld, land_action:u32, ste
             } else { mario_set_forward_vel(m,0.0); }
         }
         AIR_STEP_GRABBED_CEILING => { set_mario_action(m,world,ACT_START_HANGING,0); }
+        _=>{}
+    }
+    false
+}
+
+fn act_begin_sliding(m:&mut MarioState, world:&CollisionWorld, holding:bool)->bool {
+    let action=if crate::surface_props::mario_facing_downhill(m,false) {
+        if holding {ACT_HOLD_BUTT_SLIDE}else{ACT_BUTT_SLIDE}
+    } else if holding {ACT_HOLD_STOMACH_SLIDE}else{ACT_STOMACH_SLIDE};
+    set_mario_action(m,world,action,0)
+}
+
+fn act_crouch_slide(m:&mut MarioState, world:&CollisionWorld)->bool {
+    if m.input & INPUT_A_PRESSED as u16 != 0 {
+        return set_mario_action(m,world,ACT_LONG_JUMP,0);
+    }
+    if m.input & INPUT_Z_DOWN as u16 == 0 {
+        return set_mario_action(m,world,ACT_WALKING,0);
+    }
+    if update_sliding(m,world,4.0) {
+        return set_mario_action(m,world,ACT_CROUCHING,0);
+    }
+    if perform_ground_step(m,world)==GROUND_STEP_LEFT_GROUND {
+        return set_mario_action(m,world,ACT_FREEFALL,0);
+    }
+    false
+}
+
+fn act_butt_slide(m:&mut MarioState, world:&CollisionWorld)->bool {
+    if m.input & INPUT_A_PRESSED as u16 != 0 {
+        return set_mario_action(m,world,ACT_BUTT_SLIDE_AIR,0);
+    }
+    if m.input & INPUT_B_PRESSED as u16 != 0 {
+        return set_mario_action(m,world,ACT_STOMACH_SLIDE,0);
+    }
+    if update_sliding(m,world,4.0) {
+        return set_mario_action(m,world,ACT_BUTT_SLIDE_STOP,0);
+    }
+    match perform_ground_step(m,world) {
+        GROUND_STEP_LEFT_GROUND=>{set_mario_action(m,world,ACT_BUTT_SLIDE_AIR,0);},
+        GROUND_STEP_HIT_WALL=>{
+            mario_set_forward_vel(m,-m.forward_vel);
+            set_mario_action(m,world,ACT_GROUND_BONK,0);
+        },
         _=>{}
     }
     false
