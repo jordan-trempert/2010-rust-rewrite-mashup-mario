@@ -230,7 +230,13 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
             menu_report.join("\n")
         ));
     }
-    let maps = list_mp_map_packs(&games);
+    let mut maps = list_mp_map_packs(&games);
+    if std::env::var_os("SM64_DECOMP_ROOT").is_some() {
+        maps.push(asset_transport::MapPack {
+            label: "SM64".into(),
+            maps: vec!["sm64:bob".into()],
+        });
+    }
     diag::info!(
         Launch,
         "menu: {} maps in {} packs under {}",
