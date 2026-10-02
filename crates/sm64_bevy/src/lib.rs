@@ -253,10 +253,10 @@ fn update_debug_input(
 ) {
     if !enabled.0 || !debug_view.0 {return;}
 
-    let x=i8::from(keyboard.pressed(KeyCode::KeyD))*64
-        - i8::from(keyboard.pressed(KeyCode::KeyA))*64;
-    let y=i8::from(keyboard.pressed(KeyCode::KeyS))*64
-        - i8::from(keyboard.pressed(KeyCode::KeyW))*64;
+    let x=(keyboard.pressed(KeyCode::KeyD) as i8)*64
+        - (keyboard.pressed(KeyCode::KeyA) as i8)*64;
+    let y=(keyboard.pressed(KeyCode::KeyS) as i8)*64
+        - (keyboard.pressed(KeyCode::KeyW) as i8)*64;
 
     input.0=Sm64Input {
         stick_x:x.clamp(-64,64),
