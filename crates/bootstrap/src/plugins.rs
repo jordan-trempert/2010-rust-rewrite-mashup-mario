@@ -17,6 +17,7 @@ use net::NetPlugin;
 use render::RenderPlugin;
 use replay::ReplayPlugin;
 use session::SessionPlugin;
+use sm64_bevy::Sm64Plugin;
 use ui::UiPlugin;
 
 pub fn add_runtime_plugins(app: &mut App) {
@@ -42,7 +43,8 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(AudioPlugin)
         .add_plugins(ReplayPlugin)
         .add_plugins(RenderPlugin)
-        .add_plugins(SessionPlugin);
+        .add_plugins(SessionPlugin)
+        .add_plugins(Sm64Plugin);
 
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
