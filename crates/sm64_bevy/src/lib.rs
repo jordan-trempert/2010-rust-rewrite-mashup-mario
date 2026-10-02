@@ -20,6 +20,27 @@ pub struct Sm64Runtime {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ControllerInput(pub Sm64Input);
 
+#[derive(Resource, Debug, Clone)]
+pub struct Sm64LoadStatus {
+    pub level: String,
+    pub area: u8,
+    pub source_root: Option<std::path::PathBuf>,
+    pub loaded: bool,
+    pub message: String,
+}
+
+impl Default for Sm64LoadStatus {
+    fn default() -> Self {
+        Self {
+            level: "bob".to_owned(),
+            area: 1,
+            source_root: None,
+            loaded: false,
+            message: "SM64 decomp root not configured".to_owned(),
+        }
+    }
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Sm64MarioPresentation;
 
@@ -28,8 +49,65 @@ impl Plugin for Sm64Plugin {
         app.init_resource::<Sm64Enabled>()
             .init_resource::<Sm64Runtime>()
             .init_resource::<Sm64ControllerInput>()
+            .init_resource::<Sm64LoadStatus>()
+            .add_systems(Startup, load_sm64_from_decomp)
             .add_systems(Update, advance_sm64_runtime);
     }
+}
+
+fn load_sm64_from_decomp(
+    mut enabled: ResMut<Sm64Enabled>,
+    mut runtime: ResMut<Sm64Runtime>,
+    mut status: ResMut<Sm64LoadStatus>,
+) {
+    let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let level=std::env::var("SM64_LEVEL").unwrap_or_else(|_|"bob".to_owned());
+    let area=std::env::var("SM64_AREA")
+        .ok()
+        .and_then(|v|v.parse::<u8>().ok())
+        .filter(|v|*v!=0)
+        .unwrap_or(1);
+
+    status.source_root=Some(root.clone());
+    status.level=level.clone();
+    status.area=area;
+
+    let parsed=match sm64_assets::load_level_collision(&root,&level,area) {
+        Ok(parsed)=>parsed,
+        Err(error)=>{
+            status.message=format!("SM64 collision load failed: {error}");
+            error!("{}",status.message);
+            return;
+        }
+    };
+    let spawn=match sm64_assets::load_mario_spawn(&root,&level,area) {
+        Ok(spawn)=>spawn,
+        Err(error)=>{
+            status.message=format!("SM64 spawn load failed: {error}");
+            error!("{}",status.message);
+            return;
+        }
+    };
+
+    let surface_count=parsed.world.surfaces.len();
+    let special_count=parsed.specials.len();
+    runtime.world.collision=parsed.world;
+    runtime.world.spawn_mario(
+        [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
+        spawn.yaw_sm64(),
+    );
+    runtime.latest=Some(runtime.world.snapshot());
+    enabled.0=std::env::var_os("SM64_ENABLED")
+        .is_none_or(|v|v!="0" && !v.eq_ignore_ascii_case("false"));
+
+    status.loaded=true;
+    status.message=format!(
+        "SM64 {level} area {area}: {surface_count} surfaces, {special_count} special objects, Mario at {:?}",
+        spawn.pos
+    );
+    info!("{}",status.message);
 }
 
 fn advance_sm64_runtime(
