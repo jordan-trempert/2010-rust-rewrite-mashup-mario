@@ -48,6 +48,9 @@ impl CollisionWorld {
     }
 
     fn push_surface_kind(&mut self, mut surface: Surface, dynamic: bool) -> SurfaceId {
+        if dynamic {
+            surface.flags |= SURFACE_FLAG_DYNAMIC as i8;
+        }
         if surface.normal.y.abs() <= 0.01 && surface.normal.x.abs() > 0.707 {
             surface.flags |= SURFACE_FLAG_X_PROJECTION as i8;
         }
