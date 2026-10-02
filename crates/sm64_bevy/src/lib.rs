@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use bevy::{
     asset::RenderAssetUsages,
     camera::ClearColorConfig,
+    image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     log::{error, info, warn},
     prelude::*,
-    render::render_resource::PrimitiveTopology,
+    render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
 };
 use sm64_sim::{SM64_TICK_SECONDS, Sm64Input, Sm64Snapshot, Sm64World};
 
@@ -118,6 +121,7 @@ fn launch_requested_sm64_map(
     >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
@@ -183,6 +187,13 @@ fn launch_requested_sm64_map(
             None
         }
     };
+    let texture_sources=match sm64_assets::load_texture_sources(&root,&level) {
+        Ok(sources)=>sources,
+        Err(error)=>{
+            warn!("SM64 texture source resolution failed: {error}");
+            HashMap::new()
+        }
+    };
 
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
@@ -194,8 +205,10 @@ fn launch_requested_sm64_map(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut images,
             &parsed.world,
             render_geometry.as_ref(),
+            &texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
         );
     }
@@ -226,12 +239,21 @@ fn spawn_debug_scene(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
     materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
     world:&sm64_core::CollisionWorld,
     render_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
     mario_spawn:[f32;3],
 ) {
     if let Some(geometry)=render_geometry.filter(|geometry|geometry.triangle_count>0) {
-        spawn_display_list_geometry(commands,meshes,materials,geometry);
+        spawn_display_list_geometry(
+            commands,
+            meshes,
+            materials,
+            images,
+            geometry,
+            texture_sources,
+        );
     } else {
         spawn_collision_fallback(commands,meshes,materials,world);
     }
@@ -267,8 +289,11 @@ fn spawn_display_list_geometry(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
     materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
     geometry:&sm64_assets::ParsedRenderGeometry,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
 ) {
+    let mut texture_cache=HashMap::<String,Handle<Image>>::new();
     for (batch_index,batch) in geometry.batches.iter().enumerate() {
         if batch.vertices.len()<3 {continue;}
 
@@ -300,7 +325,28 @@ fn spawn_display_list_geometry(
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
 
-        let base_color=debug_texture_color(batch.texture_symbol.as_deref(),batch_index);
+        let texture_handle=batch.texture_symbol.as_ref().and_then(|symbol|{
+            if let Some(handle)=texture_cache.get(symbol) {
+                return Some(handle.clone());
+            }
+            let path=texture_sources.get(symbol)?;
+            match load_sm64_png(path,images) {
+                Ok(handle)=>{
+                    texture_cache.insert(symbol.clone(),handle.clone());
+                    Some(handle)
+                }
+                Err(error)=>{
+                    warn!("SM64 texture {} could not load from {}: {error}",symbol,path.display());
+                    None
+                }
+            }
+        });
+        let base_color=if texture_handle.is_some() {
+            Color::WHITE
+        } else {
+            debug_texture_color(batch.texture_symbol.as_deref(),batch_index)
+        };
+
         commands.spawn((
             Name::new(format!(
                 "SM64 display list batch {} {}",
@@ -310,6 +356,7 @@ fn spawn_display_list_geometry(
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color,
+                base_color_texture:texture_handle,
                 perceptual_roughness:1.0,
                 unlit:true,
                 cull_mode:None,
@@ -318,6 +365,33 @@ fn spawn_display_list_geometry(
             Sm64DebugWorld,
         ));
     }
+}
+
+fn load_sm64_png(
+    path:&std::path::Path,
+    images:&mut Assets<Image>,
+)->Result<Handle<Image>,String>{
+    let decoded=image::open(path)
+        .map_err(|error|error.to_string())?
+        .into_rgba8();
+    let (width,height)=decoded.dimensions();
+    let mut image=Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers:1,
+        },
+        TextureDimension::D2,
+        decoded.into_raw(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let mut sampler=ImageSamplerDescriptor::nearest();
+    sampler.address_mode_u=ImageAddressMode::Repeat;
+    sampler.address_mode_v=ImageAddressMode::Repeat;
+    sampler.address_mode_w=ImageAddressMode::Repeat;
+    image.sampler=ImageSampler::Descriptor(sampler);
+    Ok(images.add(image))
 }
 
 fn spawn_collision_fallback(
