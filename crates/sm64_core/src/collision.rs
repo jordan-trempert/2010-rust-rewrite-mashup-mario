@@ -1,9 +1,15 @@
 use crate::math::Vec3f;
 use crate::surface::Surface;
+use crate::surface_types::*;
 use crate::types::SurfaceId;
+
+pub const FLOOR_LOWER_LIMIT: f32 = -11000.0;
+pub const CELL_HEIGHT_LIMIT: f32 = 20000.0;
 
 #[derive(Clone, Debug, Default)]
 pub struct CollisionWorld {
+    /// Surfaces are retained in load order. The decomp's spatial lists are
+    /// ordered, and many queries intentionally return the first matching surface.
     pub surfaces: Vec<Surface>,
     pub water_level: Option<f32>,
 }
@@ -17,107 +23,119 @@ pub struct SurfaceHit {
 impl CollisionWorld {
     pub fn clear(&mut self) { self.surfaces.clear(); }
 
-    pub fn push_surface(&mut self, surface: Surface) -> SurfaceId {
-        let id = SurfaceId(self.surfaces.len() as u32);
+    pub fn push_surface(&mut self, mut surface: Surface) -> SurfaceId {
+        // surface_load.c marks near-X-facing walls for YZ projection.
+        if surface.normal.y.abs() <= 0.01 && surface.normal.x.abs() > 0.707 {
+            surface.flags |= SURFACE_FLAG_X_PROJECTION as i8;
+        }
+        let id=SurfaceId(self.surfaces.len() as u32);
         self.surfaces.push(surface);
         id
     }
 
-    pub fn surface(&self, id: SurfaceId) -> Option<&Surface> {
-        self.surfaces.get(id.0 as usize)
+    pub fn surface(&self,id:SurfaceId)->Option<&Surface> { self.surfaces.get(id.0 as usize) }
+
+    pub fn find_floor(&self,x_pos:f32,y_pos:f32,z_pos:f32)->Option<SurfaceHit> {
+        // Preserve the original s16 position cast (including parallel-universe wrap).
+        let x=x_pos as i16 as i32;
+        let y=y_pos as i16 as i32;
+        let z=z_pos as i16 as i32;
+        for (index,s) in self.surfaces.iter().enumerate() {
+            if s.normal.y <= 0.01 {continue;}
+            let x1=s.vertex1[0] as i32; let z1=s.vertex1[2] as i32;
+            let x2=s.vertex2[0] as i32; let z2=s.vertex2[2] as i32;
+            if (z1-z)*(x2-x1)-(x1-x)*(z2-z1)<0 {continue;}
+            let x3=s.vertex3[0] as i32; let z3=s.vertex3[2] as i32;
+            if (z2-z)*(x3-x2)-(x2-x)*(z3-z2)<0 {continue;}
+            if (z3-z)*(x1-x3)-(x3-x)*(z1-z3)<0 {continue;}
+            if s.surface_type as i32==SURFACE_CAMERA_BOUNDARY {continue;}
+            let ny=s.normal.y;
+            if ny==0.0 {continue;}
+            let height=-(x as f32*s.normal.x+s.normal.z*z as f32+s.origin_offset)/ny;
+            if y as f32-(height-78.0)<0.0 {continue;}
+            return Some(SurfaceHit{surface:SurfaceId(index as u32),height});
+        }
+        None
     }
 
-    pub fn find_floor(&self, x: f32, y: f32, z: f32) -> Option<SurfaceHit> {
-        let mut best: Option<SurfaceHit> = None;
-        for (index, surface) in self.surfaces.iter().enumerate() {
-            if surface.normal.y <= 0.01 { continue; }
-            if !point_in_triangle_xz(x, z, surface) { continue; }
-            let Some(height) = surface.height_at(x, z) else { continue; };
-            if height > y + 78.0 { continue; }
-            if best.is_none_or(|hit| height > hit.height) {
-                best = Some(SurfaceHit { surface: SurfaceId(index as u32), height });
-            }
+    pub fn find_ceil(&self,x_pos:f32,y_pos:f32,z_pos:f32)->Option<SurfaceHit> {
+        let x=x_pos as i16 as i32;
+        let y=y_pos as i16 as i32;
+        let z=z_pos as i16 as i32;
+        for (index,s) in self.surfaces.iter().enumerate() {
+            if s.normal.y >= -0.01 {continue;}
+            let x1=s.vertex1[0] as i32; let z1=s.vertex1[2] as i32;
+            let x2=s.vertex2[0] as i32; let z2=s.vertex2[2] as i32;
+            if (z1-z)*(x2-x1)-(x1-x)*(z2-z1)>0 {continue;}
+            let x3=s.vertex3[0] as i32; let z3=s.vertex3[2] as i32;
+            if (z2-z)*(x3-x2)-(x2-x)*(z3-z2)>0 {continue;}
+            if (z3-z)*(x1-x3)-(x3-x)*(z1-z3)>0 {continue;}
+            if s.surface_type as i32==SURFACE_CAMERA_BOUNDARY {continue;}
+            let ny=s.normal.y;
+            if ny==0.0 {continue;}
+            let height=-(x as f32*s.normal.x+s.normal.z*z as f32+s.origin_offset)/ny;
+            // Exact exposed-ceiling 78-unit buffer check.
+            if y as f32-(height+78.0)>0.0 {continue;}
+            return Some(SurfaceHit{surface:SurfaceId(index as u32),height});
         }
-        best
+        None
     }
 
-    pub fn find_ceil(&self, x: f32, y: f32, z: f32) -> Option<SurfaceHit> {
-        let mut best: Option<SurfaceHit> = None;
-        for (index, surface) in self.surfaces.iter().enumerate() {
-            if surface.normal.y >= -0.01 { continue; }
-            if !point_in_triangle_xz(x, z, surface) { continue; }
-            let Some(height) = surface.height_at(x, z) else { continue; };
-            if height < y { continue; }
-            if best.is_none_or(|hit| height < hit.height) {
-                best = Some(SurfaceHit { surface: SurfaceId(index as u32), height });
-            }
-        }
-        best
-    }
+    pub fn resolve_walls(&self,pos:&mut Vec3f,offset_y:f32,radius:f32)->Option<SurfaceId> {
+        let radius=radius.min(200.0);
+        let x=pos[0];
+        let y=pos[1]+offset_y;
+        let z=pos[2];
+        let mut referenced: [Option<SurfaceId>;4]=[None;4];
+        let mut num_walls=0usize;
 
-    pub fn resolve_walls(&self, pos: &mut Vec3f, offset_y: f32, radius: f32) -> Option<SurfaceId> {
-        let mut last = None;
-        // SM64 makes multiple wall passes because resolving one wall can push
-        // Mario into another. Keep the same style of iterative resolution.
-        for _ in 0..4 {
-            let mut moved = false;
-            for (index, surface) in self.surfaces.iter().enumerate() {
-                if surface.normal.y.abs() > 0.1 { continue; }
-                let test_y = pos[1] + offset_y;
-                if test_y < surface.lower_y as f32 || test_y > surface.upper_y as f32 { continue; }
-                let dist = surface.normal.x * pos[0]
-                    + surface.normal.y * test_y
-                    + surface.normal.z * pos[2]
-                    + surface.origin_offset;
-                if dist < -radius || dist > radius { continue; }
-                let projected = [
-                    pos[0] - surface.normal.x * dist,
-                    test_y - surface.normal.y * dist,
-                    pos[2] - surface.normal.z * dist,
-                ];
-                if !point_in_triangle_3d(projected, surface) { continue; }
-                let push = radius - dist;
-                pos[0] += surface.normal.x * push;
-                pos[2] += surface.normal.z * push;
-                last = Some(SurfaceId(index as u32));
-                moved = true;
+        for (index,s) in self.surfaces.iter().enumerate() {
+            if s.normal.y.abs()>0.01 {continue;}
+            if y<s.lower_y as f32 || y>s.upper_y as f32 {continue;}
+            let offset=s.normal.x*x+s.normal.y*y+s.normal.z*z+s.origin_offset;
+            if offset < -radius || offset > radius {continue;}
+
+            let inside=if s.flags as i32 & SURFACE_FLAG_X_PROJECTION != 0 {
+                wall_inside_x_projection(y,z,s)
+            } else {
+                wall_inside_z_projection(x,y,s)
+            };
+            if !inside {continue;}
+            if s.surface_type as i32==SURFACE_CAMERA_BOUNDARY {continue;}
+
+            // Deliberately use the original x/z for every wall offset. The C
+            // routine accumulates pushes in data->x/z without updating locals.
+            pos[0]+=s.normal.x*(radius-offset);
+            pos[2]+=s.normal.z*(radius-offset);
+            if num_walls<4 {
+                referenced[num_walls]=Some(SurfaceId(index as u32));
+                num_walls+=1;
             }
-            if !moved { break; }
         }
-        last
+        if num_walls==0 {None}else{referenced[num_walls-1]}
     }
 
     #[inline]
-    pub fn water_level(&self, _x: f32, _z: f32) -> f32 {
-        self.water_level.unwrap_or(-11000.0)
-    }
+    pub fn water_level(&self,_x:f32,_z:f32)->f32 {self.water_level.unwrap_or(FLOOR_LOWER_LIMIT)}
 }
 
-fn edge(a: [f32;2], b: [f32;2], p: [f32;2]) -> f32 {
-    (p[0]-a[0])*(b[1]-a[1]) - (p[1]-a[1])*(b[0]-a[0])
+fn wall_inside_x_projection(y:f32,z:f32,s:&Surface)->bool {
+    let w1=-(s.vertex1[2] as f32); let w2=-(s.vertex2[2] as f32); let w3=-(s.vertex3[2] as f32);
+    let y1=s.vertex1[1] as f32; let y2=s.vertex2[1] as f32; let y3=s.vertex3[1] as f32;
+    let pz=-z;
+    let e1=(y1-y)*(w2-w1)-(w1-pz)*(y2-y1);
+    let e2=(y2-y)*(w3-w2)-(w2-pz)*(y3-y2);
+    let e3=(y3-y)*(w1-w3)-(w3-pz)*(y1-y3);
+    if s.normal.x>0.0 {e1<=0.0&&e2<=0.0&&e3<=0.0}else{e1>=0.0&&e2>=0.0&&e3>=0.0}
 }
 
-fn point_in_triangle_xz(x: f32, z: f32, s: &Surface) -> bool {
-    let p=[x,z];
-    let a=[s.vertex1[0] as f32,s.vertex1[2] as f32];
-    let b=[s.vertex2[0] as f32,s.vertex2[2] as f32];
-    let c=[s.vertex3[0] as f32,s.vertex3[2] as f32];
-    let e1=edge(a,b,p); let e2=edge(b,c,p); let e3=edge(c,a,p);
-    (e1 >= 0.0 && e2 >= 0.0 && e3 >= 0.0) || (e1 <= 0.0 && e2 <= 0.0 && e3 <= 0.0)
-}
-
-fn point_in_triangle_3d(p: Vec3f, s: &Surface) -> bool {
-    let n=s.normal.as_vec3();
-    let ax=n[0].abs(); let ay=n[1].abs(); let az=n[2].abs();
-    let project=|v:[i16;3]| -> [f32;2] {
-        if ax >= ay && ax >= az { [v[1] as f32,v[2] as f32] }
-        else if ay >= az { [v[0] as f32,v[2] as f32] }
-        else { [v[0] as f32,v[1] as f32] }
-    };
-    let pp=if ax >= ay && ax >= az {[p[1],p[2]]} else if ay >= az {[p[0],p[2]]} else {[p[0],p[1]]};
-    let a=project(s.vertex1); let b=project(s.vertex2); let c=project(s.vertex3);
-    let e1=edge(a,b,pp); let e2=edge(b,c,pp); let e3=edge(c,a,pp);
-    (e1 >= 0.0 && e2 >= 0.0 && e3 >= 0.0) || (e1 <= 0.0 && e2 <= 0.0 && e3 <= 0.0)
+fn wall_inside_z_projection(x:f32,y:f32,s:&Surface)->bool {
+    let w1=s.vertex1[0] as f32; let w2=s.vertex2[0] as f32; let w3=s.vertex3[0] as f32;
+    let y1=s.vertex1[1] as f32; let y2=s.vertex2[1] as f32; let y3=s.vertex3[1] as f32;
+    let e1=(y1-y)*(w2-w1)-(w1-x)*(y2-y1);
+    let e2=(y2-y)*(w3-w2)-(w2-x)*(y3-y2);
+    let e3=(y3-y)*(w1-w3)-(w3-x)*(y1-y3);
+    if s.normal.z>0.0 {e1<=0.0&&e2<=0.0&&e3<=0.0}else{e1>=0.0&&e2>=0.0&&e3>=0.0}
 }
 
 #[cfg(test)]
@@ -128,6 +146,6 @@ mod tests {
         let mut world=CollisionWorld::default();
         world.push_surface(Surface::from_triangle(0,0,0,0,[-100,0,-100],[100,0,-100],[0,0,100]).unwrap());
         let hit=world.find_floor(0.0,50.0,0.0).unwrap();
-        assert!(hit.height.abs() < 0.001);
+        assert!(hit.height.abs()<0.001);
     }
 }
