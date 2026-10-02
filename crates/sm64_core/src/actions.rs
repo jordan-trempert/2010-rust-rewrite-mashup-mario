@@ -126,6 +126,13 @@ fn execute_airborne(m:&mut MarioState, world:&CollisionWorld)->bool {
         ACT_FREEFALL => act_common_air(m,world,ACT_FREEFALL_LAND,AIR_STEP_CHECK_LEDGE_GRAB),
         ACT_SIDE_FLIP => act_common_air(m,world,ACT_SIDE_FLIP_LAND,AIR_STEP_CHECK_LEDGE_GRAB),
         ACT_LONG_JUMP => act_common_air(m,world,ACT_LONG_JUMP_LAND,AIR_STEP_CHECK_LEDGE_GRAB),
+        ACT_WALL_KICK_AIR => act_common_air(m,world,ACT_JUMP_LAND,AIR_STEP_CHECK_LEDGE_GRAB),
+        ACT_WATER_JUMP => act_water_jump(m,world),
+        ACT_DIVE => act_dive(m,world),
+        ACT_JUMP_KICK => act_jump_kick(m,world),
+        ACT_AIR_HIT_WALL => act_air_hit_wall(m,world),
+        ACT_GROUND_POUND => act_ground_pound(m,world),
+        ACT_BUTT_SLIDE_AIR => act_butt_slide_air(m,world),
         _ => { update_air_without_turn(m); perform_air_step(m,world,0); false }
     }
 }
@@ -151,7 +158,22 @@ fn update_air_without_turn(m:&mut MarioState) {
 }
 
 fn act_common_air(m:&mut MarioState, world:&CollisionWorld, land_action:u32, step_arg:u32)->bool {
-    if m.input & INPUT_Z_PRESSED as u16 != 0 && m.action!=ACT_LONG_JUMP {
+    let can_kick_or_dive=matches!(
+        m.action,
+        ACT_JUMP|ACT_DOUBLE_JUMP|ACT_SIDE_FLIP
+    );
+    if can_kick_or_dive && m.input & INPUT_B_PRESSED as u16!=0 {
+        let next=if m.forward_vel>28.0 {ACT_DIVE}else{ACT_JUMP_KICK};
+        return set_mario_action(m,world,next,0);
+    }
+    if matches!(m.action,ACT_TRIPLE_JUMP|ACT_FREEFALL|ACT_WALL_KICK_AIR)
+        && m.input & INPUT_B_PRESSED as u16!=0
+    {
+        return set_mario_action(m,world,ACT_DIVE,0);
+    }
+    if !matches!(m.action,ACT_LONG_JUMP)
+        && m.input & INPUT_Z_PRESSED as u16 != 0
+    {
         return set_mario_action(m,world,ACT_GROUND_POUND,0);
     }
     update_air_without_turn(m);
@@ -167,6 +189,7 @@ fn act_common_air(m:&mut MarioState, world:&CollisionWorld, land_action:u32, ste
                 }
             } else { mario_set_forward_vel(m,0.0); }
         }
+        AIR_STEP_GRABBED_LEDGE => { set_mario_action(m,world,ACT_LEDGE_GRAB,0); }
         AIR_STEP_GRABBED_CEILING => { set_mario_action(m,world,ACT_START_HANGING,0); }
         _=>{}
     }
@@ -212,6 +235,148 @@ fn act_butt_slide(m:&mut MarioState, world:&CollisionWorld)->bool {
             mario_set_forward_vel(m,-m.forward_vel);
             set_mario_action(m,world,ACT_GROUND_BONK,0);
         },
+        _=>{}
+    }
+    false
+}
+
+
+fn act_water_jump(m:&mut MarioState,world:&CollisionWorld)->bool {
+    if m.forward_vel<15.0 {mario_set_forward_vel(m,15.0);}
+    match perform_air_step(m,world,AIR_STEP_CHECK_LEDGE_GRAB) {
+        AIR_STEP_LANDED=>{set_mario_action(m,world,ACT_JUMP_LAND,0);},
+        AIR_STEP_HIT_WALL=>mario_set_forward_vel(m,15.0),
+        AIR_STEP_GRABBED_LEDGE=>{set_mario_action(m,world,ACT_LEDGE_GRAB,0);},
+        _=>{}
+    }
+    false
+}
+
+fn act_dive(m:&mut MarioState,world:&CollisionWorld)->bool {
+    update_air_without_turn(m);
+    match perform_air_step(m,world,0) {
+        AIR_STEP_NONE=>{
+            if m.vel[1]<0.0 && m.face_angle[0]>-0x2AAA {
+                m.face_angle[0]=m.face_angle[0].wrapping_sub(0x200);
+                if m.face_angle[0]<-0x2AAA {m.face_angle[0]=-0x2AAA;}
+            }
+        }
+        AIR_STEP_LANDED=>{
+            m.face_angle[0]=0;
+            set_mario_action(m,world,ACT_DIVE_SLIDE,0);
+        }
+        AIR_STEP_HIT_WALL=>{
+            m.face_angle[0]=0;
+            if m.vel[1]>0.0 {m.vel[1]=0.0;}
+            mario_set_forward_vel(m,-16.0);
+            m.particle_flags|=PARTICLE_VERTICAL_STAR;
+            set_mario_action(m,world,ACT_BACKWARD_AIR_KB,0);
+        }
+        _=>{}
+    }
+    false
+}
+
+fn act_jump_kick(m:&mut MarioState,world:&CollisionWorld)->bool {
+    if m.action_state==0 {
+        m.action_state=1;
+        m.action_timer=0;
+    }
+    m.action_timer=m.action_timer.wrapping_add(1);
+    if m.action_timer<=8 {m.flags|=MARIO_KICKING;}
+    else {m.flags&=!MARIO_KICKING;}
+
+    update_air_without_turn(m);
+    match perform_air_step(m,world,0) {
+        AIR_STEP_LANDED=>{set_mario_action(m,world,ACT_FREEFALL_LAND,0);},
+        AIR_STEP_HIT_WALL=>mario_set_forward_vel(m,0.0),
+        _=>{}
+    }
+    false
+}
+
+fn act_air_hit_wall(m:&mut MarioState,world:&CollisionWorld)->bool {
+    m.action_timer=m.action_timer.wrapping_add(1);
+    // Preserve the original US behavior where the action effectively executes
+    // twice during its first rendered frame: the wall-kick input window is one
+    // frame tighter than the source code appears to imply.
+    if m.action_timer<=2 && m.input & INPUT_A_PRESSED as u16!=0 {
+        m.vel[1]=52.0;
+        m.face_angle[1]=m.face_angle[1].wrapping_add(i16::MIN);
+        return set_mario_action(m,world,ACT_WALL_KICK_AIR,0);
+    }
+    if m.action_timer>2 {
+        m.wall_kick_timer=5;
+        if m.vel[1]>0.0 {m.vel[1]=0.0;}
+        if m.forward_vel>=38.0 {
+            m.particle_flags|=PARTICLE_VERTICAL_STAR;
+            return set_mario_action(m,world,ACT_BACKWARD_AIR_KB,0);
+        }
+        if m.forward_vel>8.0 {mario_set_forward_vel(m,-8.0);}
+        return set_mario_action(m,world,ACT_SOFT_BONK,0);
+    }
+    false
+}
+
+fn act_ground_pound(m:&mut MarioState,world:&CollisionWorld)->bool {
+    if m.action_state==0 {
+        if m.action_timer<10 {
+            let y_offset=20.0-2.0*m.action_timer as f32;
+            if m.pos[1]+y_offset+160.0<m.ceil_height {
+                m.pos[1]+=y_offset;
+                m.peak_height=m.pos[1];
+            }
+        }
+        m.vel[1]=-50.0;
+        mario_set_forward_vel(m,0.0);
+        m.action_timer=m.action_timer.wrapping_add(1);
+
+        // The source waits for the start-ground-pound animation loop end + 4.
+        // Until that animation table is translated, ten preparation frames
+        // preserve the characteristic hover before the downward step begins.
+        if m.action_timer>=10 {m.action_state=1;}
+        return false;
+    }
+
+    match perform_air_step(m,world,0) {
+        AIR_STEP_LANDED=>{
+            m.particle_flags|=PARTICLE_MIST_CIRCLE|PARTICLE_HORIZONTAL_STAR;
+            set_mario_action(m,world,ACT_GROUND_POUND_LAND,0);
+        }
+        AIR_STEP_HIT_WALL=>{
+            mario_set_forward_vel(m,-16.0);
+            if m.vel[1]>0.0 {m.vel[1]=0.0;}
+            m.particle_flags|=PARTICLE_VERTICAL_STAR;
+            set_mario_action(m,world,ACT_BACKWARD_AIR_KB,0);
+        }
+        _=>{}
+    }
+    false
+}
+
+fn act_butt_slide_air(m:&mut MarioState,world:&CollisionWorld)->bool {
+    m.action_timer=m.action_timer.wrapping_add(1);
+    if m.action_timer>30 && m.pos[1]-m.floor_height>500.0 {
+        return set_mario_action(m,world,ACT_FREEFALL,1);
+    }
+    update_air_without_turn(m);
+    match perform_air_step(m,world,0) {
+        AIR_STEP_LANDED=>{
+            let flat=m.floor
+                .and_then(|id|world.surface(id))
+                .is_some_and(|floor|floor.normal.y>=0.9848077);
+            if m.action_state==0 && m.vel[1]<0.0 && flat {
+                m.vel[1]=-m.vel[1]/2.0;
+                m.action_state=1;
+            } else {
+                set_mario_action(m,world,ACT_BUTT_SLIDE,0);
+            }
+        }
+        AIR_STEP_HIT_WALL=>{
+            if m.vel[1]>0.0 {m.vel[1]=0.0;}
+            m.particle_flags|=PARTICLE_VERTICAL_STAR;
+            set_mario_action(m,world,ACT_BACKWARD_AIR_KB,0);
+        }
         _=>{}
     }
     false
