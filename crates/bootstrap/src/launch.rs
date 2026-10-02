@@ -232,7 +232,7 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     }
     let mut maps = list_mp_map_packs(&games);
     if std::env::var_os("SM64_DECOMP_ROOT").is_some() {
-        maps.push(asset_transport::MapPack {
+        maps.insert(0, asset_transport::MapPack {
             label: "SM64".into(),
             maps: vec!["sm64:bob".into()],
         });
