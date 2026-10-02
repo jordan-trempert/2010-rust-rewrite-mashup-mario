@@ -9,6 +9,7 @@ pub mod mario_action;
 pub mod mario_step;
 pub mod math;
 pub mod surface;
+pub mod submerged;
 pub mod surface_types;
 pub mod surface_props;
 mod trig_tables;
