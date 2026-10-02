@@ -64,6 +64,14 @@ pub struct MarioState {
     pub peak_height: f32,
     pub quicksand_depth: f32,
     pub getting_blown_gravity: f32,
+    /// Per-frame controller values mirrored from the original Controller pointer.
+    pub stick_x: f32,
+    pub stick_y: f32,
+    pub stick_mag: f32,
+    /// Original global frame counter, carried explicitly for deterministic forces.
+    pub global_timer: u32,
+    /// Swimming strength was a file-static in the original single-player runtime.
+    pub swim_strength: i16,
 }
 
 impl Default for MarioState {
@@ -124,6 +132,11 @@ impl Default for MarioState {
             peak_height: 0.0,
             quicksand_depth: 0.0,
             getting_blown_gravity: 0.0,
+            stick_x: 0.0,
+            stick_y: 0.0,
+            stick_mag: 0.0,
+            global_timer: 0,
+            swim_strength: 160,
         }
     }
 }
