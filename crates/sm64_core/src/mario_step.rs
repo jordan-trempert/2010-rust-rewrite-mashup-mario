@@ -123,11 +123,11 @@ fn perform_air_quarter_step(m:&mut MarioState, world:&CollisionWorld, intended:[
         if m.vel[1] >= 0.0 {
             m.vel[1]=0.0;
             if step_arg & AIR_STEP_CHECK_HANG != 0 {
-                if let Some(hit)=ceil {
-                    if world.surface(hit.surface).is_some_and(|s| s.surface_type as i32 == SURFACE_HANGABLE) {
-                        m.ceil=Some(hit.surface);
-                        return AIR_STEP_GRABBED_CEILING;
-                    }
+                if m.ceil
+                    .and_then(|id|world.surface(id))
+                    .is_some_and(|s|s.surface_type as i32==SURFACE_HANGABLE)
+                {
+                    return AIR_STEP_GRABBED_CEILING;
                 }
             }
             return AIR_STEP_NONE;
@@ -137,13 +137,16 @@ fn perform_air_quarter_step(m:&mut MarioState, world:&CollisionWorld, intended:[
         return AIR_STEP_HIT_WALL;
     }
 
-    // Ledge-grab displacement tests will be filled in with the exact helper;
-    // preserve the decomp's upper/lower wall distinction now.
-    if step_arg & AIR_STEP_CHECK_LEDGE_GRAB != 0 && upper.is_none() && lower.is_some() {
-        m.pos=next;
-        m.floor=Some(floor_hit.surface);
-        m.floor_height=floor_height;
-        return AIR_STEP_NONE;
+    if step_arg & AIR_STEP_CHECK_LEDGE_GRAB != 0 && upper.is_none() {
+        if let Some(lower_wall)=lower {
+            if check_ledge_grab(m,world,lower_wall,intended,next) {
+                return AIR_STEP_GRABBED_LEDGE;
+            }
+            m.pos=next;
+            m.floor=Some(floor_hit.surface);
+            m.floor_height=floor_height;
+            return AIR_STEP_NONE;
+        }
     }
 
     m.pos=next;
@@ -166,6 +169,35 @@ fn perform_air_quarter_step(m:&mut MarioState, world:&CollisionWorld, intended:[
     m.ceil=ceil.map(|h|h.surface);
     m.ceil_height=ceil_height;
     AIR_STEP_NONE
+}
+
+fn check_ledge_grab(
+    m:&mut MarioState,
+    world:&CollisionWorld,
+    wall_id:crate::types::SurfaceId,
+    intended:[f32;3],
+    next:[f32;3],
+)->bool {
+    if m.vel[1]>0.0 {return false;}
+    let displacement_x=next[0]-intended[0];
+    let displacement_z=next[2]-intended[2];
+    if displacement_x*m.vel[0]+displacement_z*m.vel[2]>0.0 {return false;}
+    let Some(wall)=world.surface(wall_id) else {return false;};
+    let nx=wall.normal.x;
+    let nz=wall.normal.z;
+    let ledge_x=next[0]-nx*60.0;
+    let ledge_z=next[2]-nz*60.0;
+    let Some(ledge)=world.find_floor(ledge_x,next[1]+160.0,ledge_z) else {return false;};
+    if ledge.height-next[1]<=100.0 {return false;}
+    let Some(ledge_floor)=world.surface(ledge.surface) else {return false;};
+    let floor_angle=atan2s(ledge_floor.normal.z,ledge_floor.normal.x);
+    m.pos=[ledge_x,ledge.height,ledge_z];
+    m.floor=Some(ledge.surface);
+    m.floor_height=ledge.height;
+    m.floor_angle=floor_angle;
+    m.face_angle[0]=0;
+    m.face_angle[1]=atan2s(nz,nx).wrapping_add(i16::MIN);
+    true
 }
 
 pub fn apply_gravity(m:&mut MarioState) {
