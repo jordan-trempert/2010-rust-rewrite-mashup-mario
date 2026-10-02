@@ -177,6 +177,12 @@ pub(crate) fn restore_menu_on_return(
     if maps.0.is_empty() {
         if let Some(identity) = identity {
             maps.0 = list_mp_map_packs(&asset_transport::GamesRoot(identity.games_root.clone()));
+            if std::env::var_os("SM64_DECOMP_ROOT").is_some() {
+                maps.0.push(asset_transport::MapPack {
+                    label: "SM64".into(),
+                    maps: vec!["sm64:bob".into()],
+                });
+            }
         }
     }
     diag::info!(Ui, "session: main menu enabled");
