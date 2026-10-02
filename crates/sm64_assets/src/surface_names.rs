@@ -154,3 +154,22 @@ pub fn surface_type_by_name(name:&str)->Option<i16> {
         _ => None,
     }
 }
+
+pub fn terrain_type_by_name(name:&str)->Option<i16> {
+    match name.trim() {
+        "TERRAIN_LOAD_VERTICES" => Some(sm64_core::TERRAIN_LOAD_VERTICES as i16),
+        "TERRAIN_LOAD_CONTINUE" => Some(sm64_core::TERRAIN_LOAD_CONTINUE as i16),
+        "TERRAIN_LOAD_END" => Some(sm64_core::TERRAIN_LOAD_END as i16),
+        "TERRAIN_LOAD_OBJECTS" => Some(sm64_core::TERRAIN_LOAD_OBJECTS as i16),
+        "TERRAIN_LOAD_ENVIRONMENT" => Some(sm64_core::TERRAIN_LOAD_ENVIRONMENT as i16),
+        "TERRAIN_GRASS" => Some(sm64_core::TERRAIN_GRASS as i16),
+        "TERRAIN_STONE" => Some(sm64_core::TERRAIN_STONE as i16),
+        "TERRAIN_SNOW" => Some(sm64_core::TERRAIN_SNOW as i16),
+        "TERRAIN_SAND" => Some(sm64_core::TERRAIN_SAND as i16),
+        "TERRAIN_SPOOKY" => Some(sm64_core::TERRAIN_SPOOKY as i16),
+        "TERRAIN_WATER" => Some(sm64_core::TERRAIN_WATER as i16),
+        "TERRAIN_SLIDE" => Some(sm64_core::TERRAIN_SLIDE as i16),
+        "TERRAIN_MASK" => Some(sm64_core::TERRAIN_MASK as i16),
+        _ => None,
+    }
+}
