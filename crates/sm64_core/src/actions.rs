@@ -256,9 +256,9 @@ fn act_dive(m:&mut MarioState,world:&CollisionWorld)->bool {
     update_air_without_turn(m);
     match perform_air_step(m,world,0) {
         AIR_STEP_NONE=>{
-            if m.vel[1]<0.0 && m.face_angle[0]>-0x2AAA {
+            if m.vel[1]<0.0 && m.face_angle[0] > -0x2AAA {
                 m.face_angle[0]=m.face_angle[0].wrapping_sub(0x200);
-                if m.face_angle[0]<-0x2AAA {m.face_angle[0]=-0x2AAA;}
+                if m.face_angle[0] < -0x2AAA {m.face_angle[0]=-0x2AAA;}
             }
         }
         AIR_STEP_LANDED=>{
