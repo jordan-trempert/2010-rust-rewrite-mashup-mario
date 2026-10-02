@@ -2,6 +2,7 @@
 
 pub mod action;
 pub mod actions;
+pub mod automatic;
 pub mod collision;
 pub mod ground_motion;
 pub mod mario;
