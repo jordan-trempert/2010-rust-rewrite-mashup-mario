@@ -126,8 +126,27 @@ impl Sm64World {
             if let Some(s)=self.collision.surface(floor_id) {
                 m.floor_angle=sm64_core::math::atan2s(s.normal.z,s.normal.x);
             }
+
+            if m.pos[1] > m.water_level as f32-40.0
+                && sm64_core::mario_floor_is_slippery(m,&self.collision)
+            {
+                m.input|=INPUT_ABOVE_SLIDE as u16;
+            }
+
+            let floor_dynamic=self.collision.surface(floor_id)
+                .is_some_and(|s|s.flags as i32 & SURFACE_FLAG_DYNAMIC != 0);
+            let ceil_dynamic=m.ceil
+                .and_then(|id|self.collision.surface(id))
+                .is_some_and(|s|s.flags as i32 & SURFACE_FLAG_DYNAMIC != 0);
+            let ceil_floor_dist=m.ceil_height-m.floor_height;
+            if (floor_dynamic||ceil_dynamic) && (0.0..=150.0).contains(&ceil_floor_dist) {
+                m.input|=INPUT_SQUISHED as u16;
+            }
+
             if m.pos[1] > m.floor_height+100.0 {m.input|=INPUT_OFF_FLOOR as u16;}
             if m.pos[1] < m.water_level as f32-10.0 {m.input|=INPUT_IN_WATER as u16;}
+            let gas=self.collision.poison_gas_level(m.pos[0],m.pos[2]);
+            if m.pos[1] < gas-100.0 {m.input|=INPUT_IN_POISON_GAS as u16;}
         }
     }
 }
