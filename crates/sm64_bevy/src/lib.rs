@@ -1,3 +1,4 @@
+use bevy::log::{error, info};
 use bevy::prelude::*;
 use sm64_sim::{SM64_TICK_SECONDS, Sm64Input, Sm64Snapshot, Sm64World};
 
@@ -99,8 +100,9 @@ fn load_sm64_from_decomp(
         spawn.yaw_sm64(),
     );
     runtime.latest=Some(runtime.world.snapshot());
-    enabled.0=std::env::var_os("SM64_ENABLED")
-        .is_none_or(|v|v!="0" && !v.eq_ignore_ascii_case("false"));
+    enabled.0=std::env::var("SM64_ENABLED")
+        .map(|v|v!="0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
 
     status.loaded=true;
     status.message=format!(
