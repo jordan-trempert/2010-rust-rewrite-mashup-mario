@@ -6,6 +6,7 @@ pub mod mario;
 pub mod mario_step;
 pub mod math;
 pub mod surface;
+pub mod surface_types;
 mod trig_tables;
 pub mod types;
 
@@ -16,3 +17,4 @@ pub use types::{ObjectId, SurfaceId};
 
 pub use collision::{CollisionWorld, SurfaceHit};
 pub use surface::{Surface, SurfaceNormal};
+pub use surface_types::*;
