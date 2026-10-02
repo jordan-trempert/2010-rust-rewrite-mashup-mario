@@ -1,7 +1,9 @@
 mod collision_source;
+mod level_script;
 mod surface_names;
 
 pub use collision_source::{CollisionParseError, ParsedCollision, SpecialObject, parse_collision_source};
+pub use level_script::{MarioSpawn, load_mario_spawn, parse_mario_spawn};
 pub use surface_names::surface_type_by_name;
 
 use std::path::{Path, PathBuf};
