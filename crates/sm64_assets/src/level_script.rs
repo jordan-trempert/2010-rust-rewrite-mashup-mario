@@ -30,7 +30,7 @@ pub fn parse_mario_spawn(source:&str, area:u8)->Option<MarioSpawn> {
     for raw in source.lines() {
         let line=remove_block_comments(raw);
         let line=line.trim();
-        let args=macro_args(line,"MARIO_POS")?;
+        let Some(args)=macro_args(line,"MARIO_POS") else { continue; };
         let parts=args.split(',').map(str::trim).collect::<Vec<_>>();
         if parts.len()!=5 { continue; }
         let parsed_area=parse_i16(parts[0])?;
