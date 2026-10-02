@@ -163,3 +163,6 @@ pub const TERRAIN_SPOOKY: i32 = 4;
 pub const TERRAIN_WATER: i32 = 5;
 pub const TERRAIN_SLIDE: i32 = 6;
 pub const TERRAIN_MASK: i32 = 7;
+
+pub const SURFACE_FLAG_DYNAMIC: i32 = 1 << 0;
+pub const SURFACE_FLAG_X_PROJECTION: i32 = 1 << 3;
