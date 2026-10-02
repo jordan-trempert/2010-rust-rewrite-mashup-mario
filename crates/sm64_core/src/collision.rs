@@ -156,8 +156,8 @@ impl CollisionWorld {
     pub fn water_level(&self,x:f32,z:f32)->f32 {
         for r in &self.environment_regions {
             if r.kind < 50
-                && r.lo_x as f32 < x && x < r.hi_x as f32
-                && r.lo_z as f32 < z && z < r.hi_z as f32 {
+                && (r.lo_x as f32) < x && x < (r.hi_x as f32)
+                && (r.lo_z as f32) < z && z < (r.hi_z as f32) {
                 return r.height as f32;
             }
         }
@@ -167,8 +167,8 @@ impl CollisionWorld {
     pub fn poison_gas_level(&self,x:f32,z:f32)->f32 {
         for r in &self.environment_regions {
             if r.kind >= 50 && r.kind % 10 == 0
-                && r.lo_x as f32 < x && x < r.hi_x as f32
-                && r.lo_z as f32 < z && z < r.hi_z as f32 {
+                && (r.lo_x as f32) < x && x < (r.hi_x as f32)
+                && (r.lo_z as f32) < z && z < (r.hi_z as f32) {
                 return r.height as f32;
             }
         }
