@@ -24,6 +24,7 @@ pub fn execute_mario_action(m:&mut MarioState, world:&CollisionWorld) {
             ACT_GROUP_MOVING => execute_moving(m,world),
             ACT_GROUP_AIRBORNE => execute_airborne(m,world),
             ACT_GROUP_SUBMERGED => crate::submerged::execute_submerged(m,world),
+            ACT_GROUP_AUTOMATIC => crate::automatic::execute_automatic(m,world),
             _ => false,
         };
     }
