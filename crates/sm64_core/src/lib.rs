@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 pub mod action;
+pub mod actions;
 pub mod collision;
 pub mod mario;
+pub mod mario_action;
 pub mod mario_step;
 pub mod math;
 pub mod surface;
