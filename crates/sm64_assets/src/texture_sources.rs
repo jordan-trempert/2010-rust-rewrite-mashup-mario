@@ -82,3 +82,27 @@ ALIGNED8 const Texture generic_09005800[] = {
         );
     }
 }
+
+
+pub fn load_actor_texture_sources(
+    decomp_root: impl AsRef<Path>,
+    actor: &str,
+) -> Result<HashMap<String, PathBuf>, CollisionParseError> {
+    let root=decomp_root.as_ref();
+    let actor_dir=root.join("actors").join(actor);
+    let mut out=HashMap::new();
+
+    for path in [
+        actor_dir.join("model.inc.c"),
+        actor_dir.join("texture.inc.c"),
+    ] {
+        if !path.exists() {
+            continue;
+        }
+        let source=fs::read_to_string(&path)
+            .map_err(|e|CollisionParseError::new(format!("{}: {e}",path.display())))?;
+        parse_texture_source_file(root,&source,&mut out);
+    }
+
+    Ok(out)
+}
