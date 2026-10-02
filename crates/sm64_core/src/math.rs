@@ -3,7 +3,6 @@ pub type Vec3s = [i16; 3];
 
 pub const ANGLE_FULL_TURN: f32 = 65536.0;
 pub const ANGLE_HALF_TURN: i16 = i16::MIN;
-const TAU: f32 = core::f32::consts::TAU;
 
 #[inline]
 pub const fn vec3f(x: f32, y: f32, z: f32) -> Vec3f { [x, y, z] }
@@ -13,24 +12,41 @@ pub const fn vec3s(x: i16, y: i16, z: i16) -> Vec3s { [x, y, z] }
 
 #[inline]
 pub fn sins(angle: i16) -> f32 {
-    // SM64 angles are unsigned 16-bit turns even though most call sites carry s16.
-    let units = angle as u16 as f32;
-    (units * TAU / ANGLE_FULL_TURN).sin()
+    crate::trig_tables::SINE_TABLE[(angle as u16 as usize) >> 4]
 }
 
 #[inline]
 pub fn coss(angle: i16) -> f32 {
-    let units = angle as u16 as f32;
-    (units * TAU / ANGLE_FULL_TURN).cos()
+    crate::trig_tables::SINE_TABLE[((angle as u16 as usize) >> 4) + 0x400]
 }
 
 #[inline]
-pub fn atan2s(y: f32, x: f32) -> i16 {
-    // Same coordinate convention as the decomp. This will be replaced with the
-    // ROM lookup table before parity sign-off; keeping it centralized makes that
-    // replacement mechanical.
-    let turns = y.atan2(x) * (ANGLE_FULL_TURN / TAU);
-    (turns.round() as i32 as u16) as i16
+pub fn atan2s(mut y: f32, mut x: f32) -> i16 {
+    #[inline]
+    fn lookup(y: f32, x: f32) -> u16 {
+        let index = if x == 0.0 { 0 } else { (y / x * 1024.0 + 0.5) as usize };
+        crate::trig_tables::ARCTAN_TABLE[index.min(0x400)] as u16
+    }
+    let ret: u16;
+    if x >= 0.0 {
+        if y >= 0.0 {
+            if y >= x { ret = lookup(x, y); } else { ret = 0x4000u16.wrapping_sub(lookup(y, x)); }
+        } else {
+            y = -y;
+            if y < x { ret = 0x4000u16.wrapping_add(lookup(y, x)); } else { ret = 0x8000u16.wrapping_sub(lookup(x, y)); }
+        }
+    } else {
+        x = -x;
+        if y < 0.0 {
+            y = -y;
+            if y >= x { ret = 0x8000u16.wrapping_add(lookup(x, y)); } else { ret = 0xC000u16.wrapping_sub(lookup(y, x)); }
+        } else if y < x {
+            ret = 0xC000u16.wrapping_add(lookup(y, x));
+        } else {
+            ret = 0u16.wrapping_sub(lookup(x, y));
+        }
+    }
+    ret as i16
 }
 
 #[inline]
