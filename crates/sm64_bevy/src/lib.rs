@@ -103,11 +103,11 @@ fn load_sm64_from_decomp(
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
     runtime.world.collision=parsed.world;
-    runtime.world.mario.terrain_type=area_settings.terrain_type;
     runtime.world.spawn_mario(
         [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
         spawn.yaw_sm64(),
     );
+    runtime.world.mario.terrain_type=area_settings.terrain_type;
     runtime.latest=Some(runtime.world.snapshot());
     enabled.0=std::env::var("SM64_ENABLED")
         .map(|v|v!="0" && !v.eq_ignore_ascii_case("false"))
