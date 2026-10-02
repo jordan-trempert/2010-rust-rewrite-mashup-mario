@@ -12,12 +12,12 @@ pub const fn vec3s(x: i16, y: i16, z: i16) -> Vec3s { [x, y, z] }
 
 #[inline]
 pub fn sins(angle: i16) -> f32 {
-    crate::trig_tables::SINE_TABLE[(angle as u16 as usize) >> 4]
+    crate::trig_tables::SINE_COSINE_TABLE[(angle as u16 as usize) >> 4]
 }
 
 #[inline]
 pub fn coss(angle: i16) -> f32 {
-    crate::trig_tables::SINE_TABLE[((angle as u16 as usize) >> 4) + 0x400]
+    crate::trig_tables::SINE_COSINE_TABLE[((angle as u16 as usize) >> 4) + 0x400]
 }
 
 #[inline]
