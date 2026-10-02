@@ -18,5 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libasound2-dev libudev-dev
       - name: Check SM64 crates
         run: cargo check -p sm64_core -p sm64_assets -p sm64_sim -p sm64_bevy --tests
