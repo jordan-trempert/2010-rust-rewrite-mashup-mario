@@ -1,7 +1,7 @@
 use bevy::{
     asset::RenderAssetUsages,
     camera::ClearColorConfig,
-    log::{error, info},
+    log::{error, info, warn},
     prelude::*,
     render::render_resource::PrimitiveTopology,
 };
@@ -176,8 +176,18 @@ fn launch_requested_sm64_map(
         }
     };
 
+    let render_geometry=match sm64_assets::load_level_render_geometry(&root,&level,area) {
+        Ok(geometry)=>Some(geometry),
+        Err(error)=>{
+            warn!("SM64 render geometry load failed; using collision fallback: {error}");
+            None
+        }
+    };
+
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
+    let render_triangles=render_geometry.as_ref().map_or(0,|g|g.triangle_count);
+    let render_batches=render_geometry.as_ref().map_or(0,|g|g.batches.len());
 
     if debug_view.0 {
         spawn_debug_scene(
@@ -185,6 +195,7 @@ fn launch_requested_sm64_map(
             &mut meshes,
             &mut materials,
             &parsed.world,
+            render_geometry.as_ref(),
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
         );
     }
@@ -204,7 +215,7 @@ fn launch_requested_sm64_map(
 
     status.loaded=true;
     status.message=format!(
-        "SM64 {level} area {area}: {surface_count} surfaces, {special_count} special objects, Mario at {:?}",
+        "SM64 {level} area {area}: {surface_count} collision surfaces, {special_count} special objects, {render_triangles} render triangles in {render_batches} batches, Mario at {:?}",
         spawn.pos
     );
     info!("{}",status.message);
@@ -216,7 +227,104 @@ fn spawn_debug_scene(
     meshes:&mut Assets<Mesh>,
     materials:&mut Assets<StandardMaterial>,
     world:&sm64_core::CollisionWorld,
+    render_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
     mario_spawn:[f32;3],
+) {
+    if let Some(geometry)=render_geometry.filter(|geometry|geometry.triangle_count>0) {
+        spawn_display_list_geometry(commands,meshes,materials,geometry);
+    } else {
+        spawn_collision_fallback(commands,meshes,materials,world);
+    }
+
+    commands.spawn((
+        Name::new("SM64 Mario debug marker"),
+        Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color:Color::srgb(0.9,0.12,0.08),
+            unlit:true,
+            ..default()
+        })),
+        Transform::from_xyz(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]),
+        Sm64MarioPresentation,
+    ));
+
+    let target=Vec3::new(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]);
+    let camera_pos=target+Vec3::new(0.0,650.0,1200.0);
+    commands.spawn((
+        Name::new("SM64 debug camera"),
+        Camera3d::default(),
+        Camera {
+            order:1000,
+            clear_color:ClearColorConfig::Custom(Color::srgb(0.08,0.12,0.2)),
+            ..default()
+        },
+        Transform::from_translation(camera_pos).looking_at(target,Vec3::Y),
+        Sm64DebugCamera,
+    ));
+}
+
+fn spawn_display_list_geometry(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    geometry:&sm64_assets::ParsedRenderGeometry,
+) {
+    for (batch_index,batch) in geometry.batches.iter().enumerate() {
+        if batch.vertices.len()<3 {continue;}
+
+        let mut positions=Vec::<[f32;3]>::with_capacity(batch.vertices.len());
+        let mut normals=Vec::<[f32;3]>::with_capacity(batch.vertices.len());
+        let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
+
+        for triangle in batch.vertices.chunks_exact(3) {
+            let a=Vec3::from_array(triangle[0].position);
+            let b=Vec3::from_array(triangle[1].position);
+            let c=Vec3::from_array(triangle[2].position);
+            let normal=(b-a).cross(c-a).try_normalize().unwrap_or(Vec3::Y).to_array();
+
+            for vertex in triangle {
+                positions.push(vertex.position);
+                normals.push(normal);
+                let [width,height]=batch.texture_size.unwrap_or([32,32]);
+                let u=vertex.texcoord[0] as f32/(32.0*width.max(1) as f32);
+                let v=vertex.texcoord[1] as f32/(32.0*height.max(1) as f32);
+                uvs.push([u,v]);
+            }
+        }
+
+        let mesh=Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+        let base_color=debug_texture_color(batch.texture_symbol.as_deref(),batch_index);
+        commands.spawn((
+            Name::new(format!(
+                "SM64 display list batch {} {}",
+                batch_index,
+                batch.texture_symbol.as_deref().unwrap_or("untextured")
+            )),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color,
+                perceptual_roughness:1.0,
+                unlit:true,
+                cull_mode:None,
+                ..default()
+            })),
+            Sm64DebugWorld,
+        ));
+    }
+}
+
+fn spawn_collision_fallback(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    world:&sm64_core::CollisionWorld,
 ) {
     let mut positions=Vec::<[f32;3]>::with_capacity(world.surfaces.len()*3);
     let mut normals=Vec::<[f32;3]>::with_capacity(world.surfaces.len()*3);
@@ -249,7 +357,7 @@ fn spawn_debug_scene(
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals);
 
     commands.spawn((
-        Name::new("SM64 debug collision world"),
+        Name::new("SM64 collision fallback"),
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color:Color::srgb(0.35,0.68,0.35),
@@ -260,32 +368,17 @@ fn spawn_debug_scene(
         })),
         Sm64DebugWorld,
     ));
+}
 
-    commands.spawn((
-        Name::new("SM64 Mario debug marker"),
-        Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color:Color::srgb(0.9,0.12,0.08),
-            unlit:true,
-            ..default()
-        })),
-        Transform::from_xyz(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]),
-        Sm64MarioPresentation,
-    ));
-
-    let target=Vec3::new(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]);
-    let camera_pos=target+Vec3::new(0.0,650.0,1200.0);
-    commands.spawn((
-        Name::new("SM64 debug camera"),
-        Camera3d::default(),
-        Camera {
-            order:1000,
-            clear_color:ClearColorConfig::Custom(Color::srgb(0.08,0.12,0.2)),
-            ..default()
-        },
-        Transform::from_translation(camera_pos).looking_at(target,Vec3::Y),
-        Sm64DebugCamera,
-    ));
+fn debug_texture_color(symbol:Option<&str>,batch_index:usize)->Color {
+    let mut hash=0x811C9DC5u32;
+    for byte in symbol.unwrap_or("untextured").bytes() {
+        hash^=byte as u32;
+        hash=hash.wrapping_mul(0x01000193);
+    }
+    hash^=batch_index as u32;
+    let channel=|shift:u32| 0.28+(((hash>>shift)&0xFF) as f32/255.0)*0.58;
+    Color::srgb(channel(0),channel(8),channel(16))
 }
 
 fn update_debug_input(
