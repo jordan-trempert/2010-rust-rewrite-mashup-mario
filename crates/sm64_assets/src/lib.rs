@@ -1,3 +1,4 @@
+mod discover;
 mod collision_source;
 mod level_script;
 mod render_geometry;
@@ -41,3 +42,5 @@ pub fn load_level_collision(
 }
 
 pub use texture_sources::load_texture_sources;
+
+pub use discover::discover_levels;
