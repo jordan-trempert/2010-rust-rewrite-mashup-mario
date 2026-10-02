@@ -347,6 +347,13 @@ fn spawn_display_list_geometry(
             debug_texture_color(batch.texture_symbol.as_deref(),batch_index)
         };
 
+        let alpha_mode=if batch.layer.contains("TRANSPARENT") {
+            AlphaMode::Blend
+        } else if batch.layer.contains("ALPHA") {
+            AlphaMode::Mask(0.5)
+        } else {
+            AlphaMode::Opaque
+        };
         commands.spawn((
             Name::new(format!(
                 "SM64 display list batch {} {}",
@@ -357,6 +364,7 @@ fn spawn_display_list_geometry(
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color,
                 base_color_texture:texture_handle,
+                alpha_mode,
                 perceptual_roughness:1.0,
                 unlit:true,
                 cull_mode:None,
