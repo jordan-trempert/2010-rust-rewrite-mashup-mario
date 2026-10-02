@@ -92,6 +92,7 @@ bevy = { version = "0.19", default-features = false, features = [
     "bevy_core_pipeline",
     "bevy_pbr",
     "tonemapping_luts",
+    "zstd_rust",
     "bevy_log",
     "bevy_sprite",
     "bevy_sprite_render",
