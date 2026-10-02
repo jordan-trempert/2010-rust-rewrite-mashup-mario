@@ -17,6 +17,6 @@ pub use mario::MarioState;
 pub use math::{Vec3f, Vec3s};
 pub use types::{ObjectId, SurfaceId};
 
-pub use collision::{CollisionWorld, SurfaceHit};
+pub use collision::{CollisionWorld, EnvironmentRegion, SurfaceHit};
 pub use surface::{Surface, SurfaceNormal};
 pub use surface_types::*;
