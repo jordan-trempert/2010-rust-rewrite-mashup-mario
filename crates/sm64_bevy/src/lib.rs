@@ -16,6 +16,23 @@ impl Default for Sm64Enabled {
     fn default() -> Self { Self(false) }
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct Sm64LaunchRequest {
+    pub level: String,
+    pub area: u8,
+}
+
+impl Sm64LaunchRequest {
+    pub fn new(level: impl Into<String>, area: u8) -> Self {
+        Self { level: level.into(), area: area.max(1) }
+    }
+
+    pub fn from_map_key(map: &str) -> Option<Self> {
+        let level=map.strip_prefix("sm64:")?;
+        (!level.is_empty()).then(||Self::new(level,1))
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct Sm64Runtime {
     pub world: Sm64World,
@@ -38,11 +55,11 @@ pub struct Sm64LoadStatus {
 impl Default for Sm64LoadStatus {
     fn default() -> Self {
         Self {
-            level: "bob".to_owned(),
+            level: String::new(),
             area: 1,
             source_root: None,
             loaded: false,
-            message: "SM64 decomp root not configured".to_owned(),
+            message: "No SM64 map loaded".to_owned(),
         }
     }
 }
@@ -75,12 +92,12 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>()
-            .add_systems(Startup, load_sm64_from_decomp)
             .add_systems(
                 Update,
                 (
-                    update_debug_input,
-                    advance_sm64_runtime,
+                    launch_requested_sm64_map,
+                    update_debug_input.after(launch_requested_sm64_map),
+                    advance_sm64_runtime.after(launch_requested_sm64_map),
                     sync_mario_presentation.after(advance_sm64_runtime),
                     follow_mario_camera.after(advance_sm64_runtime),
                 ),
@@ -88,8 +105,17 @@ impl Plugin for Sm64Plugin {
     }
 }
 
-fn load_sm64_from_decomp(
+fn launch_requested_sm64_map(
     mut commands: Commands,
+    request: Option<Res<Sm64LaunchRequest>>,
+    existing: Query<
+        Entity,
+        Or<(
+            With<Sm64DebugWorld>,
+            With<Sm64MarioPresentation>,
+            With<Sm64DebugCamera>,
+        )>,
+    >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut enabled: ResMut<Sm64Enabled>,
@@ -97,41 +123,55 @@ fn load_sm64_from_decomp(
     mut runtime: ResMut<Sm64Runtime>,
     mut status: ResMut<Sm64LoadStatus>,
 ) {
+    let Some(request)=request else {return;};
+
+    for entity in &existing {
+        commands.entity(entity).despawn();
+    }
+
     let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
+        enabled.0=false;
+        status.loaded=false;
+        status.message="SM64_DECOMP_ROOT is not configured".into();
+        error!("{}",status.message);
+        commands.remove_resource::<Sm64LaunchRequest>();
         return;
     };
-    let level=std::env::var("SM64_LEVEL").unwrap_or_else(|_|"bob".to_owned());
-    let area=std::env::var("SM64_AREA")
-        .ok()
-        .and_then(|v|v.parse::<u8>().ok())
-        .filter(|v|*v!=0)
-        .unwrap_or(1);
 
+    let level=request.level.clone();
+    let area=request.area;
     status.source_root=Some(root.clone());
     status.level=level.clone();
     status.area=area;
+    status.loaded=false;
 
     let parsed=match sm64_assets::load_level_collision(&root,&level,area) {
         Ok(parsed)=>parsed,
         Err(error)=>{
+            enabled.0=false;
             status.message=format!("SM64 collision load failed: {error}");
             error!("{}",status.message);
+            commands.remove_resource::<Sm64LaunchRequest>();
             return;
         }
     };
     let spawn=match sm64_assets::load_mario_spawn(&root,&level,area) {
         Ok(spawn)=>spawn,
         Err(error)=>{
+            enabled.0=false;
             status.message=format!("SM64 spawn load failed: {error}");
             error!("{}",status.message);
+            commands.remove_resource::<Sm64LaunchRequest>();
             return;
         }
     };
     let area_settings=match sm64_assets::load_area_settings(&root,&level,area) {
         Ok(settings)=>settings,
         Err(error)=>{
+            enabled.0=false;
             status.message=format!("SM64 area metadata load failed: {error}");
             error!("{}",status.message);
+            commands.remove_resource::<Sm64LaunchRequest>();
             return;
         }
     };
@@ -149,12 +189,14 @@ fn load_sm64_from_decomp(
         );
     }
 
+    runtime.world=Sm64World::new();
     runtime.world.collision=parsed.world;
     runtime.world.spawn_mario(
         [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
         spawn.yaw_sm64(),
     );
     runtime.world.mario.terrain_type=area_settings.terrain_type;
+    runtime.accumulator=0.0;
     runtime.latest=Some(runtime.world.snapshot());
     enabled.0=std::env::var("SM64_ENABLED")
         .map(|v|v!="0" && !v.eq_ignore_ascii_case("false"))
@@ -166,6 +208,7 @@ fn load_sm64_from_decomp(
         spawn.pos
     );
     info!("{}",status.message);
+    commands.remove_resource::<Sm64LaunchRequest>();
 }
 
 fn spawn_debug_scene(
