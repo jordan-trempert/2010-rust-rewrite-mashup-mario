@@ -18,6 +18,14 @@ pub struct MacroObjectSpawn {
     pub yaw_deg: i16,
     pub position: [i16;3],
     pub behavior_param_expr: Option<String>,
+    pub resolved: Option<MacroPresetDefinition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacroPresetDefinition {
+    pub behavior: String,
+    pub model: String,
+    pub default_behavior_param_expr: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,11 +47,47 @@ pub fn load_level_object_spawns(
         .map_err(|e|CollisionParseError::new(format!("{}: {e}",script_path.display())))?;
     let macro_source=fs::read_to_string(&macro_path)
         .map_err(|e|CollisionParseError::new(format!("{}: {e}",macro_path.display())))?;
+    let presets_path=root.join("include").join("macro_presets.inc.c");
+    let presets_source=fs::read_to_string(&presets_path)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",presets_path.display())))?;
+    let preset_defs=parse_macro_preset_definitions(&presets_source);
+
+    let mut macro_objects=parse_macro_objects(&macro_source);
+    for object in &mut macro_objects {
+        object.resolved=preset_defs.get(&object.preset).cloned();
+    }
 
     Ok(ParsedObjectSpawns{
         level_objects:parse_level_script_objects(&script),
-        macro_objects:parse_macro_objects(&macro_source),
+        macro_objects,
     })
+}
+
+pub fn parse_macro_preset_definitions(
+    source:&str,
+)->std::collections::HashMap<String,MacroPresetDefinition>{
+    let mut out=std::collections::HashMap::new();
+    for raw in source.lines(){
+        let line=raw.trim();
+        let Some(comment_start)=line.find("/*") else {continue;};
+        let Some(comment_end)=line[comment_start+2..].find("*/") else {continue;};
+        let comment_end=comment_start+2+comment_end;
+        let preset=line[comment_start+2..comment_end].trim();
+        if !preset.starts_with("macro_"){continue;}
+
+        let Some(open)=line[comment_end+2..].find('{') else {continue;};
+        let rest=&line[comment_end+2+open+1..];
+        let Some(close)=rest.find('}') else {continue;};
+        let parts=split_args(&rest[..close]);
+        if parts.len()<3{continue;}
+
+        out.insert(preset.to_owned(),MacroPresetDefinition{
+            behavior:parts[0].trim().to_owned(),
+            model:parts[1].trim().to_owned(),
+            default_behavior_param_expr:parts[2].trim().to_owned(),
+        });
+    }
+    out
 }
 
 pub fn parse_level_script_objects(source:&str)->Vec<LevelObjectSpawn>{
@@ -97,6 +141,7 @@ pub fn parse_macro_objects(source:&str)->Vec<MacroObjectSpawn>{
                     parse_i16(parts[4])?,
                 ],
                 behavior_param_expr:Some(parts[5].trim().to_owned()),
+                resolved:None,
             });
         }
         if let Some(args)=macro_args(line,"MACRO_OBJECT"){
@@ -111,6 +156,7 @@ pub fn parse_macro_objects(source:&str)->Vec<MacroObjectSpawn>{
                     parse_i16(parts[4])?,
                 ],
                 behavior_param_expr:None,
+                resolved:None,
             });
         }
         None
@@ -206,5 +252,15 @@ mod tests{
         let parsed=parse_macro_objects(src);
         assert_eq!(parsed.len(),1);
         assert_eq!(parsed[0].preset,"macro_goomba");
+        assert!(parsed[0].resolved.is_none());
+    }
+
+    #[test]
+    fn resolves_macro_preset_table_row(){
+        let src="/* macro_goomba */ { bhvGoomba, MODEL_GOOMBA, GOOMBA_SIZE_REGULAR },";
+        let defs=parse_macro_preset_definitions(src);
+        let def=defs.get("macro_goomba").unwrap();
+        assert_eq!(def.behavior,"bhvGoomba");
+        assert_eq!(def.model,"MODEL_GOOMBA");
     }
 }
