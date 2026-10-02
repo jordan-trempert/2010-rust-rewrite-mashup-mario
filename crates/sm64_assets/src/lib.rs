@@ -1,6 +1,7 @@
 mod discover;
 mod collision_source;
 mod level_script;
+mod object_spawns;
 mod render_geometry;
 mod surface_names;
 mod texture_sources;
@@ -44,3 +45,5 @@ pub fn load_level_collision(
 pub use texture_sources::{load_actor_texture_sources, load_texture_sources};
 
 pub use discover::discover_levels;
+
+pub use object_spawns::{LevelObjectSpawn, MacroObjectSpawn, ParsedObjectSpawns, load_level_object_spawns, parse_level_script_objects, parse_macro_objects};
