@@ -1,0 +1,14 @@
+[package]
+name = "sm64_bevy"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Bevy presentation and scheduling adapter for the SM64 simulation."
+
+[dependencies]
+bevy.workspace = true
+sm64_core.workspace = true
+sm64_sim.workspace = true
+
+[lints]
+workspace = true
