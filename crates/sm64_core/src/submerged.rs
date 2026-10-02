@@ -157,7 +157,7 @@ fn common_swimming_step(m:&mut MarioState, world:&CollisionWorld, strength:i16) 
     update_swimming_speed(m,strength as f32/10.0);
     match perform_water_step(m,world) {
         WATER_STEP_HIT_CEILING=>{
-            if m.face_angle[0]>-0x3000 {m.face_angle[0]=m.face_angle[0].wrapping_sub(0x100);}
+            if m.face_angle[0] > -0x3000 {m.face_angle[0]=m.face_angle[0].wrapping_sub(0x100);}
         }
         WATER_STEP_HIT_WALL if m.stick_y==0.0=>{
             if m.face_angle[0]>0 {
