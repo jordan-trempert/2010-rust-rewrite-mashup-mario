@@ -5,6 +5,7 @@ pub mod actions;
 pub mod automatic;
 pub mod collision;
 pub mod ground_motion;
+pub mod interaction;
 pub mod mario;
 pub mod mario_action;
 pub mod mario_step;
@@ -29,3 +30,5 @@ pub use surface_props::*;
 pub use ground_motion::*;
 
 pub use object::{ObjectList, Sm64Object};
+
+pub use interaction::*;
