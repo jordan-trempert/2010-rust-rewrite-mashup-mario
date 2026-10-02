@@ -6,7 +6,7 @@ use crate::types::{ObjectId, SurfaceId};
 /// Pointer fields from the C decomp are represented by stable IDs or deferred
 /// integration handles. This keeps the simulation cloneable while preserving
 /// the original state-machine shape and field semantics.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MarioState {
     pub unk00: u16,
     pub input: u16,
