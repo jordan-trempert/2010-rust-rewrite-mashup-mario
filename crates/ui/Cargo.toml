@@ -8,6 +8,7 @@ description = "Client UI state, settings and loading overlays."
 [dependencies]
 diag.workspace = true
 bevy.workspace = true
+sm64_assets.workspace = true
 asset_core.workspace = true
 asset_game.workspace = true
 asset_material.workspace = true
