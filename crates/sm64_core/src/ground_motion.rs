@@ -133,7 +133,7 @@ pub fn update_sliding(m:&mut MarioState, world:&CollisionWorld, stop_speed:f32)-
     false
 }
 
-pub fn should_begin_sliding(m:&MarioState, world:&CollisionWorld)->bool {
+pub fn should_begin_sliding(m:&MarioState, _world:&CollisionWorld)->bool {
     if m.input & INPUT_ABOVE_SLIDE as u16 == 0 {return false;}
     let slide_level=(m.terrain_type as i32 & TERRAIN_MASK)==TERRAIN_SLIDE;
     let moving_backward=m.forward_vel<=-1.0;
