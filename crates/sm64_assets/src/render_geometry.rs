@@ -23,6 +23,8 @@ pub struct RenderBatch {
     pub layer: String,
     pub texture_symbol: Option<String>,
     pub texture_size: Option<[u32; 2]>,
+    /// Active N64 light/color group when this batch was emitted.
+    pub light_symbol: Option<String>,
     /// Flattened triangle vertices, three entries per triangle.
     pub vertices: Vec<RenderVertex>,
 }
@@ -37,6 +39,8 @@ pub struct ParsedRenderGeometry {
 #[derive(Clone, Debug)]
 enum GfxCommand {
     SetTexture(String),
+    ClearTexture,
+    SetLight(String),
     SetTileSize([u32; 2]),
     Vertex {
         array: String,
@@ -60,6 +64,7 @@ struct ExecState {
     layer: String,
     texture_symbol: Option<String>,
     texture_size: Option<[u32; 2]>,
+    light_symbol: Option<String>,
 }
 
 impl ExecState {
@@ -69,6 +74,7 @@ impl ExecState {
             layer,
             texture_symbol: None,
             texture_size: None,
+            light_symbol: None,
         }
     }
 }
@@ -124,6 +130,41 @@ pub fn load_level_render_geometry(
         let mut recursion = HashSet::new();
         execute_display_list(
             &root.name,
+            &display_lists,
+            &vertex_arrays,
+            &mut state,
+            &mut output,
+            &mut recursion,
+        )?;
+    }
+    Ok(output)
+}
+
+
+pub fn load_model_display_lists(
+    decomp_root: impl AsRef<Path>,
+    relative_model_path: impl AsRef<Path>,
+    roots: &[(&str, &str)],
+) -> Result<ParsedRenderGeometry, CollisionParseError> {
+    let path=decomp_root.as_ref().join(relative_model_path.as_ref());
+    let source=fs::read_to_string(&path)
+        .map_err(|error|CollisionParseError::new(format!("{}: {error}",path.display())))?;
+
+    let mut vertex_arrays=HashMap::<String,Vec<RenderVertex>>::new();
+    let mut display_lists=HashMap::<String,Vec<GfxCommand>>::new();
+    for (name,body) in extract_arrays(&source,"Vtx") {
+        vertex_arrays.insert(name,parse_vertex_array(&body)?);
+    }
+    for (name,body) in extract_arrays(&source,"Gfx") {
+        display_lists.insert(name,parse_display_list(&body)?);
+    }
+
+    let mut output=ParsedRenderGeometry::default();
+    for (layer,name) in roots {
+        let mut state=ExecState::new((*layer).to_owned());
+        let mut recursion=HashSet::new();
+        execute_display_list(
+            name,
             &display_lists,
             &vertex_arrays,
             &mut state,
@@ -205,6 +246,22 @@ fn parse_display_list(body: &str) -> Result<Vec<GfxCommand>, CollisionParseError
             if let Some(symbol) = parts.last() {
                 commands.push(GfxCommand::SetTexture(symbol.trim().to_owned()));
             }
+        } else if let Some(args) = macro_args(line, "gsSPTexture") {
+            if args.split(',').last().is_some_and(|value|value.trim()=="G_OFF") {
+                commands.push(GfxCommand::ClearTexture);
+            }
+        } else if let Some(args) = macro_args(line, "gsSPLight") {
+            let parts=split_args(args);
+            if parts.len()>=2 && parts[1].trim()=="1" {
+                let symbol=parts[0]
+                    .trim()
+                    .trim_start_matches('&')
+                    .split('.')
+                    .next()
+                    .unwrap_or(parts[0].trim())
+                    .to_owned();
+                commands.push(GfxCommand::SetLight(symbol));
+            }
         } else if let Some(args) = macro_args(line, "gsDPSetTileSize") {
             if let Some(size) = parse_tile_size(args) {
                 commands.push(GfxCommand::SetTileSize(size));
@@ -274,6 +331,12 @@ fn execute_display_list(
             GfxCommand::SetTexture(symbol) => {
                 state.texture_symbol = Some(symbol.clone());
             }
+            GfxCommand::ClearTexture => {
+                state.texture_symbol = None;
+            }
+            GfxCommand::SetLight(symbol) => {
+                state.light_symbol = Some(symbol.clone());
+            }
             GfxCommand::SetTileSize(size) => {
                 state.texture_size = Some(*size);
             }
@@ -334,6 +397,7 @@ fn push_triangle(
         batch.layer == state.layer
             && batch.texture_symbol == state.texture_symbol
             && batch.texture_size == state.texture_size
+            && batch.light_symbol == state.light_symbol
     });
 
     if !same_batch {
@@ -341,6 +405,7 @@ fn push_triangle(
             layer: state.layer.clone(),
             texture_symbol: state.texture_symbol.clone(),
             texture_size: state.texture_size,
+            light_symbol: state.light_symbol.clone(),
             vertices: Vec::new(),
         });
     }
