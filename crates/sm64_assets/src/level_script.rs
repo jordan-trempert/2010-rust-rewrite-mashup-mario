@@ -1,10 +1,23 @@
 use std::path::Path;
 
+use crate::surface_names::terrain_type_by_name;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MarioSpawn {
     pub area: u8,
     pub yaw_degrees: i16,
     pub pos: [i16; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AreaSettings {
+    pub terrain_type: i16,
+}
+
+impl Default for AreaSettings {
+    fn default() -> Self {
+        Self { terrain_type: sm64_core::TERRAIN_GRASS as i16 }
+    }
 }
 
 impl MarioSpawn {
@@ -83,4 +96,42 @@ mod tests {
         assert_eq!(spawn.yaw_degrees,135);
         assert_eq!(spawn.yaw_sm64(),0x6000);
     }
+}
+
+pub fn load_area_settings(
+    decomp_root: impl AsRef<Path>,
+    level: &str,
+    area: u8,
+) -> Result<AreaSettings, crate::CollisionParseError> {
+    let path=decomp_root.as_ref().join("levels").join(level).join("script.c");
+    let text=std::fs::read_to_string(&path)
+        .map_err(|e|crate::CollisionParseError::new(format!("{}: {e}",path.display())))?;
+    Ok(parse_area_settings(&text,area))
+}
+
+pub fn parse_area_settings(source:&str, wanted_area:u8)->AreaSettings {
+    let mut current_area:Option<u8>=None;
+    let mut settings=AreaSettings::default();
+    for raw in source.lines() {
+        let line=remove_block_comments(raw);
+        let line=line.trim();
+        if let Some(args)=macro_args(line,"AREA") {
+            current_area=args.split(',').next()
+                .and_then(parse_i16)
+                .and_then(|v|u8::try_from(v).ok());
+            continue;
+        }
+        if line.starts_with("END_AREA") {
+            current_area=None;
+            continue;
+        }
+        if current_area==Some(wanted_area) {
+            if let Some(args)=macro_args(line,"TERRAIN_TYPE") {
+                if let Some(ty)=terrain_type_by_name(args).or_else(||parse_i16(args)) {
+                    settings.terrain_type=ty;
+                }
+            }
+        }
+    }
+    settings
 }
