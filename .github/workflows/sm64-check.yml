@@ -1,0 +1,22 @@
+name: SM64 Rust checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/sm64_core/**"
+      - "crates/sm64_sim/**"
+      - "crates/sm64_bevy/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/sm64-check.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check SM64 crates
+        run: cargo check -p sm64_core -p sm64_sim -p sm64_bevy --tests
