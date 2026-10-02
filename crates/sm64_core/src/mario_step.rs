@@ -2,6 +2,7 @@ use crate::action::*;
 use crate::collision::CollisionWorld;
 use crate::mario::MarioState;
 use crate::math::{atan2s, coss, sins};
+use crate::surface_types::*;
 
 #[inline]
 pub fn mario_set_forward_vel(m: &mut MarioState, speed: f32) {
