@@ -231,11 +231,17 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
         ));
     }
     let mut maps = list_mp_map_packs(&games);
-    if std::env::var_os("SM64_DECOMP_ROOT").is_some() {
-        maps.insert(0, asset_transport::MapPack {
-            label: "SM64".into(),
-            maps: vec!["sm64:bob".into()],
-        });
+    if let Some(root)=std::env::var_os("SM64_DECOMP_ROOT") {
+        match sm64_assets::discover_levels(std::path::PathBuf::from(root)) {
+            Ok(levels) if !levels.is_empty() => {
+                maps.insert(0, asset_transport::MapPack {
+                    label: "SM64".into(),
+                    maps: levels.into_iter().map(|level|format!("sm64:{level}")).collect(),
+                });
+            }
+            Ok(_) => {}
+            Err(error) => diag::warn!("SM64 level discovery failed: {error}"),
+        }
     }
     diag::info!(
         Launch,
