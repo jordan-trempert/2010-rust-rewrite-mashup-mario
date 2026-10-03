@@ -49,7 +49,6 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
     });
-
     app.edit_schedule(First, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
     });
@@ -84,10 +83,6 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     }
 }
 
-/// Once the normal IW4 session loader has installed the proxy match, attach
-/// the selected SM64 course to that live match. This intentionally happens
-/// after MatchInstalled: the loading screen, COD player, loadout, guns, HUD,
-/// scripts and game mode all come from the ordinary match lifecycle first.
 fn launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
     mut commands: Commands,
@@ -105,15 +100,12 @@ fn launch_installed_sm64_cod_map(
     diag::info!(World, "SM64 COD map: attaching `{level}` to installed match");
 }
 
-/// The SM64 adapter still has its old standalone debug-player presentation.
-/// A COD-routed SM64 map keeps only the course/object presentation: Mario and
-/// the adapter's order-1000 follow camera are removed so the normal IW4 view,
-/// weapon viewmodel and HUD remain authoritative.
 fn suppress_sm64_player_view(
     mut commands: Commands,
     identity: Option<Res<frame::LaunchIdentity>>,
     mario: Query<Entity, With<sm64_bevy::Sm64MarioPresentation>>,
     cameras: Query<(Entity, &Camera), With<Camera3d>>,
+    mut proxy_world: Option<ResMut<render_frontend::prepare::scene::world::WorldScene>>,
 ) {
     let Some(identity) = identity else {
         return;
@@ -121,6 +113,15 @@ fn suppress_sm64_player_view(
     if !identity.zone.starts_with("sm64cod:") {
         return;
     }
+
+    // The IW4 proxy exists only to supply scripts, weapons, bodies and shared
+    // match content. Never draw its Rust geometry underneath the SM64 course.
+    if let Some(world) = proxy_world.as_deref_mut()
+        && (world.spawned || !world.batches.is_empty() || !world.static_model_meshes.is_empty())
+    {
+        *world = render_frontend::prepare::scene::world::WorldScene::default();
+    }
+
     for entity in &mario {
         commands.entity(entity).despawn();
     }
