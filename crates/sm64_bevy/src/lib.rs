@@ -55,6 +55,34 @@ impl Sm64LaunchRequest {
     }
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct Sm64CodMapRequest {
+    pub level: String,
+    pub area: u8,
+}
+
+impl Sm64CodMapRequest {
+    pub fn new(level: impl Into<String>, area: u8) -> Self {
+        Self { level: level.into(), area: area.max(1) }
+    }
+
+    pub fn from_map_key(map: &str) -> Option<Self> {
+        let level=map.strip_prefix("sm64cod:")
+            .or_else(||map.strip_prefix("sm64:"))?;
+        (!level.is_empty()).then(||Self::new(level,1))
+    }
+
+    pub fn map_key(&self) -> String {
+        format!("sm64cod:{}",self.level)
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct Sm64CodActive {
+    pub level: String,
+    pub area: u8,
+}
+
 #[derive(Resource, Default)]
 pub struct Sm64Runtime {
     pub world: Sm64World,
