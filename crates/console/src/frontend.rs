@@ -217,37 +217,41 @@ pub(crate) fn route(
                         return Err("Only the lobby host can start a match".into());
                     }
                     let (map, mode) = selected_game(&dvars, &maps)?;
-                    if let Some(request) = sm64_bevy::Sm64LaunchRequest::from_map_key(&map) {
+                    commands.insert_resource(host_rules(&dvars));
+
+                    if let Some(request) = sm64_bevy::Sm64CodMapRequest::from_map_key(&map) {
                         if state.public {
                             return Err("SM64 maps are currently local-only".into());
                         }
+
+                        // Load a real IW4 zone so every COD system follows the
+                        // ordinary loading/session path. The requested SM64
+                        // course is carried separately and attached after the
+                        // proxy match is installed.
+                        let target = request.map_key();
                         commands.insert_resource(request);
-                        commands.remove_resource::<frame::HostMatchRules>();
-                        commands.remove_resource::<sim::HostGameModeSelection>();
-                        *party = UiPartyState::default();
-                        *app_screen = AppScreen::InGame;
-                        ui_draw.0 = false;
-                        menus.write(UiMenuRequest::Close("lobby_game_setup".into()));
-                        menus.write(UiMenuRequest::Close("game_map_select".into()));
-                        menus.write(UiMenuRequest::Close("game_lobby".into()));
-                        echo.write(format!("menu: starting {map} via SM64 runtime"));
+                        let id = transition
+                            .request_zone("iw4:mp_rust".to_owned())
+                            .map_err(|error| error.to_string())?;
+                        commands.insert_resource(mode);
+                        echo.write(format!(
+                            "menu: starting {target} over iw4:mp_rust {} (swap #{id})",
+                            mode.token()
+                        ));
+                    } else if state.public {
+                        services.submit(net::MasterMenuAction::StartMatch {
+                            map,
+                            mode: mode.token().into(),
+                        })?;
                     } else {
-                        commands.insert_resource(host_rules(&dvars));
-                        if state.public {
-                            services.submit(net::MasterMenuAction::StartMatch {
-                                map,
-                                mode: mode.token().into(),
-                            })?;
-                        } else {
-                            let id = transition
-                                .request_zone(map.clone())
-                                .map_err(|error| error.to_string())?;
-                            commands.insert_resource(mode);
-                            echo.write(format!(
-                                "menu: starting {map} {} (swap #{id})",
-                                mode.token()
-                            ));
-                        }
+                        let id = transition
+                            .request_zone(map.clone())
+                            .map_err(|error| error.to_string())?;
+                        commands.insert_resource(mode);
+                        echo.write(format!(
+                            "menu: starting {map} {} (swap #{id})",
+                            mode.token()
+                        ));
                     }
                 }
                 "ui_vote_skip" => services.submit(net::MasterMenuAction::VoteToSkip)?,
