@@ -206,18 +206,9 @@ fn suppress_sm64_player_view(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     mario: Query<Entity, With<sm64_bevy::Sm64MarioPresentation>>,
     cameras: Query<(Entity, &Camera), With<Camera3d>>,
-    mut proxy_world: Option<ResMut<render_frontend::prepare::scene::world::WorldScene>>,
 ) {
     if active.is_none() {
         return;
-    }
-
-    // The IW4 proxy exists only to supply scripts, weapons, bodies and shared
-    // match content. Never draw its Rust geometry underneath the SM64 course.
-    if let Some(world) = proxy_world.as_deref_mut()
-        && (world.spawned || !world.batches.is_empty() || !world.static_model_meshes.is_empty())
-    {
-        *world = render_frontend::prepare::scene::world::WorldScene::default();
     }
 
     for entity in &mario {
@@ -239,6 +230,7 @@ fn clear_sm64_cod_on_return(
     }
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     commands.remove_resource::<sm64_bevy::Sm64CodActive>();
+    commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
 }
 
