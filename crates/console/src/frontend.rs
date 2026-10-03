@@ -229,6 +229,7 @@ pub(crate) fn route(
                         // course is carried separately and attached after the
                         // proxy match is installed.
                         let target = request.map_key();
+                        commands.insert_resource(frame::ExternalWorldPresentation(true));
                         commands.insert_resource(request);
                         let id = transition
                             .request_zone("iw4:mp_rust".to_owned())
@@ -239,11 +240,13 @@ pub(crate) fn route(
                             mode.token()
                         ));
                     } else if state.public {
+                        commands.remove_resource::<frame::ExternalWorldPresentation>();
                         services.submit(net::MasterMenuAction::StartMatch {
                             map,
                             mode: mode.token().into(),
                         })?;
                     } else {
+                        commands.remove_resource::<frame::ExternalWorldPresentation>();
                         let id = transition
                             .request_zone(map.clone())
                             .map_err(|error| error.to_string())?;
