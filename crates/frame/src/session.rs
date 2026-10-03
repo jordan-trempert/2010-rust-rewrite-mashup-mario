@@ -26,6 +26,9 @@ impl RuntimeRole {
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Headless;
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExternalWorldPresentation(pub bool);
+
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AppScreen {
     #[default]
