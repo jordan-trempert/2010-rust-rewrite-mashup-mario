@@ -82,6 +82,7 @@ fn insert_loading_chrome(
     zone_ff: Result<std::path::PathBuf, String>,
     request_id: u64,
     mode: sim::HostGameModeSelection,
+    show_preview: bool,
 ) {
     diag::info!(Ui, "loading: map={zone} mode={}", mode.token());
     commands.insert_resource(LoadingScreen::new(
@@ -89,12 +90,16 @@ fn insert_loading_chrome(
         title,
         mode.display_name().to_owned(),
     ));
-    if let Ok(path) = zone_ff {
-        commands.insert_resource(LoadingPreviewSource {
-            path,
-            map_name: zone.to_owned(),
-            request_id,
-        });
+    if show_preview {
+        if let Ok(path) = zone_ff {
+            commands.insert_resource(LoadingPreviewSource {
+                path,
+                map_name: zone.to_owned(),
+                request_id,
+            });
+        }
+    } else {
+        commands.remove_resource::<LoadingPreviewSource>();
     }
     commands.insert_resource({
         let mut layers = UiLayers::default();
@@ -113,6 +118,7 @@ pub(crate) fn begin_load_from_session(
     loading: Option<Res<LoadingScreen>>,
     request: Option<Res<MatchLoadRequest>>,
     abort: Option<Res<assets::MatchLoadAbort>>,
+    sm64_target: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
     mut window: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let Some(fact) = approved.read().last() else {
@@ -125,7 +131,11 @@ pub(crate) fn begin_load_from_session(
         return;
     };
     let games = asset_transport::GamesRoot(identity.games_root.clone());
-    let (zone, zone_ff, common_mp, zone_alias, loading_title) = resolve_zone(&games, &fact.zone);
+    let (zone, zone_ff, common_mp, zone_alias, mut loading_title) = resolve_zone(&games, &fact.zone);
+    let sm64_loading = sm64_target.is_some();
+    if let Some(target) = sm64_target.as_ref() {
+        loading_title = crate::frontend::maps::map_label(&target.map_key());
+    }
     if loading.as_ref().is_some_and(|s| s.title() == loading_title) {
         return;
     }
@@ -153,6 +163,7 @@ pub(crate) fn begin_load_from_session(
         mode.as_deref()
             .copied()
             .unwrap_or_else(sim::HostGameModeSelection::from_env),
+        !sm64_loading,
     );
     diag::info!(
         Ui,
