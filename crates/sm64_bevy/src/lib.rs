@@ -287,7 +287,7 @@ fn launch_requested_sm64_map(
         selected_act,
     );
     if debug_view.0 {
-        spawn_simple_object_presentations(
+        spawn_runtime_object_presentations(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -368,7 +368,7 @@ fn populate_sm64_objects(
 }
 
 #[inline]
-fn spawn_simple_object_presentations(
+fn spawn_runtime_object_presentations(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
     materials:&mut Assets<StandardMaterial>,
@@ -384,24 +384,18 @@ fn spawn_simple_object_presentations(
             return;
         }
     };
-    let simple=[
-        "MODEL_YELLOW_COIN","MODEL_YELLOW_COIN_NO_SHADOW","MODEL_RED_COIN",
-        "MODEL_BLUE_COIN","MODEL_BLUE_COIN_NO_SHADOW","MODEL_STAR",
-        "MODEL_TRANSPARENT_STAR","MODEL_1UP","MODEL_HEART",
-    ];
-
-    let mut cache=HashMap::<String,(sm64_assets::ParsedRenderGeometry,HashMap<String,std::path::PathBuf>)>::new();
+    let mut cache=HashMap::<String,(sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)>::new();
 
     for object in objects {
-        if !simple.contains(&object.model.as_str()) {continue;}
+        if object.model=="MODEL_NONE" {continue;}
         let Some(sm64_assets::ModelSource::Geo{geo_symbol})=registry.get(&object.model) else {continue;};
 
         if !cache.contains_key(&object.model) {
-            match sm64_assets::resolve_geo_model_geometry(decomp_root,geo_symbol) {
-                Ok((geometry,actor))=>{
-                    let textures=sm64_assets::load_actor_texture_sources(decomp_root,&actor)
+            match sm64_assets::resolve_geo_model_parts(decomp_root,geo_symbol) {
+                Ok(model)=>{
+                    let textures=sm64_assets::load_actor_texture_sources(decomp_root,&model.actor_name)
                         .unwrap_or_default();
-                    cache.insert(object.model.clone(),(geometry,textures));
+                    cache.insert(object.model.clone(),(model,textures));
                 }
                 Err(error)=>{
                     warn!("SM64 object model {} ({geo_symbol}) failed: {error}",object.model);
@@ -409,7 +403,7 @@ fn spawn_simple_object_presentations(
                 }
             }
         }
-        let Some((geometry,textures))=cache.get(&object.model) else {continue;};
+        let Some((model,textures))=cache.get(&object.model) else {continue;};
 
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
@@ -418,23 +412,24 @@ fn spawn_simple_object_presentations(
             Sm64ObjectPresentation{id:object.id},
         )).id();
 
-        spawn_flat_object_geometry(
-            commands,meshes,materials,images,root,geometry,textures,
+        spawn_hierarchical_object_geometry(
+            commands,meshes,materials,images,root,model,textures,
         );
     }
 }
 
-fn spawn_flat_object_geometry(
+fn spawn_hierarchical_object_geometry(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
     materials:&mut Assets<StandardMaterial>,
     images:&mut Assets<Image>,
     parent:Entity,
-    geometry:&sm64_assets::ParsedRenderGeometry,
+    model:&sm64_assets::ResolvedGeoModel,
     texture_sources:&HashMap<String,std::path::PathBuf>,
 ) {
     let mut texture_cache=HashMap::<String,Handle<Image>>::new();
-    for (batch_index,batch) in geometry.batches.iter().enumerate() {
+    for (part_index,part) in model.parts.iter().enumerate() {
+      for (batch_index,batch) in part.geometry.batches.iter().enumerate() {
         if batch.vertices.len()<3 {continue;}
         let mut positions=Vec::with_capacity(batch.vertices.len());
         let mut normals=Vec::with_capacity(batch.vertices.len());
@@ -470,7 +465,7 @@ fn spawn_flat_object_geometry(
             Some(handle)
         });
         commands.spawn((
-            Name::new(format!("SM64 object mesh {batch_index}")),
+            Name::new(format!("SM64 object part {part_index} mesh {batch_index}")),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(StandardMaterial{
                 base_color:Color::WHITE,
@@ -482,10 +477,20 @@ fn spawn_flat_object_geometry(
                     else{AlphaMode::Opaque},
                 ..default()
             })),
-            Transform::IDENTITY,
+            Transform {
+                translation:Vec3::from_array(part.spec.translation),
+                rotation:Quat::from_euler(
+                    EulerRot::XYZ,
+                    part.spec.rotation_deg[0].to_radians(),
+                    part.spec.rotation_deg[1].to_radians(),
+                    part.spec.rotation_deg[2].to_radians(),
+                ),
+                scale:Vec3::splat(part.spec.scale),
+            },
             ChildOf(parent),
             Sm64DebugWorld,
         ));
+      }
     }
 }
 
