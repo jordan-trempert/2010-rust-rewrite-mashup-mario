@@ -220,6 +220,12 @@ fn launch_requested_sm64_map(
             HashMap::new()
         }
     };
+    let mario_hierarchy=sm64_assets::resolve_geo_model_parts(&root,"mario_geo")
+        .map_err(|error|{
+            warn!("SM64 Mario GeoLayout hierarchy failed; using legacy part placement: {error}");
+            error
+        })
+        .ok();
     let mario_geometry=match sm64_assets::load_model_display_lists(
         &root,
         "actors/mario/model.inc.c",
@@ -266,6 +272,7 @@ fn launch_requested_sm64_map(
             &parsed.world,
             render_geometry.as_ref(),
             &texture_sources,
+            mario_hierarchy.as_ref(),
             mario_geometry.as_ref(),
             &mario_texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
@@ -506,6 +513,7 @@ fn spawn_debug_scene(
     world:&sm64_core::CollisionWorld,
     render_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
     texture_sources:&HashMap<String,std::path::PathBuf>,
+    mario_hierarchy:Option<&sm64_assets::ResolvedGeoModel>,
     mario_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
     mario_texture_sources:&HashMap<String,std::path::PathBuf>,
     mario_spawn:[f32;3],
@@ -530,7 +538,17 @@ fn spawn_debug_scene(
         Sm64MarioPresentation,
     )).id();
 
-    if let Some(geometry)=mario_geometry.filter(|geometry|geometry.triangle_count>0) {
+    if let Some(model)=mario_hierarchy.filter(|model|!model.parts.is_empty()) {
+        spawn_mario_hierarchy(
+            commands,
+            meshes,
+            materials,
+            images,
+            mario_root,
+            model,
+            mario_texture_sources,
+        );
+    } else if let Some(geometry)=mario_geometry.filter(|geometry|geometry.triangle_count>0) {
         spawn_mario_geometry(
             commands,
             meshes,
@@ -660,6 +678,92 @@ fn spawn_display_list_geometry(
     }
 }
 
+
+fn spawn_mario_hierarchy(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    mario_root:Entity,
+    model:&sm64_assets::ResolvedGeoModel,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
+) {
+    let mut texture_cache=HashMap::<String,Handle<Image>>::new();
+
+    for (part_index,part) in model.parts.iter().enumerate() {
+        for (batch_index,batch) in part.geometry.batches.iter().enumerate() {
+            if batch.vertices.len()<3 {continue;}
+            let mut positions=Vec::with_capacity(batch.vertices.len());
+            let mut normals=Vec::with_capacity(batch.vertices.len());
+            let mut uvs=Vec::with_capacity(batch.vertices.len());
+
+            for triangle in batch.vertices.chunks_exact(3) {
+                let a=Vec3::from_array(triangle[0].position);
+                let b=Vec3::from_array(triangle[1].position);
+                let d=Vec3::from_array(triangle[2].position);
+                let face_normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y);
+                for vertex in triangle {
+                    positions.push(vertex.position);
+                    let n=Vec3::new(
+                        vertex.attributes[0] as i8 as f32,
+                        vertex.attributes[1] as i8 as f32,
+                        vertex.attributes[2] as i8 as f32,
+                    ).try_normalize().unwrap_or(face_normal);
+                    normals.push(n.to_array());
+                    let [w,h]=batch.texture_size.unwrap_or([32,32]);
+                    uvs.push([
+                        vertex.texcoord[0] as f32/(32.0*w.max(1) as f32),
+                        vertex.texcoord[1] as f32/(32.0*h.max(1) as f32),
+                    ]);
+                }
+            }
+
+            let mesh=Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD|RenderAssetUsages::RENDER_WORLD,
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+            let texture=batch.texture_symbol.as_ref().and_then(|symbol|{
+                if let Some(handle)=texture_cache.get(symbol){return Some(handle.clone());}
+                let path=texture_sources.get(symbol)?;
+                let handle=load_sm64_png(path,images).ok()?;
+                texture_cache.insert(symbol.clone(),handle.clone());
+                Some(handle)
+            });
+            let base_color=if texture.is_some(){Color::WHITE}else{mario_batch_color(batch)};
+
+            commands.spawn((
+                Name::new(format!("SM64 Mario hierarchy part {part_index} batch {batch_index}")),
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial{
+                    base_color,
+                    base_color_texture:texture,
+                    unlit:true,
+                    cull_mode:None,
+                    alpha_mode:if batch.layer.contains("TRANSPARENT"){AlphaMode::Blend}
+                        else if batch.layer.contains("ALPHA"){AlphaMode::Mask(0.5)}
+                        else{AlphaMode::Opaque},
+                    ..default()
+                })),
+                Transform {
+                    translation:Vec3::from_array(part.spec.translation),
+                    rotation:Quat::from_euler(
+                        EulerRot::XYZ,
+                        part.spec.rotation_deg[0].to_radians(),
+                        part.spec.rotation_deg[1].to_radians(),
+                        part.spec.rotation_deg[2].to_radians(),
+                    ),
+                    scale:Vec3::splat(part.spec.scale),
+                },
+                ChildOf(mario_root),
+                Sm64DebugWorld,
+            ));
+        }
+    }
+}
 
 fn spawn_mario_geometry(
     commands:&mut Commands,
