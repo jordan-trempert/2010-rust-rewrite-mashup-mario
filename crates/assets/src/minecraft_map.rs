@@ -12,8 +12,14 @@ pub fn is_minecraft(zone: &str) -> bool {
     zone.eq_ignore_ascii_case(ZONE)
 }
 
+pub fn sm64_level(zone: &str) -> Option<&str> {
+    zone.strip_prefix("sm64cod:")
+        .or_else(|| zone.strip_prefix("sm64:"))
+        .filter(|level| !level.is_empty())
+}
+
 pub fn is_sm64(zone: &str) -> bool {
-    zone.strip_prefix("sm64:").is_some_and(|level| !level.is_empty())
+    sm64_level(zone).is_some()
 }
 
 /// Whether a load's zone, with or without its content namespace, is the
@@ -24,7 +30,7 @@ pub fn is_minecraft_load(zone: &str) -> bool {
 
 /// Whether this is one of the locally sourced SM64 courses.
 pub fn is_sm64_load(zone: &str) -> bool {
-    is_sm64(zone) || zone.split_once(':').is_some_and(|(_, rest)| is_sm64(rest))
+    is_sm64(zone)
 }
 
 /// Where the world's Minecraft files are: a MinecraftOSS checkout named by
@@ -46,7 +52,7 @@ pub fn prepare() {
 }
 
 pub fn find_zone_file(root_dir: &GamesRoot, zone: &str) -> Result<ZoneFile, String> {
-    if is_sm64_load(zone) {
+    if let Some(level) = sm64_level(zone) {
         let decomp = std::env::var_os("SM64_DECOMP_ROOT")
             .map(std::path::PathBuf::from)
             .ok_or_else(|| "SM64_DECOMP_ROOT is not set".to_owned())?;
@@ -56,12 +62,11 @@ pub fn find_zone_file(root_dir: &GamesRoot, zone: &str) -> Result<ZoneFile, Stri
                 decomp.display()
             ));
         }
-        let level = zone.strip_prefix("sm64:").unwrap_or(zone);
         if !decomp.join("levels").join(level).is_dir() {
             return Err(format!("SM64 level `{level}` is not present in {}", decomp.display()));
         }
         let mut proxy = asset_transport::find_zone_file(root_dir, PROXY_ZONE)?;
-        proxy.zone_name = format!("sm64:{level}");
+        proxy.zone_name = format!("sm64cod:{level}");
         proxy.alias_note = Some(format!(
             "SM64 {level} from {} over IW4 {PROXY_MAP}",
             decomp.display()
