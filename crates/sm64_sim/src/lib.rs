@@ -176,6 +176,61 @@ impl Sm64World {
             "bhvYellowCoin"|"bhvYellowCoinInit"|"bhvCoinFormationSpawn" => {
                 self.update_yellow_coin(index);
             }
+            "bhvCoinFormation" => {
+                self.update_coin_formation(index);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_coin_formation(&mut self,index:usize) {
+        let (action,distance,parent_id,parent_pos,parent_yaw,param_expr)={
+            let object=&self.objects[index];
+            (
+                object.action,
+                object.distance_to_mario,
+                object.id,
+                object.pos,
+                object.face_angle[1],
+                object.behavior_params_expr.clone(),
+            )
+        };
+
+        match action {
+            0 if distance<2000.0 => {
+                let formation=coin_formation_kind(&param_expr);
+                let mut children=Vec::new();
+                for coin_index in 0..8i32 {
+                    let Some((relative,on_ground))=coin_formation_offset(formation,coin_index) else {continue;};
+                    let cos=sm64_core::math::coss(parent_yaw);
+                    let sin=sm64_core::math::sins(parent_yaw);
+                    let world_pos=[
+                        parent_pos[0]+relative[0]*cos+relative[2]*sin,
+                        parent_pos[1]+relative[1],
+                        parent_pos[2]-relative[0]*sin+relative[2]*cos,
+                    ];
+                    children.push((coin_index,world_pos,on_ground));
+                }
+                self.objects[index].set_action(1);
+
+                for (coin_index,pos,on_ground) in children {
+                    let id=self.spawn_object(
+                        "MODEL_YELLOW_COIN",
+                        "bhvCoinFormationSpawn",
+                        ObjectList::Level,
+                        pos,
+                        [0,parent_yaw,0],
+                    );
+                    if let Some(child)=self.object_mut(id) {
+                        child.parent=Some(parent_id);
+                        child.behavior_params=(coin_index as u32)<<16;
+                        child.behavior_params_2nd_byte=coin_index as u8;
+                        child.behavior_i32[0]=i32::from(on_ground);
+                    }
+                }
+            }
+            1 if distance>2100.0 => self.objects[index].set_action(2),
+            2 => self.objects[index].set_action(0),
             _ => {}
         }
     }
@@ -188,6 +243,16 @@ impl Sm64World {
             object.hitbox_radius=100.0;
             object.hitbox_height=64.0;
             object.anim_state=0;
+
+            if object.behavior=="bhvCoinFormationSpawn" && object.behavior_i32[0]!=0 {
+                object.pos[1]+=300.0;
+                object.refresh_floor(&self.collision);
+                if object.floor_height < -10000.0 || object.pos[1] < object.floor_height {
+                    object.active=false;
+                    return;
+                }
+                object.pos[1]=object.floor_height;
+            }
         }
         object.anim_state=object.anim_state.wrapping_add(1);
 
@@ -341,6 +406,67 @@ impl Sm64World {
             if m.pos[1] < gas-100.0 {m.input|=INPUT_IN_POISON_GAS as u16;}
         }
     }
+}
+
+#[derive(Clone,Copy)]
+enum CoinFormationKind {
+    LineHorizontal,
+    LineVertical,
+    RingHorizontal,
+    RingVertical,
+    Arrow,
+}
+
+fn coin_formation_kind(expr:&str)->CoinFormationKind {
+    if expr.contains("LINE_VERTICAL") {
+        CoinFormationKind::LineVertical
+    } else if expr.contains("RING_HORIZONTAL") {
+        CoinFormationKind::RingHorizontal
+    } else if expr.contains("RING_VERTICAL") {
+        CoinFormationKind::RingVertical
+    } else if expr.contains("ARROW") {
+        CoinFormationKind::Arrow
+    } else {
+        CoinFormationKind::LineHorizontal
+    }
+}
+
+fn coin_formation_offset(kind:CoinFormationKind,index:i32)->Option<([f32;3],bool)> {
+    let flying=matches!(kind,CoinFormationKind::LineVertical|CoinFormationKind::RingVertical);
+    let relative=match kind {
+        CoinFormationKind::LineHorizontal => {
+            if index>4{return None;}
+            [0.0,0.0,160.0*(index-2) as f32]
+        }
+        CoinFormationKind::LineVertical => {
+            if index>4{return None;}
+            [0.0,128.0*index as f32,0.0]
+        }
+        CoinFormationKind::RingHorizontal => {
+            let angle=((index as i16)<<13) as i16;
+            [
+                sm64_core::math::sins(angle)*300.0,
+                0.0,
+                sm64_core::math::coss(angle)*300.0,
+            ]
+        }
+        CoinFormationKind::RingVertical => {
+            let angle=((index as i16)<<13) as i16;
+            [
+                sm64_core::math::coss(angle)*200.0,
+                sm64_core::math::sins(angle)*200.0+200.0,
+                0.0,
+            ]
+        }
+        CoinFormationKind::Arrow => {
+            const POS:[[f32;2];8]=[
+                [0.0,-150.0],[0.0,-50.0],[0.0,50.0],[0.0,150.0],
+                [-50.0,100.0],[-100.0,50.0],[50.0,100.0],[100.0,50.0],
+            ];
+            [POS[index as usize][0],0.0,POS[index as usize][1]]
+        }
+    };
+    Some((relative,!flying))
 }
 
 fn hitboxes_overlap(
