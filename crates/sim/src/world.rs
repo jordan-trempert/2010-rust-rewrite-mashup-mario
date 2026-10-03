@@ -133,6 +133,30 @@ pub struct SimClipMesh {
 }
 
 impl SimClipMesh {
+    pub fn from_linear_triangles(verts: Vec<[f32; 3]>) -> Self {
+        let tri_count = verts.len() / 3;
+        let max_index = verts.len().min(u16::MAX as usize + 1);
+        let usable = max_index - (max_index % 3);
+        let verts = verts.into_iter().take(usable).collect::<Vec<_>>();
+        let tri_count = usable / 3;
+        let tri_indices = (0..usable).map(|index| index as u16).collect::<Vec<_>>();
+        let tables = clipmap_iw4::ClipMeshTables {
+            verts,
+            tri_indices,
+            tri_surface_flags: vec![0; tri_count],
+            // Empty content flags make the mesh use CONTENTS_SOLID, matching
+            // the ordinary world mesh fallback in clipmap_iw4.
+            ..Default::default()
+        };
+        Self {
+            tables: std::sync::Arc::new(tables),
+            static_models: Vec::new(),
+            smodel_grid: crate::smodel_grid::SmodelGrid::default(),
+        }
+    }
+}
+
+impl SimClipMesh {
     pub fn rebuild_smodel_grid(&mut self) {
         self.smodel_grid =
             crate::smodel_grid::SmodelGrid::build(self.static_models.iter().map(|sm| {
@@ -258,12 +282,21 @@ pub(crate) struct PredictionRemoteBody {
 }
 
 /// Immutable definitions shared by independently mutable simulations.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SimContent {
     data: SimContentBuilder,
 }
 
 impl SimContent {
+    pub fn with_clip_mesh(&self, mesh: SimClipMesh) -> Arc<SimContent> {
+        let mut data = self.data.clone();
+        data.clip_brushes.clear();
+        data.clip_bsp = SimClipBsp::default();
+        data.clip_cmodels = SimClipCmodels::default();
+        data.clip_mesh = mesh;
+        data.finish()
+    }
+
     pub fn clip_brushes(&self) -> &[SimBrush] {
         &self.data.clip_brushes
     }
@@ -286,7 +319,7 @@ pub struct WeaponSetup {
     pub attachments: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SimContentBuilder {
     script_sound_aliases: Option<std::collections::BTreeMap<String, Option<bool>>>,
     clip_brushes: Vec<SimBrush>,
