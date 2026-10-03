@@ -14,6 +14,54 @@ pub(crate) fn camera_far_inches(radius: f32) -> f32 {
     (radius * 8.0).max(CAMERA_NEAR_INCHES * 100.0)
 }
 
+pub fn place_external_camera(
+    commands: &mut Commands,
+    origin: [f32; 3],
+    angles: [f32; 3],
+) {
+    let transform = transform_from_iw_view(crate::prepare::scene::camera::WorldCameraPose {
+        origin,
+        angles,
+    });
+    let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::ZYX);
+
+    let host_id = commands
+        .spawn((
+            transform,
+            FlyCamera {
+                yaw,
+                pitch,
+                speed: 320.0,
+            },
+            audio::AmbientListener,
+            Visibility::Inherited,
+        ))
+        .id();
+
+    let lens_id = commands
+        .spawn((
+            FpvLens,
+            Camera3d {
+                depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING)
+                    .into(),
+                ..default()
+            },
+            CompositingSpace::Srgb,
+            Tonemapping::None,
+            Msaa::Off,
+            Transform::IDENTITY,
+            Projection::Perspective(PerspectiveProjection {
+                fov: horizontal_to_vertical_fov_deg(CG_FOV_DEFAULT).to_radians(),
+                near: CAMERA_NEAR_INCHES,
+                far: 200_000.0,
+                ..default()
+            }),
+        ))
+        .id();
+    commands.entity(host_id).add_child(lens_id);
+}
+
 pub fn place(
     commands: &mut Commands,
     scene: &mut WorldScene,
