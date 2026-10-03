@@ -229,6 +229,21 @@ fn launch_requested_sm64_map(
             warn!("SM64 Mario texture resolution failed: {error}");
             HashMap::new()
         });
+    let object_spawns=sm64_assets::load_level_object_spawns(&root,&level,area)
+        .unwrap_or_else(|error|{
+            warn!("SM64 object spawn load failed: {error}");
+            sm64_assets::ParsedObjectSpawns::default()
+        });
+    let behavior_lists=sm64_assets::load_behavior_object_lists(&root)
+        .unwrap_or_else(|error|{
+            warn!("SM64 behavior list load failed: {error}");
+            HashMap::new()
+        });
+    let selected_act=std::env::var("SM64_ACT")
+        .ok()
+        .and_then(|value|value.parse::<u8>().ok())
+        .filter(|value|(1..=6).contains(value))
+        .unwrap_or(1);
 
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
@@ -257,6 +272,13 @@ fn launch_requested_sm64_map(
         spawn.yaw_sm64(),
     );
     runtime.world.mario.terrain_type=area_settings.terrain_type;
+    runtime.world.clear_objects();
+    populate_sm64_objects(
+        &mut runtime.world,
+        &object_spawns,
+        &behavior_lists,
+        selected_act,
+    );
     runtime.accumulator=0.0;
     runtime.latest=Some(runtime.world.snapshot());
     enabled.0=std::env::var("SM64_ENABLED")
@@ -265,11 +287,71 @@ fn launch_requested_sm64_map(
 
     status.loaded=true;
     status.message=format!(
-        "SM64 {level} area {area}: {surface_count} collision surfaces, {special_count} special objects, {render_triangles} render triangles in {render_batches} batches, Mario at {:?}",
+        "SM64 {level} area {area} act {selected_act}: {surface_count} collision surfaces, {special_count} special collision objects, {render_triangles} render triangles in {render_batches} batches, {} runtime objects, Mario at {:?}",
+        runtime.world.objects.len(),
         spawn.pos
     );
     info!("{}",status.message);
     commands.remove_resource::<Sm64LaunchRequest>();
+}
+
+fn populate_sm64_objects(
+    world:&mut Sm64World,
+    spawns:&sm64_assets::ParsedObjectSpawns,
+    behavior_lists:&HashMap<String,String>,
+    selected_act:u8,
+) {
+    let act_bit=1u8<<(selected_act.saturating_sub(1));
+
+    for spawn in &spawns.level_objects {
+        if spawn.act_mask & act_bit == 0 {continue;}
+        let list=behavior_lists.get(&spawn.behavior)
+            .map_or(sm64_core::ObjectList::Default,|symbol|sm64_core::ObjectList::from_symbol(symbol));
+        let id=world.spawn_object(
+            spawn.model.clone(),
+            spawn.behavior.clone(),
+            list,
+            [
+                spawn.position[0] as f32,
+                spawn.position[1] as f32,
+                spawn.position[2] as f32,
+            ],
+            [
+                degrees_to_sm64_angle(spawn.angles_deg[0]),
+                degrees_to_sm64_angle(spawn.angles_deg[1]),
+                degrees_to_sm64_angle(spawn.angles_deg[2]),
+            ],
+        );
+        if let Some(object)=world.object_mut(id) {
+            object.behavior_params_expr=spawn.behavior_param_expr.clone();
+        }
+    }
+
+    for spawn in &spawns.macro_objects {
+        let Some(definition)=spawn.resolved.as_ref() else {continue;};
+        let list=behavior_lists.get(&definition.behavior)
+            .map_or(sm64_core::ObjectList::Default,|symbol|sm64_core::ObjectList::from_symbol(symbol));
+        let id=world.spawn_object(
+            definition.model.clone(),
+            definition.behavior.clone(),
+            list,
+            [
+                spawn.position[0] as f32,
+                spawn.position[1] as f32,
+                spawn.position[2] as f32,
+            ],
+            [0,degrees_to_sm64_angle(spawn.yaw_deg),0],
+        );
+        if let Some(object)=world.object_mut(id) {
+            object.behavior_params_expr=spawn.behavior_param_expr.clone()
+                .unwrap_or_else(||definition.default_behavior_param_expr.clone());
+        }
+    }
+}
+
+#[inline]
+fn degrees_to_sm64_angle(degrees:i16)->i16 {
+    (((degrees as i32)*0x10000/360) as u16) as i16
 }
 
 fn spawn_debug_scene(
