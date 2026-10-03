@@ -6,15 +6,24 @@ pub fn selected_game(
     dvars: &UiMenuDvars,
     maps: &MenuMapList,
 ) -> Result<(String, sim::HostGameModeSelection), String> {
-    let map = dvars.get("ui_mapname").ok_or("No map selected")?;
-    if !maps.contains(map) {
-        return Err(format!("Map `{map}` is not installed"));
+    let selected = dvars.get("ui_mapname").ok_or("No map selected")?;
+    if !maps.contains(selected) {
+        return Err(format!("Map `{selected}` is not installed"));
     }
     let mode = dvars
         .get("ui_gametype")
         .and_then(sim::HostGameModeSelection::from_token)
         .ok_or("Unsupported game mode")?;
-    Ok((map.to_owned(), mode))
+
+    // The selector keeps the public-facing sm64:<level> key, but matches are
+    // launched through the normal COD session loader.  The sm64cod namespace
+    // deliberately does not match Sm64LaunchRequest::from_map_key, so the
+    // frontend takes the same SessionSwapRequest/loading/HUD/player path as an
+    // IW4 map instead of entering the old standalone Mario debug scene.
+    let map = selected
+        .strip_prefix("sm64:")
+        .map_or_else(|| selected.to_owned(), |level| format!("sm64cod:{level}"));
+    Ok((map, mode))
 }
 
 pub const MATCH_CONFIG: &str = "default_xboxlive.cfg";
