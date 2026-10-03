@@ -10,6 +10,7 @@ pub struct LevelObjectSpawn {
     pub behavior_param_expr: String,
     pub behavior: String,
     pub acts_expr: Option<String>,
+    pub act_mask: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,6 +62,24 @@ pub fn load_level_object_spawns(
         level_objects:parse_level_script_objects(&script),
         macro_objects,
     })
+}
+
+pub fn parse_act_mask(expr:&str)->u8{
+    let expr=expr.trim();
+    if expr=="ALL_ACTS"{return 0x3F;}
+    let mut mask=0u8;
+    for part in expr.split('|').map(str::trim){
+        mask|=match part{
+            "ACT_1"=>1<<0,
+            "ACT_2"=>1<<1,
+            "ACT_3"=>1<<2,
+            "ACT_4"=>1<<3,
+            "ACT_5"=>1<<4,
+            "ACT_6"=>1<<5,
+            _=>0,
+        };
+    }
+    mask
 }
 
 pub fn parse_macro_preset_definitions(
@@ -121,6 +140,7 @@ pub fn parse_level_script_objects(source:&str)->Vec<LevelObjectSpawn>{
             behavior_param_expr:parts[7].trim().to_owned(),
             behavior:parts[8].trim().to_owned(),
             acts_expr:with_acts.then(||parts[9].trim().to_owned()),
+            act_mask:if with_acts { parse_act_mask(parts[9]) } else { 0x3F },
         })
     }).collect()
 }
@@ -244,6 +264,13 @@ mod tests{
         assert_eq!(parsed[0].model,"MODEL_KING_BOBOMB");
         assert_eq!(parsed[0].position,[1636,4242,-5567]);
         assert_eq!(parsed[0].behavior,"bhvKingBobomb");
+        assert_eq!(parsed[0].act_mask,1);
+    }
+
+    #[test]
+    fn parses_act_masks(){
+        assert_eq!(parse_act_mask("ACT_1 | ACT_3 | ACT_6"),0b100101);
+        assert_eq!(parse_act_mask("ALL_ACTS"),0x3F);
     }
 
     #[test]
