@@ -192,6 +192,7 @@ impl WorldSpawnJob {
 pub(crate) fn spawn_world(
     mut commands: Commands,
     load: Option<Res<assets::MapLoadProcess>>,
+    external_world: Option<Res<frame::ExternalWorldPresentation>>,
     mut scene: ResMut<WorldScene>,
     mut images: ResMut<Assets<Image>>,
     mut common_images: ResMut<super::world_images::ResidentGpuImages>,
@@ -211,6 +212,21 @@ pub(crate) fn spawn_world(
     ),
 ) {
     let (fpv, model_materials, fx_models) = prepared;
+    if external_world.is_some_and(|external| external.0) {
+        if !scene.spawned || job.phase != WorldSpawnPhase::Done {
+            // The IW4 map is only a gameplay/content donor. Its world images,
+            // materials, pipelines, lightmaps, static models and sky are never
+            // presented for an external world such as SM64, so do not spend
+            // minutes preparing thousands of proxy-map GPU assets.
+            *scene = WorldScene::default();
+            finish_world_spawn(&mut scene, &mut job, &mut commands);
+            diag::info!(
+                World,
+                "world spawn: proxy presentation skipped for external world; admission may continue"
+            );
+        }
+        return;
+    }
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
     // the same way this one does.
