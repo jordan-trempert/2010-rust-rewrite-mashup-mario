@@ -90,6 +90,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
 fn launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
     pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
     mut commands: Commands,
 ) {
     if installed.read().last().is_none() {
@@ -100,6 +101,69 @@ fn launch_installed_sm64_cod_map(
     };
     let level = pending.level.clone();
     let area = pending.area;
+
+    let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
+        diag::warn!(World, "SM64 COD map: SM64_DECOMP_ROOT is not configured");
+        return;
+    };
+
+    let parsed=match sm64_assets::load_level_collision(&root,&level,area) {
+        Ok(parsed)=>parsed,
+        Err(error)=>{
+            diag::warn!(World, "SM64 COD map: collision load failed for {level}: {error}");
+            return;
+        }
+    };
+    let spawn=match sm64_assets::load_mario_spawn(&root,&level,area) {
+        Ok(spawn)=>spawn,
+        Err(error)=>{
+            diag::warn!(World, "SM64 COD map: spawn load failed for {level}: {error}");
+            return;
+        }
+    };
+
+    if let Some(authority)=authority.as_deref_mut() {
+        let mut verts=Vec::with_capacity(parsed.world.surfaces.len()*3);
+        for surface in &parsed.world.surfaces {
+            for vertex in [surface.vertex1,surface.vertex2,surface.vertex3] {
+                // SM64 is Y-up. IW4 simulation is Z-up. Swapping Y/Z also
+                // flips handedness, which gives clipmap_iw4 the winding it
+                // expects for one-sided world triangles.
+                verts.push([
+                    vertex[0] as f32,
+                    vertex[2] as f32,
+                    vertex[1] as f32,
+                ]);
+            }
+        }
+        let mesh=sim::SimClipMesh::from_linear_triangles(verts);
+        let content=authority.0.content().with_clip_mesh(mesh);
+        authority.0.install_content(content);
+
+        let spawn_cod=[
+            spawn.pos[0] as f32,
+            spawn.pos[2] as f32,
+            spawn.pos[1] as f32 + 64.0,
+        ];
+        let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
+        let view=[0.0,90.0-sm64_yaw,0.0];
+        let mut players=Vec::new();
+        authority.0.visit_players(|id,_|players.push(id));
+        for id in players {
+            authority.0.teleport(id,spawn_cod);
+            authority.0.set_viewangles(id,view);
+        }
+        diag::info!(
+            World,
+            "SM64 COD map: installed {} collision triangles and teleported {} COD player(s) to {:?}",
+            parsed.world.surfaces.len(),
+            authority.0.player_count(),
+            spawn_cod
+        );
+    } else {
+        diag::warn!(World, "SM64 COD map: authority world unavailable while attaching {level}");
+    }
+
     commands.insert_resource(sm64_bevy::Sm64LaunchRequest::new(level.clone(), area));
     commands.insert_resource(sm64_bevy::Sm64CodActive {
         level: level.clone(),
