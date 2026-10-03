@@ -44,7 +44,11 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(RenderPlugin)
         .add_plugins(SessionPlugin)
         .add_plugins(Sm64Plugin)
-        .add_systems(Update, (launch_installed_sm64_cod_map, suppress_sm64_player_view));
+        .add_systems(Update, (
+            launch_installed_sm64_cod_map,
+            suppress_sm64_player_view,
+            clear_sm64_cod_on_return,
+        ));
 
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
@@ -85,32 +89,34 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
 
 fn launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
+    pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
     mut commands: Commands,
 ) {
-    let Some(fact) = installed.read().last() else {
-        return;
-    };
-    let Some(level) = fact.zone.strip_prefix("sm64cod:") else {
-        return;
-    };
-    if level.is_empty() {
+    if installed.read().last().is_none() {
         return;
     }
-    commands.insert_resource(sm64_bevy::Sm64LaunchRequest::new(level, 1));
-    diag::info!(World, "SM64 COD map: attaching `{level}` to installed match");
+    let Some(pending) = pending else {
+        return;
+    };
+    let level = pending.level.clone();
+    let area = pending.area;
+    commands.insert_resource(sm64_bevy::Sm64LaunchRequest::new(level.clone(), area));
+    commands.insert_resource(sm64_bevy::Sm64CodActive {
+        level: level.clone(),
+        area,
+    });
+    commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
+    diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
 }
 
 fn suppress_sm64_player_view(
     mut commands: Commands,
-    identity: Option<Res<frame::LaunchIdentity>>,
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
     mario: Query<Entity, With<sm64_bevy::Sm64MarioPresentation>>,
     cameras: Query<(Entity, &Camera), With<Camera3d>>,
     mut proxy_world: Option<ResMut<render_frontend::prepare::scene::world::WorldScene>>,
 ) {
-    let Some(identity) = identity else {
-        return;
-    };
-    if !identity.zone.starts_with("sm64cod:") {
+    if active.is_none() {
         return;
     }
 
@@ -130,6 +136,18 @@ fn suppress_sm64_player_view(
             commands.entity(entity).despawn();
         }
     }
+}
+
+fn clear_sm64_cod_on_return(
+    mut returned: MessageReader<frame::ReturnedToMenu>,
+    mut commands: Commands,
+) {
+    if returned.read().next().is_none() {
+        return;
+    }
+    commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
+    commands.remove_resource::<sm64_bevy::Sm64CodActive>();
+    commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
 }
 
 pub fn assemble_listen_app() -> App {
