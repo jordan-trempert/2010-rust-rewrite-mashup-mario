@@ -32,7 +32,6 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         RuntimeRole::Replay => NetPlugin::replay(),
     };
     if crate::bench::enabled() {
-        // Unfocused benchmarks must not inherit the window runner's 60 Hz sleep.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }
     app.add_plugins(AssetPlugin)
@@ -44,7 +43,8 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(ReplayPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(SessionPlugin)
-        .add_plugins(Sm64Plugin);
+        .add_plugins(Sm64Plugin)
+        .add_systems(Update, (launch_installed_sm64_cod_map, suppress_sm64_player_view));
 
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
@@ -73,9 +73,6 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         render_app.edit_schedule(bevy::core_pipeline::Core2d, |schedule| {
             schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
-        // macOS keeps Bevy's multi-threaded executor here: it is what runs
-        // `create_surfaces` (a `NonSendMarker` system there) on the main
-        // thread, which AppKit requires once rendering is pipelined.
         if !(cfg!(target_os = "macos") && pipelined_rendering()) {
             render_app.edit_schedule(bevy::render::Render, |schedule| {
                 schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
@@ -84,6 +81,53 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         render_app.edit_schedule(bevy::render::ExtractSchedule, |schedule| {
             schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
+    }
+}
+
+/// Once the normal IW4 session loader has installed the proxy match, attach
+/// the selected SM64 course to that live match. This intentionally happens
+/// after MatchInstalled: the loading screen, COD player, loadout, guns, HUD,
+/// scripts and game mode all come from the ordinary match lifecycle first.
+fn launch_installed_sm64_cod_map(
+    mut installed: MessageReader<frame::MatchInstalled>,
+    mut commands: Commands,
+) {
+    let Some(fact) = installed.read().last() else {
+        return;
+    };
+    let Some(level) = fact.zone.strip_prefix("sm64cod:") else {
+        return;
+    };
+    if level.is_empty() {
+        return;
+    }
+    commands.insert_resource(sm64_bevy::Sm64LaunchRequest::new(level, 1));
+    diag::info!(World, "SM64 COD map: attaching `{level}` to installed match");
+}
+
+/// The SM64 adapter still has its old standalone debug-player presentation.
+/// A COD-routed SM64 map keeps only the course/object presentation: Mario and
+/// the adapter's order-1000 follow camera are removed so the normal IW4 view,
+/// weapon viewmodel and HUD remain authoritative.
+fn suppress_sm64_player_view(
+    mut commands: Commands,
+    identity: Option<Res<frame::LaunchIdentity>>,
+    mario: Query<Entity, With<sm64_bevy::Sm64MarioPresentation>>,
+    cameras: Query<(Entity, &Camera), With<Camera3d>>,
+) {
+    let Some(identity) = identity else {
+        return;
+    };
+    if !identity.zone.starts_with("sm64cod:") {
+        return;
+    }
+    for entity in &mario {
+        commands.entity(entity).despawn();
+    }
+    for (entity, camera) in &cameras {
+        if camera.order == 1000 {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -128,15 +172,6 @@ pub fn default_plugins_with_quiet_log(mut window: WindowPlugin) -> bevy::app::Pl
 
 const PIPELINED_RENDERING_ENV: &str = "IW4L_PIPELINED_RENDERING";
 
-/// Overlap rendering with the next main frame. Extraction remains the ownership
-/// boundary; the bounded render channel permits one outstanding frame.
-/// Set IW4L_PIPELINED_RENDERING=0 for synchronous presentation.
-///
-/// On macOS AppKit only lets the main thread touch the NSView behind the Metal
-/// surface. Bevy hands `create_surfaces` back to the main thread through the
-/// multi-threaded executor, so there the `Render` schedule keeps that executor
-/// (`add_runtime_plugins`); a single-threaded one would create the surface on
-/// the render thread and panic in `raw-window-metal`.
 fn pipelined_rendering() -> bool {
     match std::env::var_os(PIPELINED_RENDERING_ENV) {
         None => true,
@@ -146,24 +181,6 @@ fn pipelined_rendering() -> bool {
 
 const FRAME_LATENCY_ENV: &str = "IW4L_FRAME_LATENCY";
 
-/// How many frames the surface is asked to let the CPU run ahead of the GPU.
-///
-/// wgpu calls this a hint and the backend is free to clamp it: on Vulkan it is
-/// bound to the number of swapchain images, so a run that asked for two did
-/// not necessarily get two, and only a measurement says which. One is the
-/// default because it is what the runtime shipped; the variable exists so the
-/// other arm needs no rebuild, and the manifest records the number that was
-/// asked for — never the number the driver granted, which this process cannot
-/// read back.
-///
-/// macOS defaults to two. With one, the pipelined render thread blocks in
-/// Metal's `acquire_texture` waiting for a free drawable, and the overlap
-/// buys nothing: `mp_boneyard` on an M4 Max measured ~165 fps either way,
-/// ~225 fps with two, and no further gain with three.
-///
-/// The value is a count, not a switch: anything unparseable or zero is the
-/// default, and says so rather than silently picking an arm. Read once, so the
-/// window and the manifest cannot disagree and the complaint is made once.
 pub(crate) fn frame_latency() -> u32 {
     const DEFAULT: u32 = if cfg!(target_os = "macos") { 2 } else { 1 };
     static FRAMES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
