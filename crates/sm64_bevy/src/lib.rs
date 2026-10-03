@@ -90,6 +90,11 @@ impl Default for Sm64LoadStatus {
 pub struct Sm64MarioPresentation;
 
 #[derive(Component, Debug, Clone, Copy)]
+struct Sm64ObjectPresentation {
+    id: sm64_core::ObjectId,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
 struct Sm64DebugWorld;
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -121,6 +126,7 @@ impl Plugin for Sm64Plugin {
                     update_debug_input.after(launch_requested_sm64_map),
                     advance_sm64_runtime.after(launch_requested_sm64_map),
                     sync_mario_presentation.after(advance_sm64_runtime),
+                    sync_object_presentations.after(advance_sm64_runtime),
                     follow_mario_camera.after(advance_sm64_runtime),
                 ),
             );
@@ -135,6 +141,7 @@ fn launch_requested_sm64_map(
         Or<(
             With<Sm64DebugWorld>,
             With<Sm64MarioPresentation>,
+            With<Sm64ObjectPresentation>,
             With<Sm64DebugCamera>,
         )>,
     >,
@@ -279,6 +286,17 @@ fn launch_requested_sm64_map(
         &behavior_lists,
         selected_act,
     );
+    if debug_view.0 {
+        spawn_simple_object_presentations(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &root,
+            &level,
+            &runtime.world.objects,
+        );
+    }
     runtime.accumulator=0.0;
     runtime.latest=Some(runtime.world.snapshot());
     enabled.0=std::env::var("SM64_ENABLED")
@@ -350,6 +368,127 @@ fn populate_sm64_objects(
 }
 
 #[inline]
+fn spawn_simple_object_presentations(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    decomp_root:&std::path::Path,
+    level:&str,
+    objects:&[sm64_core::Sm64Object],
+) {
+    let registry=match sm64_assets::load_model_registry(decomp_root,level) {
+        Ok(registry)=>registry,
+        Err(error)=>{
+            warn!("SM64 model registry load failed: {error}");
+            return;
+        }
+    };
+    let simple=[
+        "MODEL_YELLOW_COIN","MODEL_YELLOW_COIN_NO_SHADOW","MODEL_RED_COIN",
+        "MODEL_BLUE_COIN","MODEL_BLUE_COIN_NO_SHADOW","MODEL_STAR",
+        "MODEL_TRANSPARENT_STAR","MODEL_1UP","MODEL_HEART",
+    ];
+
+    let mut cache=HashMap::<String,(sm64_assets::ParsedRenderGeometry,HashMap<String,std::path::PathBuf>)>::new();
+
+    for object in objects {
+        if !simple.contains(&object.model.as_str()) {continue;}
+        let Some(sm64_assets::ModelSource::Geo{geo_symbol})=registry.get(&object.model) else {continue;};
+
+        if !cache.contains_key(&object.model) {
+            match sm64_assets::resolve_geo_model_geometry(decomp_root,geo_symbol) {
+                Ok((geometry,actor))=>{
+                    let textures=sm64_assets::load_actor_texture_sources(decomp_root,&actor)
+                        .unwrap_or_default();
+                    cache.insert(object.model.clone(),(geometry,textures));
+                }
+                Err(error)=>{
+                    warn!("SM64 object model {} ({geo_symbol}) failed: {error}",object.model);
+                    continue;
+                }
+            }
+        }
+        let Some((geometry,textures))=cache.get(&object.model) else {continue;};
+
+        let root=commands.spawn((
+            Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
+            Transform::from_xyz(object.pos[0],object.pos[1],object.pos[2]),
+            Visibility::default(),
+            Sm64ObjectPresentation{id:object.id},
+        )).id();
+
+        spawn_flat_object_geometry(
+            commands,meshes,materials,images,root,geometry,textures,
+        );
+    }
+}
+
+fn spawn_flat_object_geometry(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    parent:Entity,
+    geometry:&sm64_assets::ParsedRenderGeometry,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
+) {
+    let mut texture_cache=HashMap::<String,Handle<Image>>::new();
+    for (batch_index,batch) in geometry.batches.iter().enumerate() {
+        if batch.vertices.len()<3 {continue;}
+        let mut positions=Vec::with_capacity(batch.vertices.len());
+        let mut normals=Vec::with_capacity(batch.vertices.len());
+        let mut uvs=Vec::with_capacity(batch.vertices.len());
+        for triangle in batch.vertices.chunks_exact(3) {
+            let a=Vec3::from_array(triangle[0].position);
+            let b=Vec3::from_array(triangle[1].position);
+            let d=Vec3::from_array(triangle[2].position);
+            let n=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y).to_array();
+            for vertex in triangle {
+                positions.push(vertex.position);
+                normals.push(n);
+                let [w,h]=batch.texture_size.unwrap_or([32,32]);
+                uvs.push([
+                    vertex.texcoord[0] as f32/(32.0*w.max(1) as f32),
+                    vertex.texcoord[1] as f32/(32.0*h.max(1) as f32),
+                ]);
+            }
+        }
+        let mesh=Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD|RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+        let texture=batch.texture_symbol.as_ref().and_then(|symbol|{
+            if let Some(handle)=texture_cache.get(symbol){return Some(handle.clone());}
+            let path=texture_sources.get(symbol)?;
+            let handle=load_sm64_png(path,images).ok()?;
+            texture_cache.insert(symbol.clone(),handle.clone());
+            Some(handle)
+        });
+        commands.spawn((
+            Name::new(format!("SM64 object mesh {batch_index}")),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial{
+                base_color:Color::WHITE,
+                base_color_texture:texture,
+                unlit:true,
+                cull_mode:None,
+                alpha_mode:if batch.layer.contains("TRANSPARENT"){AlphaMode::Blend}
+                    else if batch.layer.contains("ALPHA"){AlphaMode::Mask(0.5)}
+                    else{AlphaMode::Opaque},
+                ..default()
+            })),
+            Transform::IDENTITY,
+            ChildOf(parent),
+            Sm64DebugWorld,
+        ));
+    }
+}
+
 fn degrees_to_sm64_angle(degrees:i16)->i16 {
     (((degrees as i32)*0x10000/360) as u16) as i16
 }
@@ -793,6 +932,27 @@ fn sync_mario_presentation(
         );
         let yaw=snapshot.mario.face_angle[1] as u16 as f32
             * core::f32::consts::TAU / 65536.0;
+        transform.rotation=Quat::from_rotation_y(yaw);
+    }
+}
+
+fn sync_object_presentations(
+    mut commands:Commands,
+    runtime:Res<Sm64Runtime>,
+    mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform)>,
+) {
+    let Some(snapshot)=runtime.latest.as_ref() else {return;};
+    let by_id=snapshot.objects.iter()
+        .map(|object|(object.id,object))
+        .collect::<HashMap<_,_>>();
+
+    for (entity,presentation,mut transform) in &mut query {
+        let Some(object)=by_id.get(&presentation.id) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        transform.translation=Vec3::new(object.pos[0],object.pos[1],object.pos[2]);
+        let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
         transform.rotation=Quat::from_rotation_y(yaw);
     }
 }
