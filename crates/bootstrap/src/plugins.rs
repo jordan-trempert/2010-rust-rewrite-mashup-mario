@@ -46,6 +46,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(Sm64Plugin)
         .add_systems(Update, (
             launch_installed_sm64_cod_map,
+            sync_cod_player_into_sm64,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ));
@@ -171,6 +172,33 @@ fn launch_installed_sm64_cod_map(
     });
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
+}
+
+fn sync_cod_player_into_sm64(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    authority: Option<Res<net::AuthorityWorld>>,
+    mut external: ResMut<sm64_bevy::Sm64ExternalPlayer>,
+) {
+    if active.is_none() {
+        external.active=false;
+        return;
+    }
+    let Some(authority)=authority else {
+        external.active=false;
+        return;
+    };
+    let mut first=None;
+    authority.0.visit_players(|_,player|{
+        if first.is_none() {
+            first=Some(player.origin);
+        }
+    });
+    let Some(origin)=first else {
+        external.active=false;
+        return;
+    };
+    external.sm64_pos=[origin[0],origin[2],origin[1]];
+    external.active=true;
 }
 
 fn suppress_sm64_player_view(
