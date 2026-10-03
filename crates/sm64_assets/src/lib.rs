@@ -47,6 +47,6 @@ pub use texture_sources::{load_actor_texture_sources, load_texture_sources};
 
 pub use discover::discover_levels;
 
-pub use object_spawns::{LevelObjectSpawn, MacroObjectSpawn, MacroPresetDefinition, ParsedObjectSpawns, load_level_object_spawns, parse_level_script_objects, parse_macro_objects, parse_macro_preset_definitions};
+pub use object_spawns::{LevelObjectSpawn, MacroObjectSpawn, MacroPresetDefinition, ParsedObjectSpawns, load_level_object_spawns, parse_act_mask, parse_level_script_objects, parse_macro_objects, parse_macro_preset_definitions};
 
 pub use behavior_lists::{load_behavior_object_lists, parse_behavior_object_lists};
