@@ -4,7 +4,7 @@ use frame::ClientSet;
 
 use asset_game::{LocalizeCatalog, load_mp_localized_strings};
 use asset_transport::{GamesRoot, LoadProgress, find_runtime_common_mp};
-// The Minecraft world is found and listed as a map of its own.
+// Custom worlds are found and listed as maps of their own.
 use assets::{find_zone_file, list_mp_map_packs};
 use assets::{LoadingPreviewSource, MatchLoadRequest};
 
@@ -66,7 +66,11 @@ fn resolve_zone(
             .ok()
             .and_then(|z| asset_transport::zone_game_for_path(&z.path))
     });
-    let title = asset_transport::map_load_title(&requested_lc, game);
+    let title = if requested_lc.starts_with("sm64cod:") {
+        crate::frontend::maps::map_label(&requested_lc)
+    } else {
+        asset_transport::map_load_title(&requested_lc, game)
+    };
     (zone, zone_ff, common_mp, zone_alias, title)
 }
 
@@ -183,7 +187,7 @@ pub(crate) fn restore_menu_on_return(
                 {
                     maps.0.insert(0, asset_transport::MapPack {
                         label: "SM64".into(),
-                        maps: levels.into_iter().map(|level|format!("sm64:{level}")).collect(),
+                        maps: levels.into_iter().map(|level|format!("sm64cod:{level}")).collect(),
                     });
                 }
             }
