@@ -1,7 +1,9 @@
 use crate::MenuMapList;
 
 pub fn map_label(map: &str) -> String {
-    if let Some(("sm64", stem)) = map.split_once(':') {
+    if let Some((namespace, stem)) = map.split_once(':')
+        && matches!(namespace, "sm64" | "sm64cod")
+    {
         return match stem {
             "bob" => "BOB-OMB BATTLEFIELD".into(),
             "wf" => "WHOMP'S FORTRESS".into(),
@@ -47,7 +49,7 @@ pub fn map_preview(map: &str) -> String {
             "t5:material/menu_mp_map_select_{}_big",
             stem.trim_start_matches("mp_")
         ),
-        ("sm64", _) => String::new(),
+        ("sm64", _) | ("sm64cod", _) => String::new(),
         (namespace, stem) => format!("{namespace}:material/preview_{stem}"),
     }
 }
