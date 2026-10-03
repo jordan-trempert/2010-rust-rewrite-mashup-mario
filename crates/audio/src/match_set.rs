@@ -113,6 +113,7 @@ fn queue_match_clips(
     teams: Option<Res<asset_game::SessionTeamSettings>>,
     namespace: Option<Res<SoundBankNamespace>>,
     loading: Option<Res<MapLoadProcess>>,
+    external_world: Option<Res<frame::ExternalWorldPresentation>>,
     mut prep: ResMut<MatchClipPrep>,
     mut announcer: ResMut<crate::match_voices::AnnouncerRoutes>,
     mut ready: ResMut<AudioReady>,
@@ -301,6 +302,25 @@ fn queue_match_clips(
         clips.reused_resident().0,
         clips.reused_resident().1,
     );
+
+    if external_world.is_some_and(|external| external.0) {
+        // An external world (SM64) still wants COD weapon/UI audio, but it
+        // does not need to hold the loading screen until every Rust/map clip
+        // has decoded. Requests remain queued and the workers continue filling
+        // the resident clip cache in the background.
+        if let Some(stage) = prep.stage.take() {
+            stage.cancel();
+        }
+        ready.0 = true;
+        clips.arm_match_live();
+        diag::info!(
+            Audio,
+            "audio: external world admitted with {} clips still preparing in background",
+            prep.required.len()
+        );
+        return;
+    }
+
     if prep.total == 0 {
         mark_ready(&mut ready, &mut prep, Some(&mut **clips));
     }
