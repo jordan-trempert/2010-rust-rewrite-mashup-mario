@@ -10,6 +10,7 @@ pub mod mario;
 pub mod mario_action;
 pub mod mario_step;
 pub mod object;
+pub mod object_motion;
 pub mod math;
 pub mod surface;
 pub mod submerged;
@@ -30,5 +31,5 @@ pub use surface_props::*;
 pub use ground_motion::*;
 
 pub use object::{ObjectList, Sm64Object};
-
+pub use object_motion::*;
 pub use interaction::*;
