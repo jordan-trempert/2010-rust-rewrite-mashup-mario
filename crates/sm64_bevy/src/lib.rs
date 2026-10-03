@@ -93,6 +93,12 @@ pub struct Sm64Runtime {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ControllerInput(pub Sm64Input);
 
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct Sm64ExternalPlayer {
+    pub sm64_pos: [f32;3],
+    pub active: bool,
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct Sm64LoadStatus {
     pub level: String,
@@ -145,6 +151,7 @@ impl Plugin for Sm64Plugin {
         app.init_resource::<Sm64Enabled>()
             .init_resource::<Sm64Runtime>()
             .init_resource::<Sm64ControllerInput>()
+            .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>()
             .add_systems(
@@ -1044,6 +1051,7 @@ fn advance_sm64_runtime(
     time: Res<Time>,
     enabled: Res<Sm64Enabled>,
     input: Res<Sm64ControllerInput>,
+    external: Res<Sm64ExternalPlayer>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
     if !enabled.0 { return; }
@@ -1051,7 +1059,11 @@ fn advance_sm64_runtime(
     let mut steps=0;
     while runtime.accumulator >= SM64_TICK_SECONDS && steps < 8 {
         runtime.accumulator -= SM64_TICK_SECONDS;
-        runtime.latest=Some(runtime.world.step(input.0));
+        runtime.latest=Some(if external.active {
+            runtime.world.step_external_player(external.sm64_pos)
+        } else {
+            runtime.world.step(input.0)
+        });
         steps += 1;
     }
 }
