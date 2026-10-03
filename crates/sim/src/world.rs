@@ -134,7 +134,6 @@ pub struct SimClipMesh {
 
 impl SimClipMesh {
     pub fn from_linear_triangles(verts: Vec<[f32; 3]>) -> Self {
-        let tri_count = verts.len() / 3;
         let max_index = verts.len().min(u16::MAX as usize + 1);
         let usable = max_index - (max_index % 3);
         let verts = verts.into_iter().take(usable).collect::<Vec<_>>();
