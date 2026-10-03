@@ -91,6 +91,12 @@ impl ZoneLane for Iw4Lane {
             }
         };
 
+        diag::info!(
+            World,
+            "IW4 map load: header parsed; allocating zone arenas temp={} virtual={}",
+            header.block_size[fastfile_iw4::XFILE_BLOCK_TEMP],
+            header.block_size[fastfile_iw4::XFILE_BLOCK_VIRTUAL],
+        );
         let stage = progress.begin_scoped(StageId::MapAssets, "memory", None);
         report.push(asset_transport::xfile_arena_row(
             "zone arenas map",
@@ -115,6 +121,7 @@ impl ZoneLane for Iw4Lane {
             }
         };
 
+        diag::info!(World, "IW4 map load: zone arenas ready; beginning asset walk");
         let mut sink =
             ZoneWalkSink::with_stage(progress.begin_scoped(StageId::MapAssets, "walk", None));
         let seeded_techsets = material_seed.technique_set_facts().to_vec();
@@ -128,6 +135,11 @@ impl ZoneLane for Iw4Lane {
             "map",
         ));
         let walked = load_zone(&mut stream, &mut sink);
+        diag::info!(
+            World,
+            "IW4 map load: asset walk returned after {} assets",
+            sink.walked
+        );
         let map_sound = sink
             .sound
             .take()
