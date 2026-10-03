@@ -240,7 +240,7 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
                 });
             }
             Ok(_) => {}
-            Err(error) => diag::warn!("SM64 level discovery failed: {error}"),
+            Err(error) => diag::warn!(Launch, "SM64 level discovery failed: {error}"),
         }
     }
     diag::info!(
