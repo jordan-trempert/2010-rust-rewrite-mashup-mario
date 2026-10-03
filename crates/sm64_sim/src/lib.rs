@@ -199,9 +199,11 @@ impl Sm64World {
         match action {
             0 if distance<2000.0 => {
                 let formation=coin_formation_kind(&param_expr);
+                let formation_flying=param_expr.contains("FLYING");
                 let mut children=Vec::new();
                 for coin_index in 0..8i32 {
-                    let Some((relative,on_ground))=coin_formation_offset(formation,coin_index) else {continue;};
+                    let Some((relative,mut on_ground))=coin_formation_offset(formation,coin_index) else {continue;};
+                    if formation_flying {on_ground=false;}
                     let cos=sm64_core::math::coss(parent_yaw);
                     let sin=sm64_core::math::sins(parent_yaw);
                     let world_pos=[
