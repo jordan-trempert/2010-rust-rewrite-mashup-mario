@@ -20,6 +20,12 @@ use session::SessionPlugin;
 use sm64_bevy::Sm64Plugin;
 use ui::UiPlugin;
 
+#[derive(Resource, Debug, Clone, Copy)]
+struct Sm64CodSpawnPending {
+    origin: [f32; 3],
+    view: [f32; 3],
+}
+
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -46,6 +52,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(Sm64Plugin)
         .add_systems(Update, (
             launch_installed_sm64_cod_map,
+            place_sm64_cod_player_when_ready,
             sync_cod_player_into_sm64,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
@@ -148,17 +155,19 @@ fn launch_installed_sm64_cod_map(
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
         let view=[0.0,90.0-sm64_yaw,0.0];
-        let mut players=Vec::new();
-        authority.0.visit_players(|id,_|players.push(id));
-        for id in players {
-            authority.0.teleport(id,spawn_cod);
-            authority.0.set_viewangles(id,view);
-        }
+        commands.insert_resource(Sm64CodSpawnPending {
+            origin: spawn_cod,
+            view,
+        });
+        render_frontend::prepare::scene::world_occupancy::place_external_camera(
+            &mut commands,
+            spawn_cod,
+            view,
+        );
         diag::info!(
             World,
-            "SM64 COD map: installed {} collision triangles and teleported {} COD player(s) to {:?}",
+            "SM64 COD map: installed {} collision triangles; COD spawn armed at {:?}",
             parsed.world.surfaces.len(),
-            authority.0.player_count(),
             spawn_cod
         );
     } else {
@@ -172,6 +181,39 @@ fn launch_installed_sm64_cod_map(
     });
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
+}
+
+fn place_sm64_cod_player_when_ready(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    pending: Option<Res<Sm64CodSpawnPending>>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+    mut commands: Commands,
+) {
+    if active.is_none() {
+        commands.remove_resource::<Sm64CodSpawnPending>();
+        return;
+    }
+    let (Some(pending), Some(authority)) = (pending, authority.as_deref_mut()) else {
+        return;
+    };
+
+    let mut players=Vec::new();
+    authority.0.visit_players(|id,_|players.push(id));
+    if players.is_empty() {
+        return;
+    }
+
+    for id in players {
+        authority.0.teleport(id,pending.origin);
+        authority.0.set_viewangles(id,pending.view);
+    }
+    diag::info!(
+        World,
+        "SM64 COD map: placed {} COD player(s) at {:?}",
+        authority.0.player_count(),
+        pending.origin
+    );
+    commands.remove_resource::<Sm64CodSpawnPending>();
 }
 
 fn sync_cod_player_into_sm64(
@@ -230,6 +272,7 @@ fn clear_sm64_cod_on_return(
     }
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     commands.remove_resource::<sm64_bevy::Sm64CodActive>();
+    commands.remove_resource::<Sm64CodSpawnPending>();
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
 }
