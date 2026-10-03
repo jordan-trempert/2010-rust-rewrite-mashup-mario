@@ -113,11 +113,14 @@ fn queue_match_clips(
     teams: Option<Res<asset_game::SessionTeamSettings>>,
     namespace: Option<Res<SoundBankNamespace>>,
     loading: Option<Res<MapLoadProcess>>,
-    external_world: Option<Res<frame::ExternalWorldPresentation>>,
     mut prep: ResMut<MatchClipPrep>,
     mut announcer: ResMut<crate::match_voices::AnnouncerRoutes>,
     mut ready: ResMut<AudioReady>,
-    (silent, failed): (Option<Res<AudioSilent>>, Option<Res<crate::ambient::SoundBankFailed>>),
+    (silent, failed, external_world): (
+        Option<Res<AudioSilent>>,
+        Option<Res<crate::ambient::SoundBankFailed>>,
+        Option<Res<frame::ExternalWorldPresentation>>,
+    ),
 ) {
     if ready.0 || prep.submitted {
         return;
