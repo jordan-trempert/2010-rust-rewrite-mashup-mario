@@ -159,14 +159,6 @@ fn launch_installed_sm64_cod_map(
             origin: spawn_cod,
             view,
         });
-        // Same camera host shape as a normal IW4 world. It provides the
-        // pre-spawn/class-select background; once the local player becomes
-        // Alive, session::local_arm enables SimCamera and COD takes control.
-        render_frontend::prepare::scene::world_occupancy::place_external_camera(
-            &mut commands,
-            spawn_cod,
-            view,
-        );
         diag::info!(
             World,
             "SM64 COD map: installed {} collision triangles; COD spawn armed at {:?}",
@@ -182,11 +174,6 @@ fn launch_installed_sm64_cod_map(
         level: level.clone(),
         area,
     });
-    // This map is presented by sm64_bevy rather than render_frontend's
-    // WorldScene. Admission must still treat it as a fully presented COD
-    // world so class select, HUD, input, weapons, and the normal local-player
-    // handoff can run.
-    commands.insert_resource(frame::ExternalWorldPresentation(true));
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
 }
