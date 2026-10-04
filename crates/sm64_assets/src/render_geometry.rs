@@ -137,7 +137,37 @@ pub fn load_level_render_geometry(
             &mut recursion,
         )?;
     }
+    coalesce_opaque_batches(&mut output);
     Ok(output)
+}
+
+fn coalesce_opaque_batches(output: &mut ParsedRenderGeometry) {
+    let batches = std::mem::take(&mut output.batches);
+    let mut merged = Vec::<RenderBatch>::with_capacity(batches.len());
+    let mut by_key =
+        HashMap::<(String, Option<String>, Option<[u32; 2]>, Option<String>), usize>::new();
+
+    for batch in batches {
+        // Preserve ordering for blended geometry; opaque and alpha-tested
+        // batches can be safely grouped by render state.
+        if batch.layer.contains("TRANSPARENT") {
+            merged.push(batch);
+            continue;
+        }
+        let key = (
+            batch.layer.clone(),
+            batch.texture_symbol.clone(),
+            batch.texture_size,
+            batch.light_symbol.clone(),
+        );
+        if let Some(&index) = by_key.get(&key) {
+            merged[index].vertices.extend(batch.vertices);
+        } else {
+            by_key.insert(key, merged.len());
+            merged.push(batch);
+        }
+    }
+    output.batches = merged;
 }
 
 
