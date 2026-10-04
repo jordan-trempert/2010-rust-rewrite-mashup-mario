@@ -513,7 +513,7 @@ fn spawn_runtime_object_presentations(
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
             Transform {
                 translation:sm64_render_vec3(object.pos),
-                rotation:Quat::IDENTITY,
+                rotation:sm64_object_rotation(object.face_angle),
                 scale:Vec3::from_array(object.scale),
             },
             Visibility::default(),
@@ -866,6 +866,16 @@ fn sm64_render_rotation(degrees:[f32;3])->Quat {
         -Vec3::Y,
     );
     Quat::from_mat3(&(basis * Mat3::from_quat(old) * basis.transpose()))
+}
+
+#[inline]
+fn sm64_object_rotation(angle:[i16;3])->Quat {
+    let to_deg=|value:i16| value as u16 as f32*360.0/65536.0;
+    sm64_render_rotation([
+        to_deg(angle[0]),
+        to_deg(angle[1]),
+        to_deg(angle[2]),
+    ])
 }
 
 fn spawn_display_list_geometry(
@@ -1434,8 +1444,7 @@ fn sync_object_presentations(
         };
         presented.insert(presentation.id);
         transform.translation=sm64_render_vec3(object.pos);
-        let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
-        transform.rotation=Quat::from_rotation_z(yaw);
+        transform.rotation=sm64_object_rotation(object.face_angle);
         transform.scale=Vec3::from_array(object.scale);
     }
 
