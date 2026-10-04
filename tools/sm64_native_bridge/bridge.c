@@ -330,7 +330,7 @@ static int bridge_main(int argc, char **argv) {
         &gfx_dummy_wm_api,
         &gfx_dummy_renderer_api,
         "IW4L SM64 Gameplay Bridge",
-        false
+        0
     );
     audio_init();
     sound_init();
