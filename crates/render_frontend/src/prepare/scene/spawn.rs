@@ -222,6 +222,20 @@ pub(crate) fn spawn_world(
         .map(|process| process.progress.clone());
     let paced = progress.is_some();
     if job.phase == WorldSpawnPhase::Gpu {
+        let fpv_done = fpv.settled_for(&tess.catalog)
+            && model_materials.settled_for(&tess.catalog);
+
+        if external_world {
+            if fpv_done {
+                finish_world_spawn(&mut scene, &mut job, &mut commands);
+                diag::info!(
+                    World,
+                    "world spawn: external donor FPV/model preparation ready; admission may continue"
+                );
+            }
+            return;
+        }
+
         if !paced {
             finish_world_spawn(&mut scene, &mut job, &mut commands);
             return;
@@ -230,7 +244,6 @@ pub(crate) fn spawn_world(
         let spawn = job.spawn;
         let gpu_ready = gpu.as_deref();
         let gpu_done = super::world_gpu::poll(&mut job.gpu_wait, spawn, gpu_ready, gap_ms);
-        let fpv_done = fpv.settled_for(&tess.catalog) && model_materials.settled_for(&tess.catalog);
         if gpu_done && !fpv_done {
             diag::info!(
                 World,
@@ -739,11 +752,18 @@ pub(crate) fn spawn_world(
         }
 
         if external_world {
-            // Custom worlds need COD's admitted materials, image registry,
-            // FPV models, HUD and scripts, but not the donor map's BSP tess,
-            // static-model scene, lightmaps or GPU pipeline warm-up. Create
-            // the ordinary FlyCamera/FpvLens host directly and declare the
-            // donor presentation ready here.
+            // FPV preparation requires the same model-lighting atlas resource
+            // as a normal COD world, even though the donor BSP itself will not
+            // be drawn.
+            if let Some(dims)=lighting_iw4::model_lighting_atlas_dims(
+                super::world::SMODEL_LIGHTING_MAX_CLIENT_VIEWS,
+            ) {
+                let atlas=render_scene::WorldModelLightingAtlas::new(&mut images,dims);
+                scene.model_lighting_image=Some(atlas.image.clone());
+                scene.model_lighting_dims=Some(atlas.dims);
+                commands.insert_resource(atlas);
+            }
+
             if let Some(view) = scene.intermission_view {
                 super::world_occupancy::place_external_camera(
                     &mut commands,
@@ -757,10 +777,14 @@ pub(crate) fn spawn_world(
                     [0.0, 0.0, 0.0],
                 );
             }
-            finish_world_spawn(&mut scene, &mut job, &mut commands);
+
+            // Do not finish the world yet. prepare_fpv_compositions and
+            // prepare_model_materials run after this system; the Gpu phase
+            // above will admit the world as soon as those are settled.
+            job.phase=WorldSpawnPhase::Gpu;
             diag::info!(
                 World,
-                "world spawn: external donor prepared through materials/images; skipped IW4 world tess and GPU warm-up"
+                "world spawn: external donor materials/images ready; waiting for FPV/model preparation"
             );
             return;
         }
