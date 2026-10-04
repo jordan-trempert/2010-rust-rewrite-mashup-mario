@@ -536,6 +536,11 @@ fn spawn_runtime_object_presentations(
                                 decomp_root,&model.actor_name
                             ).unwrap_or_default();
                             if textures.is_empty() {
+                                textures=sm64_assets::load_level_object_texture_sources(
+                                    decomp_root,level,&model.actor_name
+                                ).unwrap_or_default();
+                            }
+                            if textures.is_empty() {
                                 textures=sm64_assets::load_texture_sources(
                                     decomp_root,level
                                 ).unwrap_or_default();
