@@ -37,6 +37,7 @@ render_frontend.workspace = true
 sim.workspace = true
 sm64_bevy.workspace = true
 sm64_assets.workspace = true
+sm64_sim.workspace = true
 net.workspace = true
 ui.workspace = true
 replay.workspace = true
