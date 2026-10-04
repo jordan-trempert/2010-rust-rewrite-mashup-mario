@@ -63,9 +63,25 @@ impl fmt::Display for NativeBridgeError {
 impl std::error::Error for NativeBridgeError {}
 
 pub fn native_root(asset_root: impl AsRef<Path>) -> PathBuf {
-    env::var_os("SM64_NATIVE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| asset_root.as_ref().to_path_buf())
+    if let Some(path)=env::var_os("SM64_NATIVE_ROOT") {
+        return PathBuf::from(path);
+    }
+
+    let asset_root=asset_root.as_ref();
+    if asset_root.join("src").join("pc").join("pc_main.c").is_file() {
+        return asset_root.to_path_buf();
+    }
+
+    if let Some(parent)=asset_root.parent() {
+        for name in ["sm64-port","sm64_port","sm64-port-master"] {
+            let candidate=parent.join(name);
+            if candidate.join("src").join("pc").join("pc_main.c").is_file() {
+                return candidate;
+            }
+        }
+    }
+
+    asset_root.to_path_buf()
 }
 
 pub fn default_bridge_path(asset_root: impl AsRef<Path>) -> PathBuf {
