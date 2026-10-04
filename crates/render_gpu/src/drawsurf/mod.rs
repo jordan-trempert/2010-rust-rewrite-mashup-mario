@@ -66,7 +66,7 @@ pub use geometry_diagnostic::{ExtractedDiagnosticGeometry, geometry_diagnostic_e
 pub use gpu_resources::*;
 pub use minecraft_world::{
     MINECRAFT_VERTEX_BYTES, MinecraftAtlasImage, MinecraftClouds, MinecraftSectionUpload,
-    MinecraftWorldFrame,
+    MinecraftWorldFrame, set_external_hides_map,
 };
 pub use model_lighting_tiles::{ModelLightingTileUpload, ModelLightingTileUploads};
 pub use postfx::{ExtractedBlood, ExtractedFilm, ExtractedPostFx};
