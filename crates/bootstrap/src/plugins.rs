@@ -20,6 +20,12 @@ use session::SessionPlugin;
 use sm64_bevy::Sm64Plugin;
 use ui::UiPlugin;
 
+#[derive(Resource, Debug, Default, Clone)]
+struct Sm64CodCollisionState {
+    static_vertices: Vec<[f32;3]>,
+    last_dynamic_tick: u32,
+}
+
 #[derive(Resource, Debug, Clone, Copy)]
 struct Sm64CodSpawn {
     origin: [f32; 3],
@@ -49,6 +55,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }
     app.init_resource::<Sm64CodNativeState>();
+    app.init_resource::<Sm64CodCollisionState>();
     app.add_plugins(AssetPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(ConsolePlugin)
@@ -64,6 +71,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
             apply_sm64_native_player_output,
+            apply_sm64_dynamic_collision,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ).chain());
@@ -109,6 +117,7 @@ fn launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
     pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
+    mut collision_state: ResMut<Sm64CodCollisionState>,
     mut commands: Commands,
 ) {
     if installed.read().last().is_none() {
@@ -155,6 +164,8 @@ fn launch_installed_sm64_cod_map(
                 ]);
             }
         }
+        collision_state.static_vertices=verts.clone();
+        collision_state.last_dynamic_tick=0;
         let mesh=sim::SimClipMesh::from_linear_triangles(verts);
         let content=authority.0.content().with_clip_mesh(mesh);
         authority.0.install_content(content);
@@ -326,6 +337,41 @@ fn sync_cod_player_into_sm64(
     external.active=true;
 }
 
+fn apply_sm64_dynamic_collision(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    dynamic: Res<sm64_bevy::Sm64NativeDynamicCollision>,
+    mut collision_state: ResMut<Sm64CodCollisionState>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+) {
+    if active.is_none() {
+        return;
+    }
+    if dynamic.tick==0 || dynamic.tick==collision_state.last_dynamic_tick {
+        return;
+    }
+    let Some(authority)=authority.as_deref_mut() else {return;};
+
+    let s=sm64_core::SM64_TO_IW4_SCALE;
+    let mut verts=collision_state.static_vertices.clone();
+    verts.reserve(dynamic.triangles.len()*3);
+
+    for tri in &dynamic.triangles {
+        // Same handedness/winding conversion used by the static course mesh.
+        for vertex in [tri[0],tri[2],tri[1]] {
+            verts.push([
+                vertex[0]*s,
+                -vertex[2]*s,
+                vertex[1]*s,
+            ]);
+        }
+    }
+
+    let mesh=sim::SimClipMesh::from_linear_triangles(verts);
+    let content=authority.0.content().with_clip_mesh(mesh);
+    authority.0.install_content(content);
+    collision_state.last_dynamic_tick=dynamic.tick;
+}
+
 fn apply_sm64_native_player_output(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
@@ -446,6 +492,7 @@ fn clear_sm64_cod_on_return(
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     commands.remove_resource::<sm64_bevy::Sm64CodActive>();
     commands.remove_resource::<Sm64CodSpawn>();
+    commands.insert_resource(Sm64CodCollisionState::default());
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
 }
