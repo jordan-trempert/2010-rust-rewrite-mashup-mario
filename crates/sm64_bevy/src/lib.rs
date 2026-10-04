@@ -119,6 +119,8 @@ pub struct Sm64ExternalPlayer {
     pub sm64_vel: [f32;3],
     /// SM64 binary-angle yaw used by object behaviors that face/track Mario.
     pub sm64_yaw: i16,
+    pub sm64_pitch: i16,
+    pub attack_flags: u32,
     pub health: i32,
     pub active: bool,
 }
@@ -1255,8 +1257,9 @@ fn advance_sm64_runtime(
                 pos:external.sm64_pos,
                 vel:external.sm64_vel,
                 yaw:external.sm64_yaw,
+                pitch:external.sm64_pitch,
                 health:external.health,
-                attack_flags:0,
+                attack_flags:external.attack_flags,
             }) {
                 Ok(snapshot)=>{
                     native_output.active=true;
