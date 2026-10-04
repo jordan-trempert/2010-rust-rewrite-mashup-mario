@@ -61,6 +61,7 @@ pub fn update_admission(
 
 pub fn drive_class_select_screen(
     mut screen: ResMut<AppScreen>,
+    mut ui_draw: ResMut<frame::UiDraw>,
     mut loading: Option<ResMut<LoadingScreen>>,
     mut load: Option<ResMut<assets::MapLoadProcess>>,
     signon: Res<SignonState>,
@@ -106,6 +107,10 @@ pub fn drive_class_select_screen(
         loading.finish();
     }
     if matches!(*screen, AppScreen::Loading | AppScreen::MainMenu) {
+        // Class select and the in-match HUD are both normal COD UI. Menu
+        // transitions can leave UiDraw disabled, so explicitly re-enable it
+        // when admission hands control to cgame.
+        ui_draw.0 = true;
         *screen = AppScreen::ClassSelect;
     }
 }
