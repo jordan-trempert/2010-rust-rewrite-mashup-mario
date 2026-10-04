@@ -148,6 +148,12 @@ fn launch_installed_sm64_cod_map(
         let content=authority.0.content().with_clip_mesh(mesh);
         authority.0.install_content(content);
 
+        // with_clip_mesh intentionally removes the donor BSP brushes. The
+        // imported SM64 triangle mesh is already complete at this point, so
+        // the mp_rust preparation hold must not keep authority/admission
+        // frozen waiting on donor collision that is no longer in use.
+        commands.insert_resource(net::AuthorityLoadHold(false));
+
         let spawn_cod=[
             spawn.pos[0] as f32,
             spawn.pos[2] as f32,
