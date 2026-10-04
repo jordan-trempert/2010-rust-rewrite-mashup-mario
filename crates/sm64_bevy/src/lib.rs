@@ -304,7 +304,7 @@ fn launch_requested_sm64_map(
     let render_triangles=render_geometry.as_ref().map_or(0,|g|g.triangle_count);
     let render_batches=render_geometry.as_ref().map_or(0,|g|g.batches.len());
 
-    if debug_view.0 {
+    if debug_view.0 || cod_active.is_some() {
         spawn_debug_scene(
             &mut commands,
             &mut meshes,
@@ -317,7 +317,7 @@ fn launch_requested_sm64_map(
             mario_geometry.as_ref(),
             &mario_texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
-            cod_active.is_none(),
+            debug_view.0 && cod_active.is_none(),
         );
     }
 
@@ -335,7 +335,7 @@ fn launch_requested_sm64_map(
         &behavior_lists,
         selected_act,
     );
-    if debug_view.0 {
+    if debug_view.0 || cod_active.is_some() {
         spawn_runtime_object_presentations(
             &mut commands,
             &mut meshes,
