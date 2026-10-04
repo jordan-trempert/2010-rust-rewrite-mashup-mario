@@ -45,9 +45,18 @@ if (Test-Path $armipsSource) {
         }
     }
 }
-$backup = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
+$backup = Join-Path $root "pc_main.iw4l-backup.txt"
 $builtExe = Join-Path $build "sm64.us.exe"
 $output = Join-Path $build "iw4l-sm64-bridge.exe"
+$staleBackupSource = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
+$staleBackupObject = Join-Path $build "src\pc\pc_main.iw4l-backup.o"
+
+# Older versions of this script created the backup inside src/pc with a .c
+# extension. sm64-port recursively globs src/pc/*.c, so that backup was
+# compiled and linked alongside the bridge, causing duplicate WinMain and
+# global symbol definitions. Remove both stale artifacts before this build.
+Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
+Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 
 Write-Host "Building native SM64 gameplay bridge from $root"
 Copy-Item $pcMain $backup -Force
