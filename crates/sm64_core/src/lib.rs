@@ -19,6 +19,10 @@ pub mod surface_props;
 mod trig_tables;
 pub mod types;
 
+/// World-space conversion used by the COD mashup.
+/// SM64 authored units are larger than IW4 player/world units.
+pub const SM64_TO_IW4_SCALE: f32 = 0.4;
+
 pub use action::*;
 pub use mario::MarioState;
 pub use math::{Vec3f, Vec3s};
