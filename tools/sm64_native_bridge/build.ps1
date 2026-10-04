@@ -93,6 +93,30 @@ try {
     if (-not (Test-Path $builtExe)) {
         throw "Expected bridge executable was not produced at $builtExe"
     }
+
+    # Windows locks a running executable. A previous launcher run can leave
+    # iw4l-sm64-bridge.exe alive if the game or bridge terminated abnormally.
+    # Stop only the bridge helper before replacing it; never touch the game.
+    Get-Process -Name "iw4l-sm64-bridge" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    while ((Test-Path $output) -and ([DateTime]::UtcNow -lt $deadline)) {
+        try {
+            $stream = [System.IO.File]::Open(
+                $output,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+            $stream.Dispose()
+            break
+        }
+        catch {
+            Start-Sleep -Milliseconds 100
+        }
+    }
+
     Copy-Item $builtExe $output -Force
 
     Write-Host ""
