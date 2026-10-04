@@ -25,6 +25,7 @@
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
 #include "engine/level_script.h"
+#include "engine/surface_load.h"
 
 #define REQUEST_MAGIC 0x31514D53u /* SMQ1 */
 #define SNAPSHOT_MAGIC 0x31534D53u /* SMS1 */
@@ -248,14 +249,55 @@ static uint32_t collect_objects(const struct Object **objects, uint32_t capacity
     return count;
 }
 
+static uint32_t collect_dynamic_surfaces(
+    const struct Surface **out,
+    uint32_t capacity
+) {
+    const struct Surface *seen[8192];
+    uint32_t seen_count = 0;
+    int z, x, partition;
+
+    for (z = 0; z < NUM_CELLS; ++z) {
+        for (x = 0; x < NUM_CELLS; ++x) {
+            for (partition = 0; partition < 3; ++partition) {
+                struct SurfaceNode *node =
+                    gDynamicSurfacePartition[z][x][partition].next;
+                while (node != NULL) {
+                    const struct Surface *surface = node->surface;
+                    uint32_t i;
+                    int duplicate = 0;
+                    for (i = 0; i < seen_count; ++i) {
+                        if (seen[i] == surface) {
+                            duplicate = 1;
+                            break;
+                        }
+                    }
+                    if (!duplicate && seen_count < capacity) {
+                        seen[seen_count++] = surface;
+                    }
+                    node = node->next;
+                }
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < seen_count; ++i) {
+        out[i] = seen[i];
+    }
+    return seen_count;
+}
+
 static void write_snapshot(void) {
     const struct Object *objects[4096];
+    const struct Surface *dynamic_surfaces[8192];
     uint32_t count = collect_objects(objects, 4096);
+    uint32_t dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
     uint32_t i;
 
     write_u32(SNAPSHOT_MAGIC);
     write_u32(gGlobalTimer);
     write_u32(count);
+    write_u32(dynamic_count);
     write_i32(gMarioState != NULL ? gMarioState->health : 0);
     write_i32(gMarioState != NULL ? gMarioState->numCoins : 0);
     write_u32(gMarioState != NULL ? gMarioState->action : 0);
@@ -289,6 +331,20 @@ static void write_snapshot(void) {
         write_u32((uint32_t)object->oInteractStatus);
         write_i32((int32_t)object->oDamageOrCoinValue);
     }
+
+    for (i = 0; i < dynamic_count; ++i) {
+        const struct Surface *surface = dynamic_surfaces[i];
+        write_f32((float)surface->vertex1[0]);
+        write_f32((float)surface->vertex1[1]);
+        write_f32((float)surface->vertex1[2]);
+        write_f32((float)surface->vertex2[0]);
+        write_f32((float)surface->vertex2[1]);
+        write_f32((float)surface->vertex2[2]);
+        write_f32((float)surface->vertex3[0]);
+        write_f32((float)surface->vertex3[1]);
+        write_f32((float)surface->vertex3[2]);
+    }
+
     fflush(stdout);
 }
 
