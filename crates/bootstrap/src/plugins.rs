@@ -133,10 +133,13 @@ fn launch_installed_sm64_cod_map(
     if let Some(authority)=authority.as_deref_mut() {
         let mut verts=Vec::with_capacity(parsed.world.surfaces.len()*3);
         for surface in &parsed.world.surfaces {
-            // SM64 is Y-up and IW4 is Z-up. The Y/Z swap changes handedness,
-            // so reverse v2/v3 as well; otherwise walkable SM64 floors become
-            // back-facing triangles and a falling COD capsule passes through.
-            for vertex in [surface.vertex1,surface.vertex3,surface.vertex2] {
+            // SM64 is Y-up and IW4 is Z-up. Swapping Y/Z flips handedness.
+            // Keep the source triangle order here: clipmap_iw4's mesh tracer
+            // intentionally derives its collision normal with the opposite
+            // cross-product order, so the handedness flip and tracer winding
+            // cancel out. Reversing v2/v3 makes floors face downward and a
+            // falling COD capsule will pass straight through them.
+            for vertex in [surface.vertex1,surface.vertex2,surface.vertex3] {
                 verts.push([
                     vertex[0] as f32,
                     vertex[2] as f32,
