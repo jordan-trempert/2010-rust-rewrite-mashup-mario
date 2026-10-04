@@ -133,16 +133,13 @@ fn launch_installed_sm64_cod_map(
     if let Some(authority)=authority.as_deref_mut() {
         let mut verts=Vec::with_capacity(parsed.world.surfaces.len()*3);
         for surface in &parsed.world.surfaces {
-            // SM64 is Y-up and IW4 is Z-up. Swapping Y/Z flips handedness.
-            // Keep the source triangle order here: clipmap_iw4's mesh tracer
-            // intentionally derives its collision normal with the opposite
-            // cross-product order, so the handedness flip and tracer winding
-            // cancel out. Reversing v2/v3 makes floors face downward and a
-            // falling COD capsule will pass straight through them.
-            for vertex in [surface.vertex1,surface.vertex2,surface.vertex3] {
+            // Proper rotation: SM64 (X,Y-up,Z) -> IW4 (X,-Z,Y-up).
+            // clipmap_iw4 uses the opposite triangle cross-product convention,
+            // so reverse v2/v3 here to keep SM64 floor normals facing upward.
+            for vertex in [surface.vertex1,surface.vertex3,surface.vertex2] {
                 verts.push([
                     vertex[0] as f32,
-                    vertex[2] as f32,
+                    -(vertex[2] as f32),
                     vertex[1] as f32,
                 ]);
             }
@@ -167,11 +164,11 @@ fn launch_installed_sm64_cod_map(
         const SM64_COD_SPAWN_CLEARANCE: f32 = 256.0;
         let spawn_cod=[
             spawn.pos[0] as f32,
-            spawn.pos[2] as f32,
+            -(spawn.pos[2] as f32),
             floor_y + SM64_COD_SPAWN_CLEARANCE,
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
-        let view=[0.0,90.0-sm64_yaw,0.0];
+        let view=[0.0,sm64_yaw-90.0,0.0];
 
         // Validate the exact collision backend COD movement will use before
         // admitting the player. This is a swept standing-player capsule from
@@ -279,14 +276,14 @@ fn sync_cod_player_into_sm64(
         external.active=false;
         return;
     };
-    external.sm64_pos=[origin[0],origin[2],origin[1]];
+    external.sm64_pos=[origin[0],origin[2],-origin[1]];
     // IW4 velocities are units/second; SM64 stores velocity per 30 Hz tick.
     external.sm64_vel=[
         velocity[0]/sm64_sim::SM64_TICK_HZ as f32,
         velocity[2]/sm64_sim::SM64_TICK_HZ as f32,
-        velocity[1]/sm64_sim::SM64_TICK_HZ as f32,
+        -velocity[1]/sm64_sim::SM64_TICK_HZ as f32,
     ];
-    let sm64_yaw_degrees=90.0-viewangles[1];
+    let sm64_yaw_degrees=viewangles[1]+90.0;
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
     external.health=health;
     external.active=true;
