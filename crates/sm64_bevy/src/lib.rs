@@ -433,26 +433,21 @@ fn spawn_runtime_object_presentations(
             return;
         }
     };
-    let mut cache=HashMap::<String,(sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)>::new();
+    let mut geo_cache=HashMap::<
+        String,
+        (sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)
+    >::new();
+    let mut dl_cache=HashMap::<
+        String,
+        (sm64_assets::ParsedRenderGeometry,HashMap<String,std::path::PathBuf>)
+    >::new();
 
     for object in objects {
         if object.model=="MODEL_NONE" {continue;}
-        let Some(sm64_assets::ModelSource::Geo{geo_symbol})=registry.get(&object.model) else {continue;};
-
-        if !cache.contains_key(&object.model) {
-            match sm64_assets::resolve_geo_model_parts(decomp_root,geo_symbol) {
-                Ok(model)=>{
-                    let textures=sm64_assets::load_actor_texture_sources(decomp_root,&model.actor_name)
-                        .unwrap_or_default();
-                    cache.insert(object.model.clone(),(model,textures));
-                }
-                Err(error)=>{
-                    warn!("SM64 object model {} ({geo_symbol}) failed: {error}",object.model);
-                    continue;
-                }
-            }
-        }
-        let Some((model,textures))=cache.get(&object.model) else {continue;};
+        let Some(source)=registry.get(&object.model) else {
+            warn!("SM64 object model {} is not registered",object.model);
+            continue;
+        };
 
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
@@ -461,12 +456,57 @@ fn spawn_runtime_object_presentations(
             Sm64ObjectPresentation{id:object.id},
         )).id();
 
-        spawn_hierarchical_object_geometry(
-            commands,meshes,materials,images,root,model,textures,
-        );
+        match source {
+            sm64_assets::ModelSource::Geo{geo_symbol}=>{
+                if !geo_cache.contains_key(&object.model) {
+                    match sm64_assets::resolve_geo_model_parts(decomp_root,geo_symbol) {
+                        Ok(model)=>{
+                            let textures=sm64_assets::load_actor_texture_sources(
+                                decomp_root,&model.actor_name
+                            ).unwrap_or_default();
+                            geo_cache.insert(object.model.clone(),(model,textures));
+                        }
+                        Err(error)=>{
+                            warn!(
+                                "SM64 object model {} ({geo_symbol}) failed: {error}",
+                                object.model
+                            );
+                            commands.entity(root).despawn();
+                            continue;
+                        }
+                    }
+                }
+                let Some((model,textures))=geo_cache.get(&object.model) else {continue;};
+                spawn_hierarchical_object_geometry(
+                    commands,meshes,materials,images,root,model,textures,
+                );
+            }
+            sm64_assets::ModelSource::DisplayList{display_list,layer}=>{
+                if !dl_cache.contains_key(&object.model) {
+                    match sm64_assets::resolve_display_list_model_geometry(
+                        decomp_root,level,display_list,layer,
+                    ) {
+                        Ok(resolved)=>{
+                            dl_cache.insert(object.model.clone(),resolved);
+                        }
+                        Err(error)=>{
+                            warn!(
+                                "SM64 display-list model {} ({display_list}) failed: {error}",
+                                object.model
+                            );
+                            commands.entity(root).despawn();
+                            continue;
+                        }
+                    }
+                }
+                let Some((geometry,textures))=dl_cache.get(&object.model) else {continue;};
+                spawn_flat_object_geometry(
+                    commands,meshes,materials,images,root,geometry,textures,
+                );
+            }
+        }
     }
 }
-
 fn spawn_hierarchical_object_geometry(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
@@ -535,6 +575,71 @@ fn spawn_hierarchical_object_geometry(
             Sm64DebugWorld,
         ));
       }
+    }
+}
+
+fn spawn_flat_object_geometry(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    parent:Entity,
+    geometry:&sm64_assets::ParsedRenderGeometry,
+    texture_sources:&HashMap<String,std::path::PathBuf>,
+) {
+    let mut texture_cache=HashMap::<String,Handle<Image>>::new();
+    for (batch_index,batch) in geometry.batches.iter().enumerate() {
+        if batch.vertices.len()<3 {continue;}
+        let mut positions=Vec::with_capacity(batch.vertices.len());
+        let mut normals=Vec::with_capacity(batch.vertices.len());
+        let mut uvs=Vec::with_capacity(batch.vertices.len());
+        for triangle in batch.vertices.chunks_exact(3) {
+            let a=sm64_render_vec3(triangle[0].position);
+            let b=sm64_render_vec3(triangle[1].position);
+            let d=sm64_render_vec3(triangle[2].position);
+            let n=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Z).to_array();
+            for vertex in triangle {
+                positions.push(sm64_render_pos(vertex.position));
+                normals.push(n);
+                let [w,h]=batch.texture_size.unwrap_or([32,32]);
+                uvs.push([
+                    vertex.texcoord[0] as f32/(32.0*w.max(1) as f32),
+                    vertex.texcoord[1] as f32/(32.0*h.max(1) as f32),
+                ]);
+            }
+        }
+        let mesh=Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD|RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+        let texture=batch.texture_symbol.as_ref().and_then(|symbol|{
+            if let Some(handle)=texture_cache.get(symbol){return Some(handle.clone());}
+            let path=texture_sources.get(symbol)?;
+            let handle=load_sm64_png(path,images).ok()?;
+            texture_cache.insert(symbol.clone(),handle.clone());
+            Some(handle)
+        });
+
+        commands.spawn((
+            Name::new(format!("SM64 flat object mesh {batch_index}")),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial{
+                base_color:Color::WHITE,
+                base_color_texture:texture,
+                unlit:true,
+                alpha_mode:if batch.layer.contains("TRANSPARENT"){AlphaMode::Blend}
+                    else if batch.layer.contains("ALPHA"){AlphaMode::Mask(0.5)}
+                    else{AlphaMode::Opaque},
+                ..default()
+            })),
+            Transform::IDENTITY,
+            ChildOf(parent),
+            Sm64DebugWorld,
+        ));
     }
 }
 
