@@ -520,24 +520,58 @@ fn spawn_runtime_object_presentations(
                         decomp_root,level,geo_symbol
                     ) {
                         Ok(model)=>{
-                            let textures=sm64_assets::load_actor_texture_sources(
+                            let mut textures=sm64_assets::load_actor_texture_sources(
                                 decomp_root,&model.actor_name
                             ).unwrap_or_default();
+                            if textures.is_empty() {
+                                textures=sm64_assets::load_texture_sources(
+                                    decomp_root,level
+                                ).unwrap_or_default();
+                            }
                             geo_cache.insert(object.model.clone(),(model,textures));
                         }
-                        Err(error)=>{
-                            warn!(
-                                "SM64 object model {} ({geo_symbol}) failed: {error}",
-                                object.model
-                            );
-                            continue;
+                        Err(hierarchy_error)=>{
+                            // Some generated decomp GeoLayouts are simple
+                            // enough for the direct display-list resolver even
+                            // when hierarchy parsing fails. Use that before
+                            // dropping the model entirely (notably stars).
+                            match sm64_assets::resolve_geo_model_geometry(
+                                decomp_root,geo_symbol
+                            ) {
+                                Ok((geometry,actor_name))=>{
+                                    let mut textures=sm64_assets::load_actor_texture_sources(
+                                        decomp_root,&actor_name
+                                    ).unwrap_or_default();
+                                    if textures.is_empty() {
+                                        textures=sm64_assets::load_texture_sources(
+                                            decomp_root,level
+                                        ).unwrap_or_default();
+                                    }
+                                    dl_cache.insert(
+                                        object.model.clone(),
+                                        (geometry,textures),
+                                    );
+                                }
+                                Err(flat_error)=>{
+                                    warn!(
+                                        "SM64 object model {} ({geo_symbol}) failed: {hierarchy_error}; flat fallback: {flat_error}",
+                                        object.model
+                                    );
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
-                let Some((model,textures))=geo_cache.get(&object.model) else {continue;};
-                spawn_hierarchical_object_geometry(
-                    commands,meshes,materials,images,root,model,textures,
-                );
+                if let Some((model,textures))=geo_cache.get(&object.model) {
+                    spawn_hierarchical_object_geometry(
+                        commands,meshes,materials,images,root,model,textures,
+                    );
+                } else if let Some((geometry,textures))=dl_cache.get(&object.model) {
+                    spawn_flat_object_geometry(
+                        commands,meshes,materials,images,root,geometry,textures,
+                    );
+                }
             }
             sm64_assets::ModelSource::DisplayList{display_list,layer}=>{
                 if !dl_cache.contains_key(&object.model) {
