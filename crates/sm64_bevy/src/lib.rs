@@ -755,7 +755,7 @@ fn sm64_render_rotation(degrees:[f32;3])->Quat {
         Vec3::Z,
         -Vec3::Y,
     );
-    Quat::from_mat3(&(basis * Mat3::from_quat(old) * basis))
+    Quat::from_mat3(&(basis * Mat3::from_quat(old) * basis.transpose()))
 }
 
 fn spawn_display_list_geometry(
