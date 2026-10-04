@@ -147,10 +147,11 @@ fn launch_installed_sm64_cod_map(
             // clipmap_iw4 uses the opposite triangle cross-product convention,
             // so reverse v2/v3 here to keep SM64 floor normals facing upward.
             for vertex in [surface.vertex1,surface.vertex3,surface.vertex2] {
+                let s=sm64_core::SM64_TO_IW4_SCALE;
                 verts.push([
-                    vertex[0] as f32,
-                    -(vertex[2] as f32),
-                    vertex[1] as f32,
+                    vertex[0] as f32*s,
+                    -(vertex[2] as f32)*s,
+                    vertex[1] as f32*s,
                 ]);
             }
         }
@@ -171,11 +172,12 @@ fn launch_installed_sm64_cod_map(
         // Start well above the detected SM64 floor. This gives COD's
         // capsule several frames to settle onto the imported collision and
         // makes a bad floor/collision transform obvious in the log.
-        const SM64_COD_SPAWN_CLEARANCE: f32 = 256.0;
+        const SM64_COD_SPAWN_CLEARANCE: f32 = 128.0;
+        let s=sm64_core::SM64_TO_IW4_SCALE;
         let spawn_cod=[
-            spawn.pos[0] as f32,
-            -(spawn.pos[2] as f32),
-            floor_y + SM64_COD_SPAWN_CLEARANCE,
+            spawn.pos[0] as f32*s,
+            -(spawn.pos[2] as f32)*s,
+            floor_y*s + SM64_COD_SPAWN_CLEARANCE,
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
         let view=[0.0,sm64_yaw-90.0,0.0];
@@ -186,7 +188,7 @@ fn launch_installed_sm64_cod_map(
         let probe_end=[
             spawn_cod[0],
             spawn_cod[1],
-            floor_y - 128.0,
+            floor_y*sm64_core::SM64_TO_IW4_SCALE - 96.0,
         ];
         let probe=authority.0.trace_world(
             spawn_cod,
@@ -295,12 +297,17 @@ fn sync_cod_player_into_sm64(
         bridge_state.last_weapon_shot_count=None;
         return;
     };
-    external.sm64_pos=[origin[0],origin[2],-origin[1]];
+    let inv_scale=1.0/sm64_core::SM64_TO_IW4_SCALE;
+    external.sm64_pos=[
+        origin[0]*inv_scale,
+        origin[2]*inv_scale,
+        -origin[1]*inv_scale,
+    ];
     // IW4 velocities are units/second; SM64 stores velocity per 30 Hz tick.
     external.sm64_vel=[
-        velocity[0]/sm64_sim::SM64_TICK_HZ as f32,
-        velocity[2]/sm64_sim::SM64_TICK_HZ as f32,
-        -velocity[1]/sm64_sim::SM64_TICK_HZ as f32,
+        velocity[0]*inv_scale/sm64_sim::SM64_TICK_HZ as f32,
+        velocity[2]*inv_scale/sm64_sim::SM64_TICK_HZ as f32,
+        -velocity[1]*inv_scale/sm64_sim::SM64_TICK_HZ as f32,
     ];
     let sm64_yaw_degrees=viewangles[1]+90.0;
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
@@ -377,15 +384,16 @@ fn apply_sm64_native_player_output(
 
     authority.0.set_external_motion(id,owns_motion);
     if owns_motion {
+        let s=sm64_core::SM64_TO_IW4_SCALE;
         let origin=[
-            output.sm64_pos[0],
-            -output.sm64_pos[2],
-            output.sm64_pos[1],
+            output.sm64_pos[0]*s,
+            -output.sm64_pos[2]*s,
+            output.sm64_pos[1]*s,
         ];
         let velocity=[
-            output.sm64_vel[0]*sm64_sim::SM64_TICK_HZ as f32,
-            -output.sm64_vel[2]*sm64_sim::SM64_TICK_HZ as f32,
-            output.sm64_vel[1]*sm64_sim::SM64_TICK_HZ as f32,
+            output.sm64_vel[0]*s*sm64_sim::SM64_TICK_HZ as f32,
+            -output.sm64_vel[2]*s*sm64_sim::SM64_TICK_HZ as f32,
+            output.sm64_vel[1]*s*sm64_sim::SM64_TICK_HZ as f32,
         ];
         authority.0.set_origin(id,origin);
         authority.0.set_velocity(id,velocity);
