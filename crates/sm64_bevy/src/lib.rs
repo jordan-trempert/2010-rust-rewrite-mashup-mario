@@ -171,6 +171,7 @@ impl Plugin for Sm64Plugin {
 fn launch_requested_sm64_map(
     mut commands: Commands,
     request: Option<Res<Sm64LaunchRequest>>,
+    cod_active: Option<Res<Sm64CodActive>>,
     existing: Query<
         Entity,
         Or<(
@@ -311,6 +312,7 @@ fn launch_requested_sm64_map(
             mario_geometry.as_ref(),
             &mario_texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
+            cod_active.is_none(),
         );
     }
 
@@ -521,12 +523,7 @@ fn spawn_hierarchical_object_geometry(
             })),
             Transform {
                 translation:sm64_render_vec3(part.spec.translation),
-                rotation:Quat::from_euler(
-                    EulerRot::XYZ,
-                    part.spec.rotation_deg[0].to_radians(),
-                    part.spec.rotation_deg[1].to_radians(),
-                    part.spec.rotation_deg[2].to_radians(),
-                ),
+                rotation:sm64_render_rotation(part.spec.rotation_deg),
                 scale:Vec3::splat(part.spec.scale),
             },
             ChildOf(parent),
@@ -552,6 +549,7 @@ fn spawn_debug_scene(
     mario_geometry:Option<&sm64_assets::ParsedRenderGeometry>,
     mario_texture_sources:&HashMap<String,std::path::PathBuf>,
     mario_spawn:[f32;3],
+    spawn_debug_player:bool,
 ) {
     if let Some(geometry)=render_geometry.filter(|geometry|geometry.triangle_count>0) {
         spawn_display_list_geometry(
@@ -566,61 +564,63 @@ fn spawn_debug_scene(
         spawn_collision_fallback(commands,meshes,materials,world);
     }
 
-    let mario_root=commands.spawn((
-        Name::new("SM64 Mario"),
-        Transform::from_xyz(mario_spawn[0],mario_spawn[1],mario_spawn[2]),
-        Visibility::default(),
-        Sm64MarioPresentation,
-    )).id();
-
-    if let Some(model)=mario_hierarchy.filter(|model|!model.parts.is_empty()) {
-        spawn_mario_hierarchy(
-            commands,
-            meshes,
-            materials,
-            images,
-            mario_root,
-            model,
-            mario_texture_sources,
-        );
-    } else if let Some(geometry)=mario_geometry.filter(|geometry|geometry.triangle_count>0) {
-        spawn_mario_geometry(
-            commands,
-            meshes,
-            materials,
-            images,
-            mario_root,
-            geometry,
-            mario_texture_sources,
-        );
-    } else {
+    if spawn_debug_player {
+        let mario_root=commands.spawn((
+            Name::new("SM64 Mario"),
+            Transform::from_xyz(mario_spawn[0],mario_spawn[1],mario_spawn[2]),
+            Visibility::default(),
+            Sm64MarioPresentation,
+        )).id();
+    
+        if let Some(model)=mario_hierarchy.filter(|model|!model.parts.is_empty()) {
+            spawn_mario_hierarchy(
+                commands,
+                meshes,
+                materials,
+                images,
+                mario_root,
+                model,
+                mario_texture_sources,
+            );
+        } else if let Some(geometry)=mario_geometry.filter(|geometry|geometry.triangle_count>0) {
+            spawn_mario_geometry(
+                commands,
+                meshes,
+                materials,
+                images,
+                mario_root,
+                geometry,
+                mario_texture_sources,
+            );
+        } else {
+            commands.spawn((
+                Name::new("SM64 Mario fallback"),
+                Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color:Color::srgb(0.9,0.12,0.08),
+                    unlit:true,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0,80.0,0.0),
+                ChildOf(mario_root),
+                Sm64DebugWorld,
+            ));
+        }
+    
+        let target=Vec3::new(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]);
+        let camera_pos=target+Vec3::new(0.0,650.0,1200.0);
         commands.spawn((
-            Name::new("SM64 Mario fallback"),
-            Mesh3d(meshes.add(Cuboid::new(80.0,160.0,80.0))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color:Color::srgb(0.9,0.12,0.08),
-                unlit:true,
+            Name::new("SM64 debug camera"),
+            Camera3d::default(),
+            Camera {
+                order:1000,
+                clear_color:ClearColorConfig::Custom(Color::srgb(0.08,0.12,0.2)),
                 ..default()
-            })),
-            Transform::from_xyz(0.0,80.0,0.0),
-            ChildOf(mario_root),
-            Sm64DebugWorld,
+            },
+            Transform::from_translation(camera_pos).looking_at(target,Vec3::Y),
+            Sm64DebugCamera,
         ));
     }
-
-    let target=Vec3::new(mario_spawn[0],mario_spawn[1]+80.0,mario_spawn[2]);
-    let camera_pos=target+Vec3::new(0.0,650.0,1200.0);
-    commands.spawn((
-        Name::new("SM64 debug camera"),
-        Camera3d::default(),
-        Camera {
-            order:1000,
-            clear_color:ClearColorConfig::Custom(Color::srgb(0.08,0.12,0.2)),
-            ..default()
-        },
-        Transform::from_translation(camera_pos).looking_at(target,Vec3::Y),
-        Sm64DebugCamera,
-    ));
 }
 
 #[inline]
@@ -631,6 +631,21 @@ fn sm64_render_pos(v:[f32;3])->[f32;3] {
 #[inline]
 fn sm64_render_vec3(v:[f32;3])->Vec3 {
     Vec3::new(v[0],v[2],v[1])
+}
+
+fn sm64_render_rotation(degrees:[f32;3])->Quat {
+    let old=Quat::from_euler(
+        EulerRot::XYZ,
+        degrees[0].to_radians(),
+        degrees[1].to_radians(),
+        degrees[2].to_radians(),
+    );
+    let basis=Mat3::from_cols(
+        Vec3::X,
+        Vec3::Z,
+        Vec3::Y,
+    );
+    Quat::from_mat3(&(basis * Mat3::from_quat(old) * basis))
 }
 
 fn spawn_display_list_geometry(
