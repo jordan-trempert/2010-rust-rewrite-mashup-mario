@@ -85,6 +85,7 @@ struct Request {
     float pos[3];
     float vel[3];
     int16_t yaw;
+    int16_t pitch;
     int32_t health;
     uint32_t attack_flags;
 };
@@ -157,14 +158,13 @@ static void write_f32(float value) { fwrite(&value, sizeof(value), 1, stdout); }
 
 static int read_request(struct Request *request) {
     uint32_t magic;
-    uint16_t reserved;
     int i;
     if (!read_u32(&magic) || magic != REQUEST_MAGIC || !read_u32(&request->op)) {
         return 0;
     }
     for (i = 0; i < 3; ++i) if (!read_f32(&request->pos[i])) return 0;
     for (i = 0; i < 3; ++i) if (!read_f32(&request->vel[i])) return 0;
-    if (!read_i16(&request->yaw) || !read_u16(&reserved)) return 0;
+    if (!read_i16(&request->yaw) || !read_i16(&request->pitch)) return 0;
     if (!read_i32(&request->health) || !read_u32(&request->attack_flags)) return 0;
     return 1;
 }
@@ -181,6 +181,7 @@ static void apply_proxy(const struct Request *request) {
     gMarioState->vel[1] = request->vel[1];
     gMarioState->vel[2] = request->vel[2];
     gMarioState->faceAngle[1] = request->yaw;
+    gMarioState->faceAngle[0] = request->pitch;
     gMarioState->input = 0;
 
     gMarioObject->oPosX = request->pos[0];
@@ -193,13 +194,30 @@ static void apply_proxy(const struct Request *request) {
     gMarioObject->header.gfx.pos[2] = request->pos[2];
 
     if (gPlayer1Controller != NULL) {
-        gPlayer1Controller->buttonDown = 0;
-        gPlayer1Controller->buttonPressed = 0;
+        u16 buttons = 0;
+
+        /* Primary fire becomes the cannon's A press only while Mario's hidden
+           proxy is actually in the cannon action. It must not turn ordinary
+           COD gunfire into Mario jumps. */
+        if (gMarioState->action == ACT_IN_CANNON && (request->attack_flags & 1u)) {
+            buttons |= A_BUTTON;
+        }
+
+        gPlayer1Controller->buttonDown = buttons;
+        gPlayer1Controller->buttonPressed = buttons;
         gPlayer1Controller->rawStickX = 0;
         gPlayer1Controller->rawStickY = 0;
         gPlayer1Controller->stickX = 0.0f;
         gPlayer1Controller->stickY = 0.0f;
         gPlayer1Controller->stickMag = 0.0f;
+    }
+
+    if (gMarioState->action == ACT_IN_CANNON && gMarioState->usedObj != NULL) {
+        s32 inputYaw = (s16)(request->yaw - gMarioState->usedObj->oMoveAngleYaw);
+        if (inputYaw > 0x4000) inputYaw = 0x4000;
+        if (inputYaw < -0x4000) inputYaw = -0x4000;
+        gMarioObject->oMarioCannonInputYaw = inputYaw;
+        gMarioState->faceAngle[0] = request->pitch;
     }
 }
 
