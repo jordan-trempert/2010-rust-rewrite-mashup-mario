@@ -341,8 +341,20 @@ fn launch_requested_sm64_map(
                 );
             }
             Err(error)=>{
+                let allow_partial=std::env::var("SM64_ALLOW_PARTIAL_FALLBACK")
+                    .is_ok_and(|value|value=="1" || value.eq_ignore_ascii_case("true"));
+                if !allow_partial {
+                    enabled.0=false;
+                    status.loaded=false;
+                    status.message=format!(
+                        "SM64 COD map requires the native decomp gameplay bridge: {error}. Build tools/sm64_native_bridge/build.ps1 against sm64-port (or set SM64_NATIVE_BRIDGE)."
+                    );
+                    error!("{}",status.message);
+                    commands.remove_resource::<Sm64LaunchRequest>();
+                    return;
+                }
                 warn!(
-                    "SM64 COD map: native gameplay bridge unavailable ({error}); falling back to partial Rust behavior port. Build tools/sm64_native_bridge/build.ps1 against sm64-port and set SM64_NATIVE_ROOT."
+                    "SM64 COD map: native gameplay bridge unavailable ({error}); SM64_ALLOW_PARTIAL_FALLBACK is enabled, so only the incomplete Rust behavior subset will run."
                 );
             }
         }
