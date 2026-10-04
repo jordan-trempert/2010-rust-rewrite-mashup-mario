@@ -386,6 +386,8 @@ static int bridge_main(int argc, char **argv) {
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
+extern int __argc;
+extern char **__argv;
 int WINAPI WinMain(
     UNUSED HINSTANCE hInstance,
     UNUSED HINSTANCE hPrevInstance,
