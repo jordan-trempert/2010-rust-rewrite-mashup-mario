@@ -21,7 +21,7 @@ use sm64_bevy::Sm64Plugin;
 use ui::UiPlugin;
 
 #[derive(Resource, Debug, Clone, Copy)]
-struct Sm64CodSpawnPending {
+struct Sm64CodSpawn {
     origin: [f32; 3],
     view: [f32; 3],
 }
@@ -52,7 +52,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(Sm64Plugin)
         .add_systems(Update, (
             launch_installed_sm64_cod_map,
-            place_sm64_cod_player_when_ready,
+            place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
@@ -154,14 +154,18 @@ fn launch_installed_sm64_cod_map(
         // frozen waiting on donor collision that is no longer in use.
         commands.insert_resource(net::AuthorityLoadHold(false));
 
+        let floor_y=parsed.world
+            .find_floor(spawn.pos[0] as f32, 30_000.0, spawn.pos[2] as f32)
+            .map(|hit|hit.height)
+            .unwrap_or(spawn.pos[1] as f32);
         let spawn_cod=[
             spawn.pos[0] as f32,
             spawn.pos[2] as f32,
-            spawn.pos[1] as f32 + 64.0,
+            floor_y + 72.0,
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
         let view=[0.0,90.0-sm64_yaw,0.0];
-        commands.insert_resource(Sm64CodSpawnPending {
+        commands.insert_resource(Sm64CodSpawn {
             origin: spawn_cod,
             view,
         });
@@ -184,39 +188,31 @@ fn launch_installed_sm64_cod_map(
     diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
 }
 
-fn place_sm64_cod_player_when_ready(
+fn place_sm64_cod_player_on_life_started(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
-    pending: Option<Res<Sm64CodSpawnPending>>,
+    spawn: Option<Res<Sm64CodSpawn>>,
+    mut lives: MessageReader<frame::LifeStarted>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
-    mut commands: Commands,
 ) {
     if active.is_none() {
-        commands.remove_resource::<Sm64CodSpawnPending>();
         return;
     }
-    let (Some(pending), Some(authority)) = (pending, authority.as_deref_mut()) else {
+    let (Some(spawn),Some(authority))=(spawn,authority.as_deref_mut()) else {
         return;
     };
-
-    let mut players=Vec::new();
-    authority.0.visit_players(|id,_|players.push(id));
-    if players.is_empty() {
-        return;
+    for life in lives.read() {
+        let id=sim::ClientId(life.client);
+        authority.0.teleport(id,spawn.origin);
+        authority.0.set_viewangles(id,spawn.view);
+        diag::info!(
+            World,
+            "SM64 COD map: life {} client {} spawned at {:?}",
+            life.life,
+            life.client,
+            spawn.origin
+        );
     }
-
-    for id in players {
-        authority.0.teleport(id,pending.origin);
-        authority.0.set_viewangles(id,pending.view);
-    }
-    diag::info!(
-        World,
-        "SM64 COD map: placed {} COD player(s) at {:?}",
-        authority.0.player_count(),
-        pending.origin
-    );
-    commands.remove_resource::<Sm64CodSpawnPending>();
 }
-
 fn sync_cod_player_into_sm64(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     authority: Option<Res<net::AuthorityWorld>>,
@@ -273,7 +269,7 @@ fn clear_sm64_cod_on_return(
     }
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     commands.remove_resource::<sm64_bevy::Sm64CodActive>();
-    commands.remove_resource::<Sm64CodSpawnPending>();
+    commands.remove_resource::<Sm64CodSpawn>();
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
 }
