@@ -384,7 +384,7 @@ fn launch_requested_sm64_map(
         &behavior_lists,
         selected_act,
     );
-    if debug_view.0 || cod_active.is_some() {
+    if (debug_view.0 || cod_active.is_some()) && !native.active {
         spawn_runtime_object_presentations(
             &mut commands,
             &mut meshes,
@@ -1387,8 +1387,13 @@ fn sync_object_presentations(
     // silently made those objects invisible, so materialize any newly observed
     // simulation object here.
     let (Some(root),level)=(status.source_root.as_ref(),status.level.as_str()) else {return;};
-    for object in &snapshot.objects {
-        if presented.contains(&object.id) || object.model=="MODEL_NONE" {continue;}
+    let missing=snapshot.objects.iter()
+        .filter(|object|!presented.contains(&object.id) && object.model!="MODEL_NONE")
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        // Resolve the model registry and geometry caches once for the whole
+        // native snapshot instead of reparsing the decomp once per object.
         spawn_runtime_object_presentations(
             &mut commands,
             &mut meshes,
@@ -1396,7 +1401,7 @@ fn sync_object_presentations(
             &mut images,
             root,
             level,
-            std::slice::from_ref(object),
+            &missing,
         );
     }
 }
