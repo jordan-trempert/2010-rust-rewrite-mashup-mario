@@ -30,6 +30,21 @@ if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
 $buildRel = "build/us_bridge"
 $build = Join-Path $root "build\us_bridge"
 $bridgeSource = Join-Path $PSScriptRoot "bridge.c"
+$armipsSource = Join-Path $root "tools\armips.cpp"
+if (Test-Path $armipsSource) {
+    $armipsText = Get-Content $armipsSource -Raw
+    if ($armipsText -notmatch '#include\s+<cstdint>') {
+        $needle = '#include <clocale>'
+        if ($armipsText.Contains($needle)) {
+            $armipsText = $armipsText.Replace(
+                $needle,
+                $needle + [Environment]::NewLine + "#include <cstdint>"
+            )
+            Set-Content -Path $armipsSource -Value $armipsText -Encoding UTF8
+            Write-Host "Patched tools/armips.cpp for modern GCC (<cstdint>)."
+        }
+    }
+}
 $backup = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
 $builtExe = Join-Path $build "sm64.us.exe"
 $output = Join-Path $build "iw4l-sm64-bridge.exe"
@@ -41,6 +56,11 @@ Copy-Item $bridgeSource $pcMain -Force
 try {
     Push-Location $root
     try {
+        & make -C tools -j1
+        if ($LASTEXITCODE -ne 0) {
+            throw "sm64-port host tools build failed with exit code $LASTEXITCODE"
+        }
+
         $makeArgs = @(
             "BUILD_DIR=$buildRel",
             "ENABLE_DX11=0",
