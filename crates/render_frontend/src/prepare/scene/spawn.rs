@@ -212,21 +212,7 @@ pub(crate) fn spawn_world(
     ),
 ) {
     let (fpv, model_materials, fx_models) = prepared;
-    if external_world.is_some_and(|external| external.0) {
-        if !scene.spawned || job.phase != WorldSpawnPhase::Done {
-            // The IW4 map is only a gameplay/content donor. Its world images,
-            // materials, pipelines, lightmaps, static models and sky are never
-            // presented for an external world such as SM64, so do not spend
-            // minutes preparing thousands of proxy-map GPU assets.
-            *scene = WorldScene::default();
-            finish_world_spawn(&mut scene, &mut job, &mut commands);
-            diag::info!(
-                World,
-                "world spawn: proxy presentation skipped for external world; admission may continue"
-            );
-        }
-        return;
-    }
+    let external_world = external_world.is_some_and(|external| external.0);
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
     // the same way this one does.
@@ -750,6 +736,33 @@ pub(crate) fn spawn_world(
                 }),
                 None => host.0.glass = fx::FxGlassSystemHost::default(),
             }
+        }
+
+        if external_world {
+            // Custom worlds need COD's admitted materials, image registry,
+            // FPV models, HUD and scripts, but not the donor map's BSP tess,
+            // static-model scene, lightmaps or GPU pipeline warm-up. Create
+            // the ordinary FlyCamera/FpvLens host directly and declare the
+            // donor presentation ready here.
+            if let Some(view) = scene.intermission_view {
+                super::world_occupancy::place_external_camera(
+                    &mut commands,
+                    view.origin,
+                    view.angles,
+                );
+            } else {
+                super::world_occupancy::place_external_camera(
+                    &mut commands,
+                    [scene.center.x, scene.center.y, scene.center.z + 64.0],
+                    [0.0, 0.0, 0.0],
+                );
+            }
+            finish_world_spawn(&mut scene, &mut job, &mut commands);
+            diag::info!(
+                World,
+                "world spawn: external donor prepared through materials/images; skipped IW4 world tess and GPU warm-up"
+            );
+            return;
         }
 
         job.phase = WorldSpawnPhase::WorldTess;
