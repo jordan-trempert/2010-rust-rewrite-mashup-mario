@@ -45,7 +45,10 @@ pub fn load_level_collision(
     load_collision_file(collision_path(decomp_root, level, area))
 }
 
-pub use texture_sources::{load_actor_texture_sources, load_texture_sources};
+pub use texture_sources::{
+    load_actor_texture_sources, load_level_object_texture_sources,
+    load_texture_sources,
+};
 
 pub use discover::discover_levels;
 
