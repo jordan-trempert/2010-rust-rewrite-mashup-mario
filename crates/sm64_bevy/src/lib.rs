@@ -102,6 +102,17 @@ struct Sm64NativeRuntime {
 
 
 #[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct Sm64NativePlayerOutput {
+    pub active: bool,
+    pub sm64_pos: [f32;3],
+    pub sm64_vel: [f32;3],
+    pub sm64_yaw: i16,
+    pub action: u32,
+    pub health: i32,
+    pub coins: i32,
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
     /// SM64-coordinate velocity in units per original 30 Hz tick.
@@ -165,6 +176,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64Runtime>()
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
+            .init_resource::<Sm64NativePlayerOutput>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>();
         app.insert_non_send_resource(Sm64NativeRuntime::default());
@@ -1226,6 +1238,7 @@ fn advance_sm64_runtime(
     input: Res<Sm64ControllerInput>,
     external: Res<Sm64ExternalPlayer>,
     mut native: NonSendMut<Sm64NativeRuntime>,
+    mut native_output: ResMut<Sm64NativePlayerOutput>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
     if !enabled.0 { return; }
@@ -1246,6 +1259,13 @@ fn advance_sm64_runtime(
                 attack_flags:0,
             }) {
                 Ok(snapshot)=>{
+                    native_output.active=true;
+                    native_output.sm64_pos=snapshot.mario_pos;
+                    native_output.sm64_vel=snapshot.mario_vel;
+                    native_output.sm64_yaw=snapshot.mario_yaw;
+                    native_output.action=snapshot.mario_action;
+                    native_output.health=snapshot.mario_health;
+                    native_output.coins=snapshot.coins;
                     runtime.latest=Some(native_snapshot_to_sm64(
                         snapshot,
                         &runtime.world.mario,
@@ -1256,9 +1276,11 @@ fn advance_sm64_runtime(
                     error!("SM64 native gameplay bridge failed: {error}");
                     native.client=None;
                     native.active=false;
+                    native_output.active=false;
                 }
             }
         } else {
+            native_output.active=false;
             runtime.latest=Some(if external.active {
                 runtime.world.step_external_player(
                     external.sm64_pos,
@@ -1283,6 +1305,9 @@ fn native_snapshot_to_sm64(
     mario.health=native.mario_health.clamp(i16::MIN as i32,i16::MAX as i32) as i16;
     mario.num_coins=native.coins.clamp(i16::MIN as i32,i16::MAX as i32) as i16;
     mario.action=native.mario_action;
+    mario.pos=native.mario_pos;
+    mario.vel=native.mario_vel;
+    mario.face_angle[1]=native.mario_yaw;
 
     let objects=native.objects.into_iter().map(|source|{
         let model=model_symbols.get(&source.model_id)
