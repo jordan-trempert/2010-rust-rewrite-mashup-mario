@@ -29,6 +29,10 @@ pub struct NativeObject {
     pub face_angle: [i16; 3],
     pub scale: [f32; 3],
     pub active_flags: u16,
+    pub render_flags: u16,
+    pub anim_id: i16,
+    pub anim_frame: i16,
+    pub anim_state: i32,
     pub interact_status: u32,
     pub damage_or_coin_value: i32,
 }
@@ -229,6 +233,10 @@ impl NativeClient {
                 *value = read_f32(&mut self.stdout)?;
             }
             let active_flags = read_u16(&mut self.stdout)?;
+            let render_flags = read_u16(&mut self.stdout)?;
+            let anim_id = read_i16(&mut self.stdout)?;
+            let anim_frame = read_i16(&mut self.stdout)?;
+            let anim_state = read_i32(&mut self.stdout)?;
             let interact_status = read_u32(&mut self.stdout)?;
             let damage_or_coin_value = read_i32(&mut self.stdout)?;
             objects.push(NativeObject {
@@ -238,6 +246,10 @@ impl NativeClient {
                 face_angle,
                 scale,
                 active_flags,
+                render_flags,
+                anim_id,
+                anim_frame,
+                anim_state,
                 interact_status,
                 damage_or_coin_value,
             });
