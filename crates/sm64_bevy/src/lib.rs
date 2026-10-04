@@ -1222,24 +1222,47 @@ fn sync_mario_presentation(
 fn sync_object_presentations(
     mut commands:Commands,
     runtime:Res<Sm64Runtime>,
+    status:Res<Sm64LoadStatus>,
+    mut meshes:ResMut<Assets<Mesh>>,
+    mut materials:ResMut<Assets<StandardMaterial>>,
+    mut images:ResMut<Assets<Image>>,
     mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform)>,
 ) {
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
     let by_id=snapshot.objects.iter()
         .map(|object|(object.id,object))
         .collect::<HashMap<_,_>>();
+    let mut presented=std::collections::HashSet::new();
 
     for (entity,presentation,mut transform) in &mut query {
         let Some(object)=by_id.get(&presentation.id) else {
             commands.entity(entity).despawn();
             continue;
         };
+        presented.insert(presentation.id);
         transform.translation=sm64_render_vec3(object.pos);
         let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
         transform.rotation=Quat::from_rotation_z(yaw);
     }
-}
 
+    // Native SM64 behaviors create objects at runtime (coin formations,
+    // particles, stars, enemy children, etc.). Initial-load-only presentation
+    // silently made those objects invisible, so materialize any newly observed
+    // simulation object here.
+    let (Some(root),level)=(status.source_root.as_ref(),status.level.as_str()) else {return;};
+    for object in &snapshot.objects {
+        if presented.contains(&object.id) || object.model=="MODEL_NONE" {continue;}
+        spawn_runtime_object_presentations(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            root,
+            level,
+            std::slice::from_ref(object),
+        );
+    }
+}
 fn follow_mario_camera(
     runtime:Res<Sm64Runtime>,
     mut query:Query<&mut Transform,With<Sm64DebugCamera>>,
