@@ -9,6 +9,7 @@ description = "Bevy presentation and scheduling adapter for the SM64 simulation.
 bevy.workspace = true
 sm64_core.workspace = true
 sm64_assets.workspace = true
+sm64_native.workspace = true
 sm64_sim.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 
