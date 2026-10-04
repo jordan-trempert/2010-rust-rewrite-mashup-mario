@@ -328,6 +328,10 @@ static void write_snapshot(void) {
         write_f32(object->header.gfx.scale[1]);
         write_f32(object->header.gfx.scale[2]);
         write_u16((uint16_t)object->activeFlags);
+        write_u16((uint16_t)object->header.gfx.node.flags);
+        write_i16(object->header.gfx.animInfo.animID);
+        write_i16(object->header.gfx.animInfo.animFrame);
+        write_i32((int32_t)object->oAnimState);
         write_u32((uint32_t)object->oInteractStatus);
         write_i32((int32_t)object->oDamageOrCoinValue);
     }
