@@ -433,7 +433,7 @@ pub fn authority_should_tick(
     hold: Option<Res<AuthorityLoadHold>>,
 ) -> bool {
     role.runs_authority()
-        && world.is_some_and(|world| world.0.clip_brush_count() > 0)
+        && world.is_some_and(|world| world.0.has_world_clip())
         && !hold.is_some_and(|h| h.0)
 }
 
