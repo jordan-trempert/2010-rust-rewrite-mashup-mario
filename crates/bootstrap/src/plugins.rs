@@ -159,11 +159,6 @@ fn launch_installed_sm64_cod_map(
             origin: spawn_cod,
             view,
         });
-        render_frontend::prepare::scene::world_occupancy::place_external_camera(
-            &mut commands,
-            spawn_cod,
-            view,
-        );
         diag::info!(
             World,
             "SM64 COD map: installed {} collision triangles; COD spawn armed at {:?}",
