@@ -36,6 +36,7 @@ render_gpu.workspace = true
 render_frontend.workspace = true
 sim.workspace = true
 sm64_bevy.workspace = true
+sm64_core.workspace = true
 sm64_assets.workspace = true
 sm64_sim.workspace = true
 net.workspace = true
