@@ -449,7 +449,7 @@ fn spawn_runtime_object_presentations(
 
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
-            Transform::from_xyz(object.pos[0],object.pos[1],object.pos[2]),
+            Transform::from_xyz(object.pos[0],object.pos[2],object.pos[1]),
             Visibility::default(),
             Sm64ObjectPresentation{id:object.id},
         )).id();
@@ -520,7 +520,7 @@ fn spawn_hierarchical_object_geometry(
                 ..default()
             })),
             Transform {
-                translation:Vec3::from_array(part.spec.translation),
+                translation:sm64_render_vec3(part.spec.translation),
                 rotation:Quat::from_euler(
                     EulerRot::XYZ,
                     part.spec.rotation_deg[0].to_radians(),
@@ -623,6 +623,16 @@ fn spawn_debug_scene(
     ));
 }
 
+#[inline]
+fn sm64_render_pos(v:[f32;3])->[f32;3] {
+    [v[0],v[2],v[1]]
+}
+
+#[inline]
+fn sm64_render_vec3(v:[f32;3])->Vec3 {
+    Vec3::new(v[0],v[2],v[1])
+}
+
 fn spawn_display_list_geometry(
     commands:&mut Commands,
     meshes:&mut Assets<Mesh>,
@@ -640,13 +650,13 @@ fn spawn_display_list_geometry(
         let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
 
         for triangle in batch.vertices.chunks_exact(3) {
-            let a=Vec3::from_array(triangle[0].position);
-            let b=Vec3::from_array(triangle[1].position);
-            let c=Vec3::from_array(triangle[2].position);
-            let normal=(b-a).cross(c-a).try_normalize().unwrap_or(Vec3::Y).to_array();
+            let a=sm64_render_vec3(triangle[0].position);
+            let b=sm64_render_vec3(triangle[1].position);
+            let c=sm64_render_vec3(triangle[2].position);
+            let normal=(b-a).cross(c-a).try_normalize().unwrap_or(Vec3::Z).to_array();
 
             for vertex in triangle {
-                positions.push(vertex.position);
+                positions.push(sm64_render_pos(vertex.position));
                 normals.push(normal);
                 let [width,height]=batch.texture_size.unwrap_or([32,32]);
                 let u=vertex.texcoord[0] as f32/(32.0*width.max(1) as f32);
@@ -974,20 +984,20 @@ fn spawn_collision_fallback(
     for surface in &world.surfaces {
         positions.push([
             surface.vertex1[0] as f32,
-            surface.vertex1[1] as f32,
             surface.vertex1[2] as f32,
+            surface.vertex1[1] as f32,
         ]);
         positions.push([
             surface.vertex2[0] as f32,
-            surface.vertex2[1] as f32,
             surface.vertex2[2] as f32,
+            surface.vertex2[1] as f32,
         ]);
         positions.push([
             surface.vertex3[0] as f32,
-            surface.vertex3[1] as f32,
             surface.vertex3[2] as f32,
+            surface.vertex3[1] as f32,
         ]);
-        let n=[surface.normal.x,surface.normal.y,surface.normal.z];
+        let n=[surface.normal.x,surface.normal.z,surface.normal.y];
         normals.extend_from_slice(&[n,n,n]);
     }
 
@@ -1100,9 +1110,9 @@ fn sync_object_presentations(
             commands.entity(entity).despawn();
             continue;
         };
-        transform.translation=Vec3::new(object.pos[0],object.pos[1],object.pos[2]);
+        transform.translation=Vec3::new(object.pos[0],object.pos[2],object.pos[1]);
         let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
-        transform.rotation=Quat::from_rotation_y(yaw);
+        transform.rotation=Quat::from_rotation_z(-yaw);
     }
 }
 
