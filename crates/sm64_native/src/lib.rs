@@ -16,6 +16,7 @@ pub struct NativePlayerProxy {
     pub pos: [f32; 3],
     pub vel: [f32; 3],
     pub yaw: i16,
+    pub pitch: i16,
     pub health: i32,
     pub attack_flags: u32,
 }
@@ -153,7 +154,7 @@ impl NativeClient {
             write_f32(&mut self.stdin, value)?;
         }
         write_i16(&mut self.stdin, player.yaw)?;
-        write_u16(&mut self.stdin, 0)?;
+        write_i16(&mut self.stdin, player.pitch)?;
         write_i32(&mut self.stdin, player.health)?;
         write_u32(&mut self.stdin, player.attack_flags)?;
         self.stdin
