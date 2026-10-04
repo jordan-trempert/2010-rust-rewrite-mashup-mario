@@ -241,6 +241,14 @@ static void write_snapshot(void) {
     write_i32(gMarioState != NULL ? gMarioState->health : 0);
     write_i32(gMarioState != NULL ? gMarioState->numCoins : 0);
     write_u32(gMarioState != NULL ? gMarioState->action : 0);
+    write_f32(gMarioState != NULL ? gMarioState->pos[0] : 0.0f);
+    write_f32(gMarioState != NULL ? gMarioState->pos[1] : 0.0f);
+    write_f32(gMarioState != NULL ? gMarioState->pos[2] : 0.0f);
+    write_f32(gMarioState != NULL ? gMarioState->vel[0] : 0.0f);
+    write_f32(gMarioState != NULL ? gMarioState->vel[1] : 0.0f);
+    write_f32(gMarioState != NULL ? gMarioState->vel[2] : 0.0f);
+    write_i16(gMarioState != NULL ? gMarioState->faceAngle[1] : 0);
+    write_u16(0);
 
     for (i = 0; i < count; ++i) {
         const struct Object *object = objects[i];
@@ -349,10 +357,9 @@ static int bridge_main(int argc, char **argv) {
         select_gfx_pool();
         level_command = level_script_execute(level_command);
         gGlobalTimer++;
-        /* The decomp may move Mario while executing its player behavior.
-           COD remains authoritative, so re-apply the external player before
-           serializing object/player-facing state for the host. */
-        apply_proxy(&request);
+        /* Serialize the decomp's resulting Mario state before the next
+           external-player write. This is how cannon launches, moving
+           platforms, warps and knockback are handed back to COD. */
         write_snapshot();
     }
 
