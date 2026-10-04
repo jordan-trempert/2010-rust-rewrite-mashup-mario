@@ -493,11 +493,10 @@ fn spawn_runtime_object_presentations(
 
     for object in objects {
         if object.model=="MODEL_NONE" {continue;}
-        let Some(source)=registry.get(&object.model) else {
-            warn!("SM64 object model {} is not registered",object.model);
-            continue;
-        };
 
+        // Always create the presentation root first. If geometry resolution
+        // fails, the root remains as an invisible placeholder so the same
+        // missing model is not reparsed and re-warned every frame.
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
             Transform {
@@ -509,10 +508,17 @@ fn spawn_runtime_object_presentations(
             Sm64ObjectPresentation{id:object.id},
         )).id();
 
+        let Some(source)=registry.get(&object.model) else {
+            warn!("SM64 object model {} is not registered",object.model);
+            continue;
+        };
+
         match source {
             sm64_assets::ModelSource::Geo{geo_symbol}=>{
                 if !geo_cache.contains_key(&object.model) {
-                    match sm64_assets::resolve_geo_model_parts(decomp_root,geo_symbol) {
+                    match sm64_assets::resolve_geo_model_parts_for_level(
+                        decomp_root,level,geo_symbol
+                    ) {
                         Ok(model)=>{
                             let textures=sm64_assets::load_actor_texture_sources(
                                 decomp_root,&model.actor_name
@@ -524,7 +530,6 @@ fn spawn_runtime_object_presentations(
                                 "SM64 object model {} ({geo_symbol}) failed: {error}",
                                 object.model
                             );
-                            commands.entity(root).despawn();
                             continue;
                         }
                     }
@@ -547,7 +552,6 @@ fn spawn_runtime_object_presentations(
                                 "SM64 display-list model {} ({display_list}) failed: {error}",
                                 object.model
                             );
-                            commands.entity(root).despawn();
                             continue;
                         }
                     }
