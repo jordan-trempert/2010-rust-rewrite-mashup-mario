@@ -53,6 +53,9 @@ pub use object_spawns::{LevelObjectSpawn, MacroObjectSpawn, MacroPresetDefinitio
 
 pub use behavior_lists::{load_behavior_object_lists, parse_behavior_object_lists};
 
-pub use model_registry::{ModelSource, load_model_registry, resolve_geo_model_geometry};
+pub use model_registry::{
+    ModelSource, load_model_registry, resolve_display_list_model_geometry,
+    resolve_geo_model_geometry,
+};
 
 pub use geo_layout::{GeoRenderPart, ResolvedGeoModel, ResolvedGeoPart, parse_geo_render_parts, resolve_geo_model_parts};
