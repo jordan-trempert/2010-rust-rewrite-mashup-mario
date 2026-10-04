@@ -158,10 +158,14 @@ fn launch_installed_sm64_cod_map(
             .find_floor(spawn.pos[0] as f32, 30_000.0, spawn.pos[2] as f32)
             .map(|hit|hit.height)
             .unwrap_or(spawn.pos[1] as f32);
+        // Start well above the detected SM64 floor. This gives COD's
+        // capsule several frames to settle onto the imported collision and
+        // makes a bad floor/collision transform obvious in the log.
+        const SM64_COD_SPAWN_CLEARANCE: f32 = 256.0;
         let spawn_cod=[
             spawn.pos[0] as f32,
             spawn.pos[2] as f32,
-            floor_y + 72.0,
+            floor_y + SM64_COD_SPAWN_CLEARANCE,
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
         let view=[0.0,90.0-sm64_yaw,0.0];
@@ -171,9 +175,11 @@ fn launch_installed_sm64_cod_map(
         });
         diag::info!(
             World,
-            "SM64 COD map: installed {} collision triangles; COD spawn armed at {:?}",
+            "SM64 COD map: installed {} collision triangles; detected floor_y={:.1}; COD spawn armed at {:?} (+{:.0} above floor)",
             parsed.world.surfaces.len(),
-            spawn_cod
+            floor_y,
+            spawn_cod,
+            SM64_COD_SPAWN_CLEARANCE
         );
     } else {
         diag::warn!(World, "SM64 COD map: authority world unavailable while attaching {level}");
