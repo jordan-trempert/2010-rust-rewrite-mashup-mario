@@ -1352,7 +1352,6 @@ fn sync_mario_presentation(
         let yaw=snapshot.mario.face_angle[1] as u16 as f32
             * core::f32::consts::TAU / 65536.0;
         transform.rotation=Quat::from_rotation_z(yaw);
-        transform.scale=Vec3::from_array(object.scale);
     }
 }
 
@@ -1380,6 +1379,7 @@ fn sync_object_presentations(
         transform.translation=sm64_render_vec3(object.pos);
         let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
         transform.rotation=Quat::from_rotation_z(yaw);
+        transform.scale=Vec3::from_array(object.scale);
     }
 
     // Native SM64 behaviors create objects at runtime (coin formations,
