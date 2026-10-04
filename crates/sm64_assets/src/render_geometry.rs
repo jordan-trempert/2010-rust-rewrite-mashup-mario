@@ -142,29 +142,61 @@ pub fn load_level_render_geometry(
 }
 
 fn coalesce_opaque_batches(output: &mut ParsedRenderGeometry) {
+    const CELL: f32 = 2048.0;
+
     let batches = std::mem::take(&mut output.batches);
     let mut merged = Vec::<RenderBatch>::with_capacity(batches.len());
-    let mut by_key =
-        HashMap::<(String, Option<String>, Option<[u32; 2]>, Option<String>), usize>::new();
+    let mut by_key = HashMap::<
+        (
+            String,
+            Option<String>,
+            Option<[u32; 2]>,
+            Option<String>,
+            (i32, i32, i32),
+        ),
+        usize,
+    >::new();
 
     for batch in batches {
-        // Preserve ordering for blended geometry; opaque and alpha-tested
-        // batches can be safely grouped by render state.
+        // Preserve ordering for blended geometry. Opaque/alpha-tested
+        // geometry is grouped by render state *and* spatial cell so the
+        // resulting Bevy meshes still have useful bounds for frustum culling.
         if batch.layer.contains("TRANSPARENT") {
             merged.push(batch);
             continue;
         }
-        let key = (
-            batch.layer.clone(),
-            batch.texture_symbol.clone(),
-            batch.texture_size,
-            batch.light_symbol.clone(),
-        );
-        if let Some(&index) = by_key.get(&key) {
-            merged[index].vertices.extend(batch.vertices);
-        } else {
-            by_key.insert(key, merged.len());
-            merged.push(batch);
+
+        for tri in batch.vertices.chunks_exact(3) {
+            let center = [
+                (tri[0].position[0] + tri[1].position[0] + tri[2].position[0]) / 3.0,
+                (tri[0].position[1] + tri[1].position[1] + tri[2].position[1]) / 3.0,
+                (tri[0].position[2] + tri[1].position[2] + tri[2].position[2]) / 3.0,
+            ];
+            let cell = (
+                (center[0] / CELL).floor() as i32,
+                (center[1] / CELL).floor() as i32,
+                (center[2] / CELL).floor() as i32,
+            );
+            let key = (
+                batch.layer.clone(),
+                batch.texture_symbol.clone(),
+                batch.texture_size,
+                batch.light_symbol.clone(),
+                cell,
+            );
+            if let Some(&index) = by_key.get(&key) {
+                merged[index].vertices.extend_from_slice(tri);
+            } else {
+                let index = merged.len();
+                by_key.insert(key, index);
+                merged.push(RenderBatch {
+                    layer: batch.layer.clone(),
+                    texture_symbol: batch.texture_symbol.clone(),
+                    texture_size: batch.texture_size,
+                    light_symbol: batch.light_symbol.clone(),
+                    vertices: tri.to_vec(),
+                });
+            }
         }
     }
     output.batches = merged;
