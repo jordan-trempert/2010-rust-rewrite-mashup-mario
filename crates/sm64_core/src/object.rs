@@ -65,6 +65,7 @@ pub struct Sm64Object {
     pub move_angle: Vec3s,
     pub face_angle: Vec3s,
     pub angle_vel: Vec3s,
+    pub scale: Vec3f,
 
     pub action: i32,
     pub prev_action: i32,
@@ -136,6 +137,7 @@ impl Sm64Object {
             move_angle: face_angle,
             face_angle,
             angle_vel: [0; 3],
+            scale: [1.0; 3],
             action: 0,
             prev_action: 0,
             sub_action: 0,
