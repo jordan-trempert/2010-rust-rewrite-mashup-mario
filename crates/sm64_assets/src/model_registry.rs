@@ -22,16 +22,74 @@ pub fn load_model_registry(
     let root=decomp_root.as_ref();
     let mut registry=HashMap::new();
 
-    for path in [
-        root.join("levels").join("scripts.c"),
-        root.join("levels").join(level).join("script.c"),
-    ] {
-        if !path.exists(){continue;}
-        let source=fs::read_to_string(&path)
-            .map_err(|e|CollisionParseError::new(format!("{}: {e}",path.display())))?;
-        parse_model_registry_source(&source,&mut registry);
+    let level_path=root.join("levels").join(level).join("script.c");
+    let level_source=fs::read_to_string(&level_path)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",level_path.display())))?;
+
+    // Level-local LOAD_MODEL_* entries are always valid for this course.
+    parse_model_registry_source(&level_source,&mut registry);
+
+    // Actor model IDs are intentionally reused between script_func_global_N
+    // groups. Parsing all of levels/scripts.c makes, for example, model 0x54
+    // ambiguously map to Bullet Bill, Blargg, Water Bomb, Pokey, Boo, etc.
+    // Only include the global groups this level actually JUMP_LINKs.
+    let scripts_path=root.join("levels").join("scripts.c");
+    if scripts_path.exists() {
+        let scripts=fs::read_to_string(&scripts_path)
+            .map_err(|e|CollisionParseError::new(format!("{}: {e}",scripts_path.display())))?;
+
+        // The common model table lives before script_func_global_1 and is
+        // loaded for every level.
+        let common_end=scripts.find("const LevelScript script_func_global_1[]")
+            .unwrap_or(scripts.len());
+        parse_model_registry_source(&scripts[..common_end],&mut registry);
+
+        for linked in linked_global_scripts(&level_source) {
+            if let Some(body)=extract_level_script_body(&scripts,&linked) {
+                parse_model_registry_source(body,&mut registry);
+            }
+        }
     }
+
     Ok(registry)
+}
+
+fn linked_global_scripts(level_source:&str)->Vec<String>{
+    let mut out=Vec::new();
+    for raw in strip_comments(level_source).lines() {
+        let line=raw.trim();
+        let Some(args)=macro_args(line,"JUMP_LINK") else {continue;};
+        let symbol=args.trim();
+        if symbol.starts_with("script_func_global_")
+            && !out.iter().any(|entry|entry==symbol)
+        {
+            out.push(symbol.to_owned());
+        }
+    }
+    out
+}
+
+fn extract_level_script_body<'a>(source:&'a str,symbol:&str)->Option<&'a str>{
+    let needle=format!("const LevelScript {symbol}[]");
+    let start=source.find(&needle)?;
+    let open=source[start..].find('{')?+start;
+    let bytes=source.as_bytes();
+    let mut depth=0i32;
+    let mut index=open;
+    while index<bytes.len() {
+        match bytes[index] {
+            b'{' => depth+=1,
+            b'}' => {
+                depth-=1;
+                if depth==0 {
+                    return Some(&source[open+1..index]);
+                }
+            }
+            _=>{}
+        }
+        index+=1;
+    }
+    None
 }
 
 pub fn load_model_id_symbols(
