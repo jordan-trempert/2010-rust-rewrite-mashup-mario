@@ -229,7 +229,7 @@ pub(crate) fn route(
                         // course is carried separately and attached after the
                         // proxy match is installed.
                         let target = request.map_key();
-                        commands.insert_resource(frame::ExternalWorldPresentation(true));
+                        commands.remove_resource::<frame::ExternalWorldPresentation>();
                         commands.insert_resource(request);
                         // Follow the Minecraft custom-world path: the logical
                         // session map remains the custom world key, while
