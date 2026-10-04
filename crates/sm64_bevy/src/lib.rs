@@ -96,6 +96,11 @@ pub struct Sm64ControllerInput(pub Sm64Input);
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
+    /// SM64-coordinate velocity in units per original 30 Hz tick.
+    pub sm64_vel: [f32;3],
+    /// SM64 binary-angle yaw used by object behaviors that face/track Mario.
+    pub sm64_yaw: i16,
+    pub health: i32,
     pub active: bool,
 }
 
@@ -1087,7 +1092,11 @@ fn advance_sm64_runtime(
     while runtime.accumulator >= SM64_TICK_SECONDS && steps < 8 {
         runtime.accumulator -= SM64_TICK_SECONDS;
         runtime.latest=Some(if external.active {
-            runtime.world.step_external_player(external.sm64_pos)
+            runtime.world.step_external_player(
+                external.sm64_pos,
+                external.sm64_vel,
+                external.sm64_yaw,
+            )
         } else {
             runtime.world.step(input.0)
         });
