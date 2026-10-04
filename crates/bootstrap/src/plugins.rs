@@ -172,6 +172,35 @@ fn launch_installed_sm64_cod_map(
         ];
         let sm64_yaw=spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
         let view=[0.0,90.0-sm64_yaw,0.0];
+
+        // Validate the exact collision backend COD movement will use before
+        // admitting the player. This is a swept standing-player capsule from
+        // the spawn down through the expected Battlefield floor.
+        let probe_end=[
+            spawn_cod[0],
+            spawn_cod[1],
+            floor_y - 128.0,
+        ];
+        let probe=authority.0.trace_world(
+            spawn_cod,
+            probe_end,
+            sim::PLAYER_MINS,
+            sim::PLAYER_MAXS,
+            sim::MASK_PLAYER_SOLID,
+        );
+        diag::info!(
+            World,
+            "SM64 COD collision probe: start={:?} end={:?} fraction={:.4} normal={:?} walkable={} startsolid={} allsolid={} contents=0x{:08x}",
+            spawn_cod,
+            probe_end,
+            probe.fraction,
+            probe.normal,
+            probe.walkable,
+            probe.startsolid,
+            probe.allsolid,
+            probe.contents
+        );
+
         commands.insert_resource(Sm64CodSpawn {
             origin: spawn_cod,
             view,
