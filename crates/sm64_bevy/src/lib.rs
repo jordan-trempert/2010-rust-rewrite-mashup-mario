@@ -843,12 +843,14 @@ fn spawn_debug_scene(
 
 #[inline]
 fn sm64_render_pos(v:[f32;3])->[f32;3] {
-    [v[0],-v[2],v[1]]
+    let s=sm64_core::SM64_TO_IW4_SCALE;
+    [v[0]*s,-v[2]*s,v[1]*s]
 }
 
 #[inline]
 fn sm64_render_vec3(v:[f32;3])->Vec3 {
-    Vec3::new(v[0],-v[2],v[1])
+    let s=sm64_core::SM64_TO_IW4_SCALE;
+    Vec3::new(v[0]*s,-v[2]*s,v[1]*s)
 }
 
 fn sm64_render_rotation(degrees:[f32;3])->Quat {
