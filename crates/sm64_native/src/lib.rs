@@ -43,6 +43,7 @@ pub struct NativeSnapshot {
     pub mario_vel: [f32; 3],
     pub mario_yaw: i16,
     pub objects: Vec<NativeObject>,
+    pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
 }
 
 #[derive(Debug)]
@@ -185,6 +186,7 @@ impl NativeClient {
         }
         let tick = read_u32(&mut self.stdout)?;
         let object_count = read_u32(&mut self.stdout)? as usize;
+        let dynamic_surface_count = read_u32(&mut self.stdout)? as usize;
         let mario_health = read_i32(&mut self.stdout)?;
         let coins = read_i32(&mut self.stdout)?;
         let mario_action = read_u32(&mut self.stdout)?;
@@ -202,6 +204,11 @@ impl NativeClient {
         if object_count > 4096 {
             return Err(NativeBridgeError::new(format!(
                 "native bridge returned impossible object count {object_count}"
+            )));
+        }
+        if dynamic_surface_count > 8192 {
+            return Err(NativeBridgeError::new(format!(
+                "native bridge returned impossible dynamic surface count {dynamic_surface_count}"
             )));
         }
 
@@ -236,6 +243,17 @@ impl NativeClient {
             });
         }
 
+        let mut dynamic_surfaces=Vec::with_capacity(dynamic_surface_count);
+        for _ in 0..dynamic_surface_count {
+            let mut tri=[[0.0;3];3];
+            for vertex in &mut tri {
+                for axis in vertex {
+                    *axis=read_f32(&mut self.stdout)?;
+                }
+            }
+            dynamic_surfaces.push(tri);
+        }
+
         Ok(NativeSnapshot {
             tick,
             mario_health,
@@ -245,6 +263,7 @@ impl NativeClient {
             mario_vel,
             mario_yaw,
             objects,
+            dynamic_surfaces,
         })
     }
 }
