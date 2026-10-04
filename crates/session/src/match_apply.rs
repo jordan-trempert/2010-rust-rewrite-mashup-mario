@@ -986,7 +986,9 @@ fn preflight_match_install(
             .collect(),
     };
     // The Minecraft world runs the level script of the map it stands in for.
-    let script_map = if assets::minecraft_map::is_minecraft_load(zone) {
+    let script_map = if assets::minecraft_map::is_minecraft_load(zone)
+        || assets::minecraft_map::is_sm64_load(zone)
+    {
         assets::minecraft_map::PROXY_MAP
     } else {
         zone
@@ -1033,8 +1035,11 @@ fn preflight_match_install(
             None => script_dvars.push((name.clone(), value.clone())),
         }
     }
-    // A Minecraft world has no time or score limit.
-    if assets::minecraft_map::is_minecraft_load(zone) {
+    // Custom worlds run on top of the IW4 donor match without
+    // ending because mp_rust's ordinary score/time limits elapsed.
+    if assets::minecraft_map::is_minecraft_load(zone)
+        || assets::minecraft_map::is_sm64_load(zone)
+    {
         for limit in ["timelimit", "scorelimit"] {
             let name = format!("scr_{gametype}_{limit}");
             match script_dvars.iter_mut().find(|(set, _)| set.eq_ignore_ascii_case(&name)) {
