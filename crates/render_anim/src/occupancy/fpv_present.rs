@@ -267,7 +267,8 @@ pub fn spawn_pending_fpv(
             return;
         }
     };
-    let Ok(host) = cameras.single() else {
+    let mut camera_iter=cameras.iter();
+    let Some(host)=camera_iter.next() else {
         diag::info!(
             Fpv,
             "fpv: no FlyCamera to parent viewmodel under — re-queue"
@@ -277,6 +278,12 @@ pub fn spawn_pending_fpv(
         status.0 = Some(FpvState::Blocked(RenderGapCause::FpvNoCamera));
         return;
     };
+    if camera_iter.next().is_some() {
+        diag::warn!(
+            Fpv,
+            "fpv: multiple FlyCamera hosts present; using the first host instead of refusing viewmodel"
+        );
+    }
 
     commands.entity(host).with_children(|parent| {
         parent.spawn((
@@ -831,7 +838,12 @@ pub fn stamp_fpv_placement_matrix(
     cameras: Query<&Transform, (With<FlyCamera>, Without<FpvPlacementRoot>)>,
     roots: Query<&Transform, With<FpvPlacementRoot>>,
 ) {
-    let (Ok(cam), Ok(local)) = (cameras.single(), roots.single()) else {
+    let Some(cam)=cameras.iter().next() else {
+        fpv_plan.placement_ok = false;
+        fpv_plan.settle_visible();
+        return;
+    };
+    let Ok(local)=roots.single() else {
         fpv_plan.placement_ok = false;
         fpv_plan.settle_visible();
         return;
