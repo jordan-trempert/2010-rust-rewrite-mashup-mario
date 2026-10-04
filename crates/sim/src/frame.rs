@@ -412,6 +412,22 @@ impl FrameWorld<'_> {
         ps.viewangles = viewangles;
         true
     }
+    pub fn set_velocity(&mut self, id: ClientId, velocity: [f32; 3]) -> bool {
+        let Some(ps) = self.player_mut(id) else {
+            return false;
+        };
+        ps.velocity = velocity;
+        true
+    }
+
+    pub fn set_health(&mut self, id: ClientId, health: i32) -> bool {
+        let Some(ps) = self.player_mut(id) else {
+            return false;
+        };
+        ps.health = health.clamp(0, ps.max_health.max(1));
+        true
+    }
+
 
     pub fn set_e_flags(&mut self, id: ClientId, e_flags: u32) -> bool {
         let Some(ps) = self.player_mut(id) else {
