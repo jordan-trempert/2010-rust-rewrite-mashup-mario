@@ -26,6 +26,13 @@ struct Sm64CodSpawn {
     view: [f32; 3],
 }
 
+#[derive(Resource, Debug, Default, Clone, Copy)]
+struct Sm64CodNativeState {
+    last_sm64_health: Option<i32>,
+    last_action: u32,
+}
+
+
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -40,6 +47,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     if crate::bench::enabled() {
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }
+    app.init_resource::<Sm64CodNativeState>();
     app.add_plugins(AssetPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(ConsolePlugin)
@@ -54,6 +62,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
+            apply_sm64_native_player_output,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ));
@@ -214,6 +223,7 @@ fn launch_installed_sm64_cod_map(
         diag::warn!(World, "SM64 COD map: authority world unavailable while attaching {level}");
     }
 
+    commands.insert_resource(Sm64CodNativeState::default());
     commands.insert_resource(sm64_bevy::Sm64LaunchRequest::new(level.clone(), area));
     commands.insert_resource(sm64_bevy::Sm64CodActive {
         level: level.clone(),
@@ -287,6 +297,95 @@ fn sync_cod_player_into_sm64(
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
     external.health=health;
     external.active=true;
+}
+
+fn apply_sm64_native_player_output(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    mut bridge_state: ResMut<Sm64CodNativeState>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+) {
+    if active.is_none() {
+        bridge_state.last_sm64_health=None;
+        bridge_state.last_action=0;
+        return;
+    }
+    let Some(authority)=authority.as_deref_mut() else {return;};
+
+    let mut first=None;
+    authority.0.visit_players(|id,player|{
+        if first.is_none() {
+            first=Some((id,*player));
+        }
+    });
+    let Some((id,player))=first else {return;};
+
+    if !output.active {
+        authority.0.set_external_motion(id,false);
+        bridge_state.last_sm64_health=None;
+        bridge_state.last_action=0;
+        return;
+    }
+
+    // Preserve ordinary COD damage while layering SM64 damage/healing on top.
+    // SM64's normal full health is 0x880, so apply the *delta* rather than
+    // replacing COD health with an unrelated absolute scale every frame.
+    if let Some(previous)=bridge_state.last_sm64_health {
+        let sm64_delta=output.health-previous;
+        if sm64_delta!=0 {
+            let scaled=((sm64_delta as f32)*(player.max_health.max(1) as f32)/0x880 as f32).round() as i32;
+            if scaled!=0 {
+                authority.0.set_health(id,player.health.saturating_add(scaled));
+            }
+        }
+    }
+    bridge_state.last_sm64_health=Some(output.health);
+
+    let group=output.action & sm64_core::ACT_GROUP_MASK;
+    let owns_motion=matches!(
+        group,
+        sm64_core::ACT_GROUP_OBJECT
+            | sm64_core::ACT_GROUP_AUTOMATIC
+            | sm64_core::ACT_GROUP_CUTSCENE
+    ) || matches!(
+        output.action,
+        sm64_core::ACT_SHOT_FROM_CANNON
+            | sm64_core::ACT_TORNADO_TWIRLING
+            | sm64_core::ACT_GRABBED
+            | sm64_core::ACT_RIDING_HOOT
+    );
+
+    authority.0.set_external_motion(id,owns_motion);
+    if owns_motion {
+        let origin=[
+            output.sm64_pos[0],
+            -output.sm64_pos[2],
+            output.sm64_pos[1],
+        ];
+        let velocity=[
+            output.sm64_vel[0]*sm64_sim::SM64_TICK_HZ as f32,
+            -output.sm64_vel[2]*sm64_sim::SM64_TICK_HZ as f32,
+            output.sm64_vel[1]*sm64_sim::SM64_TICK_HZ as f32,
+        ];
+        authority.0.set_origin(id,origin);
+        authority.0.set_velocity(id,velocity);
+
+        let sm64_yaw_degrees=output.sm64_yaw as u16 as f32*360.0/65536.0;
+        let mut view=player.viewangles;
+        view[1]=sm64_yaw_degrees-90.0;
+        authority.0.set_viewangles(id,view);
+    }
+
+    if output.action!=bridge_state.last_action {
+        diag::info!(
+            World,
+            "SM64 native player action 0x{:08x} -> 0x{:08x} (external_motion={})",
+            bridge_state.last_action,
+            output.action,
+            owns_motion
+        );
+        bridge_state.last_action=output.action;
+    }
 }
 
 fn suppress_sm64_player_view(
