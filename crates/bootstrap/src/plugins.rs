@@ -30,6 +30,7 @@ struct Sm64CodSpawn {
 struct Sm64CodNativeState {
     last_sm64_health: Option<i32>,
     last_action: u32,
+    last_weapon_shot_count: Option<i32>,
 }
 
 
@@ -65,7 +66,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             apply_sm64_native_player_output,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
-        ));
+        ).chain());
 
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
@@ -261,14 +262,19 @@ fn place_sm64_cod_player_on_life_started(
 fn sync_cod_player_into_sm64(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     authority: Option<Res<net::AuthorityWorld>>,
+    mut bridge_state: ResMut<Sm64CodNativeState>,
     mut external: ResMut<sm64_bevy::Sm64ExternalPlayer>,
 ) {
     if active.is_none() {
         external.active=false;
+        external.attack_flags=0;
+        bridge_state.last_weapon_shot_count=None;
         return;
     }
     let Some(authority)=authority else {
         external.active=false;
+        external.attack_flags=0;
+        bridge_state.last_weapon_shot_count=None;
         return;
     };
     let mut first=None;
@@ -279,11 +285,14 @@ fn sync_cod_player_into_sm64(
                 player.velocity,
                 player.viewangles,
                 player.health,
+                player.weapon_shot_count,
             ));
         }
     });
-    let Some((origin,velocity,viewangles,health))=first else {
+    let Some((origin,velocity,viewangles,health,weapon_shot_count))=first else {
         external.active=false;
+        external.attack_flags=0;
+        bridge_state.last_weapon_shot_count=None;
         return;
     };
     external.sm64_pos=[origin[0],origin[2],-origin[1]];
@@ -295,6 +304,17 @@ fn sync_cod_player_into_sm64(
     ];
     let sm64_yaw_degrees=viewangles[1]+90.0;
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
+    // IW4 pitch is positive downward; SM64 cannon pitch is positive upward.
+    external.sm64_pitch=((-viewangles[0]/360.0)*65536.0) as i32 as i16;
+    external.attack_flags=if bridge_state
+        .last_weapon_shot_count
+        .is_some_and(|previous|weapon_shot_count!=previous)
+    {
+        1
+    } else {
+        0
+    };
+    bridge_state.last_weapon_shot_count=Some(weapon_shot_count);
     external.health=health;
     external.active=true;
 }
