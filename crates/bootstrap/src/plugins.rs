@@ -54,6 +54,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_when_ready,
             sync_cod_player_into_sm64,
+            mark_sm64_external_after_cod_world_ready,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ));
@@ -242,6 +243,26 @@ fn sync_cod_player_into_sm64(
     };
     external.sm64_pos=[origin[0],origin[2],origin[1]];
     external.active=true;
+}
+
+fn mark_sm64_external_after_cod_world_ready(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    scene: Option<Res<render_frontend::prepare::scene::world::WorldScene>>,
+    external: Option<Res<frame::ExternalWorldPresentation>>,
+    mut commands: Commands,
+) {
+    if active.is_none() {
+        return;
+    }
+    if scene.is_some_and(|scene| scene.spawned)
+        && !external.is_some_and(|external| external.0)
+    {
+        commands.insert_resource(frame::ExternalWorldPresentation(true));
+        diag::info!(
+            World,
+            "SM64 COD map: normal COD world ready; hiding mp_rust donor presentation"
+        );
+    }
 }
 
 fn suppress_sm64_player_view(
