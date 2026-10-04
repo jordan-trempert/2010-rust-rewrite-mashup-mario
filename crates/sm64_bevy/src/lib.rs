@@ -1373,7 +1373,7 @@ fn advance_sm64_runtime(
 }
 
 fn face_sm64_billboards(
-    cameras:Query<&GlobalTransform,With<render_scene::FlyCamera>>,
+    cameras:Query<&GlobalTransform,With<Camera3d>>,
     parent_transforms:Query<&GlobalTransform,Without<Sm64BillboardPart>>,
     mut billboards:Query<(&ChildOf,&GlobalTransform,&mut Transform),With<Sm64BillboardPart>>,
 ) {
