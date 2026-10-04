@@ -63,6 +63,30 @@ fn parse_texture_source_file(
     }
 }
 
+pub fn load_level_object_texture_sources(
+    decomp_root: impl AsRef<Path>,
+    level: &str,
+    object_dir: &str,
+) -> Result<HashMap<String, PathBuf>, CollisionParseError> {
+    let root=decomp_root.as_ref();
+    let dir=root.join("levels").join(level).join(object_dir);
+    let mut out=HashMap::new();
+
+    for path in [
+        dir.join("model.inc.c"),
+        dir.join("texture.inc.c"),
+    ] {
+        if !path.exists() {
+            continue;
+        }
+        let source=fs::read_to_string(&path)
+            .map_err(|e|CollisionParseError::new(format!("{}: {e}",path.display())))?;
+        parse_texture_source_file(root,&source,&mut out);
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
