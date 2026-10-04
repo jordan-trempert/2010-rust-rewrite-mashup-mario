@@ -941,6 +941,11 @@ pub fn extract_minecraft_world(
     mut clouds_of: Local<Option<(usize, std::sync::Arc<render_gpu::MinecraftClouds>)>>,
     mut cracks_of: Local<Option<(usize, std::sync::Arc<render_gpu::MinecraftAtlasImage>)>>,
 ) {
+    let hide_donor = main_world
+        .get_resource::<frame::ExternalWorldPresentation>()
+        .is_some_and(|external| external.0);
+    render_gpu::set_external_hides_map(hide_donor);
+
     let Some(mut view) = main_world.get_resource_mut::<render_anim::minecraft_world::MinecraftWorldView>() else {
         return;
     };
