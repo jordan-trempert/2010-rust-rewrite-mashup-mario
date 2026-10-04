@@ -13,19 +13,54 @@ pub fn load_texture_sources(
     let root=decomp_root.as_ref();
     let mut out=HashMap::new();
 
-    for path in [
-        root.join("bin").join("generic.c"),
-        root.join("levels").join(level).join("texture.inc.c"),
-    ] {
-        if !path.exists() {
-            continue;
+    // Segment 9 is a per-course texture bank. BOB loads "generic", WF loads
+    // "grass", CCM loads "snow", JRB loads "water", etc. Using generic.c for
+    // every level makes non-BOB display lists resolve to the wrong or missing
+    // texture symbols.
+    if let Some(bank)=level_texture_bank(root,level)? {
+        let bank_path=root.join("bin").join(format!("{bank}.c"));
+        if bank_path.exists() {
+            let source=fs::read_to_string(&bank_path)
+                .map_err(|e|CollisionParseError::new(format!("{}: {e}",bank_path.display())))?;
+            parse_texture_source_file(root,&source,&mut out);
         }
-        let source=fs::read_to_string(&path)
-            .map_err(|e|CollisionParseError::new(format!("{}: {e}",path.display())))?;
+    }
+
+    let level_texture=root.join("levels").join(level).join("texture.inc.c");
+    if level_texture.exists() {
+        let source=fs::read_to_string(&level_texture)
+            .map_err(|e|CollisionParseError::new(format!("{}: {e}",level_texture.display())))?;
         parse_texture_source_file(root,&source,&mut out);
     }
 
     Ok(out)
+}
+
+fn level_texture_bank(
+    root:&Path,
+    level:&str,
+)->Result<Option<String>,CollisionParseError>{
+    let script_path=root.join("levels").join(level).join("script.c");
+    if !script_path.exists() {
+        return Ok(None);
+    }
+    let source=fs::read_to_string(&script_path)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",script_path.display())))?;
+
+    for raw in source.lines() {
+        let line=raw.trim();
+        if !line.contains("LOAD_MIO0_TEXTURE") || !line.contains("0x09") {
+            continue;
+        }
+        let Some(start)=line.find('_') else {continue;};
+        let tail=&line[start+1..];
+        let Some(end)=tail.find("_mio0SegmentRomStart") else {continue;};
+        let bank=&tail[..end];
+        if !bank.is_empty() {
+            return Ok(Some(bank.to_owned()));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_texture_source_file(
