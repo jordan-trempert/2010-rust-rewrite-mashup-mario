@@ -267,14 +267,28 @@ fn sync_cod_player_into_sm64(
     let mut first=None;
     authority.0.visit_players(|_,player|{
         if first.is_none() {
-            first=Some(player.origin);
+            first=Some((
+                player.origin,
+                player.velocity,
+                player.viewangles,
+                player.health,
+            ));
         }
     });
-    let Some(origin)=first else {
+    let Some((origin,velocity,viewangles,health))=first else {
         external.active=false;
         return;
     };
     external.sm64_pos=[origin[0],origin[2],origin[1]];
+    // IW4 velocities are units/second; SM64 stores velocity per 30 Hz tick.
+    external.sm64_vel=[
+        velocity[0]/sm64_sim::SM64_TICK_HZ as f32,
+        velocity[2]/sm64_sim::SM64_TICK_HZ as f32,
+        velocity[1]/sm64_sim::SM64_TICK_HZ as f32,
+    ];
+    let sm64_yaw_degrees=90.0-viewangles[1];
+    external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
+    external.health=health;
     external.active=true;
 }
 
