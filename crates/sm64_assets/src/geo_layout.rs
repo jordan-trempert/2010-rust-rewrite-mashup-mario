@@ -113,6 +113,82 @@ pub fn resolve_geo_model_parts(
     Err(CollisionParseError::new(format!("could not find actor GeoLayout {geo_symbol}")))
 }
 
+pub fn resolve_geo_model_parts_for_level(
+    decomp_root:impl AsRef<Path>,
+    level:&str,
+    geo_symbol:&str,
+)->Result<ResolvedGeoModel,CollisionParseError>{
+    let root=decomp_root.as_ref();
+
+    // Shared actor geometry first.
+    if let Ok(model)=resolve_geo_model_parts(root,geo_symbol) {
+        return Ok(model);
+    }
+
+    // Course-specific objects (for example BOB's chain-chomp gate and
+    // seesaw platform) live under levels/<level>/* rather than actors/*.
+    let level_root=root.join("levels").join(level);
+    let mut dirs=Vec::new();
+    collect_dirs_with_geo(&level_root,&mut dirs)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",level_root.display())))?;
+
+    for dir in dirs {
+        let geo_path=dir.join("geo.inc.c");
+        let Ok(source)=fs::read_to_string(&geo_path) else {continue;};
+        if !source.contains(geo_symbol) {continue;}
+
+        let specs=parse_geo_render_parts(&source,geo_symbol)?;
+        let mut parts=Vec::new();
+
+        // Most level-local object geos have a sibling model.inc.c. Area
+        // geometry may fan out into numbered subdirectories, so try those too.
+        let mut model_paths=Vec::new();
+        let sibling=dir.join("model.inc.c");
+        if sibling.exists() {
+            model_paths.push(sibling);
+        }
+        if let Ok(entries)=fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path=entry.path().join("model.inc.c");
+                if path.exists() {
+                    model_paths.push(path);
+                }
+            }
+        }
+
+        for spec in specs {
+            let root_pair=[(spec.layer.as_str(),spec.display_list.as_str())];
+            for model_path in &model_paths {
+                let relative=model_path.strip_prefix(root)
+                    .map_err(|_|CollisionParseError::new(format!(
+                        "{} is outside decomp root",model_path.display()
+                    )))?
+                    .to_string_lossy()
+                    .replace('\\',"/");
+                match load_model_display_lists(root,&relative,&root_pair) {
+                    Ok(geometry) if geometry.triangle_count>0=>{
+                        parts.push(ResolvedGeoPart{spec:spec.clone(),geometry});
+                        break;
+                    }
+                    _=>{}
+                }
+            }
+        }
+
+        let actor_name=dir.file_name()
+            .and_then(|v|v.to_str())
+            .unwrap_or(level)
+            .to_owned();
+        if !parts.is_empty() {
+            return Ok(ResolvedGeoModel{actor_name,parts});
+        }
+    }
+
+    Err(CollisionParseError::new(format!(
+        "could not find GeoLayout {geo_symbol} in actors or level {level}"
+    )))
+}
+
 fn flatten_layout(
     layouts:&HashMap<String,String>,
     symbol:&str,
