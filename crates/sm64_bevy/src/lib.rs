@@ -477,12 +477,12 @@ fn spawn_hierarchical_object_geometry(
         let mut normals=Vec::with_capacity(batch.vertices.len());
         let mut uvs=Vec::with_capacity(batch.vertices.len());
         for triangle in batch.vertices.chunks_exact(3) {
-            let a=Vec3::from_array(triangle[0].position);
-            let b=Vec3::from_array(triangle[1].position);
-            let d=Vec3::from_array(triangle[2].position);
+            let a=sm64_render_vec3(triangle[0].position);
+            let b=sm64_render_vec3(triangle[1].position);
+            let d=sm64_render_vec3(triangle[2].position);
             let n=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y).to_array();
             for vertex in triangle {
-                positions.push(vertex.position);
+                positions.push(sm64_render_pos(vertex.position));
                 normals.push(n);
                 let [w,h]=batch.texture_size.unwrap_or([32,32]);
                 uvs.push([
@@ -743,16 +743,16 @@ fn spawn_mario_hierarchy(
             let mut uvs=Vec::with_capacity(batch.vertices.len());
 
             for triangle in batch.vertices.chunks_exact(3) {
-                let a=Vec3::from_array(triangle[0].position);
-                let b=Vec3::from_array(triangle[1].position);
-                let d=Vec3::from_array(triangle[2].position);
+                let a=sm64_render_vec3(triangle[0].position);
+                let b=sm64_render_vec3(triangle[1].position);
+                let d=sm64_render_vec3(triangle[2].position);
                 let face_normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y);
                 for vertex in triangle {
-                    positions.push(vertex.position);
+                    positions.push(sm64_render_pos(vertex.position));
                     let n=Vec3::new(
                         vertex.attributes[0] as i8 as f32,
-                        vertex.attributes[1] as i8 as f32,
                         vertex.attributes[2] as i8 as f32,
+                        vertex.attributes[1] as i8 as f32,
                     ).try_normalize().unwrap_or(face_normal);
                     normals.push(n.to_array());
                     let [w,h]=batch.texture_size.unwrap_or([32,32]);
@@ -828,12 +828,12 @@ fn spawn_mario_geometry(
         let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
 
         for triangle in batch.vertices.chunks_exact(3) {
-            let a=Vec3::from_array(triangle[0].position);
-            let b=Vec3::from_array(triangle[1].position);
-            let d=Vec3::from_array(triangle[2].position);
+            let a=sm64_render_vec3(triangle[0].position);
+            let b=sm64_render_vec3(triangle[1].position);
+            let d=sm64_render_vec3(triangle[2].position);
             let face_normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Y);
             for vertex in triangle {
-                positions.push(vertex.position);
+                positions.push(sm64_render_pos(vertex.position));
                 // Mario's Vtx payload stores signed normals in the RGB bytes
                 // while lighting is active. Prefer them over a flat face normal.
                 let n=Vec3::new(
