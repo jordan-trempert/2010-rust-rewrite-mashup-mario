@@ -56,7 +56,10 @@ Copy-Item $bridgeSource $pcMain -Force
 try {
     Push-Location $root
     try {
-        & make -C tools -j1
+        # The normal sm64-port build uses all-except-recomp. Do not build
+        # ido5.3_recomp here: that optional ROM-matching tool requires Capstone
+        # and is unrelated to the host-native gameplay bridge.
+        & make -C tools all-except-recomp -j1
         if ($LASTEXITCODE -ne 0) {
             throw "sm64-port host tools build failed with exit code $LASTEXITCODE"
         }
