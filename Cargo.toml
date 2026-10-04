@@ -67,6 +67,7 @@ members = [
     "crates/sim",
     "crates/sm64_core",
     "crates/sm64_assets",
+    "crates/sm64_native",
     "crates/sm64_sim",
     "crates/sm64_bevy",
     "crates/trace_iw4",
@@ -173,6 +174,7 @@ replay = { path = "crates/replay" }
 sim = { path = "crates/sim" }
 sm64_core = { path = "crates/sm64_core" }
 sm64_assets = { path = "crates/sm64_assets" }
+sm64_native = { path = "crates/sm64_native" }
 sm64_sim = { path = "crates/sm64_sim" }
 sm64_bevy = { path = "crates/sm64_bevy" }
 trace_iw4 = { path = "crates/trace_iw4" }
