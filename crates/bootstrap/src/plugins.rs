@@ -159,6 +159,14 @@ fn launch_installed_sm64_cod_map(
             origin: spawn_cod,
             view,
         });
+        // Same camera host shape as a normal IW4 world. It provides the
+        // pre-spawn/class-select background; once the local player becomes
+        // Alive, session::local_arm enables SimCamera and COD takes control.
+        render_frontend::prepare::scene::world_occupancy::place_external_camera(
+            &mut commands,
+            spawn_cod,
+            view,
+        );
         diag::info!(
             World,
             "SM64 COD map: installed {} collision triangles; COD spawn armed at {:?}",
