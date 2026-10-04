@@ -58,11 +58,17 @@ impl fmt::Display for NativeBridgeError {
 
 impl std::error::Error for NativeBridgeError {}
 
-pub fn default_bridge_path(decomp_root: impl AsRef<Path>) -> PathBuf {
+pub fn native_root(asset_root: impl AsRef<Path>) -> PathBuf {
+    env::var_os("SM64_NATIVE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| asset_root.as_ref().to_path_buf())
+}
+
+pub fn default_bridge_path(asset_root: impl AsRef<Path>) -> PathBuf {
     if let Some(path) = env::var_os("SM64_NATIVE_BRIDGE") {
         return PathBuf::from(path);
     }
-    let root = decomp_root.as_ref();
+    let root = native_root(asset_root);
     #[cfg(windows)]
     {
         root.join("build")
@@ -92,8 +98,9 @@ impl NativeClient {
         area: u8,
         act: u8,
     ) -> Result<Self, NativeBridgeError> {
-        let root = decomp_root.as_ref();
-        let bridge = default_bridge_path(root);
+        let asset_root = decomp_root.as_ref();
+        let root = native_root(asset_root);
+        let bridge = default_bridge_path(asset_root);
         if !bridge.is_file() {
             return Err(NativeBridgeError::new(format!(
                 "native SM64 bridge not found at {}",
