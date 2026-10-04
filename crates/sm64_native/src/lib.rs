@@ -38,6 +38,9 @@ pub struct NativeSnapshot {
     pub mario_health: i32,
     pub coins: i32,
     pub mario_action: u32,
+    pub mario_pos: [f32; 3],
+    pub mario_vel: [f32; 3],
+    pub mario_yaw: i16,
     pub objects: Vec<NativeObject>,
 }
 
@@ -168,6 +171,16 @@ impl NativeClient {
         let mario_health = read_i32(&mut self.stdout)?;
         let coins = read_i32(&mut self.stdout)?;
         let mario_action = read_u32(&mut self.stdout)?;
+        let mut mario_pos=[0.0;3];
+        for value in &mut mario_pos {
+            *value=read_f32(&mut self.stdout)?;
+        }
+        let mut mario_vel=[0.0;3];
+        for value in &mut mario_vel {
+            *value=read_f32(&mut self.stdout)?;
+        }
+        let mario_yaw=read_i16(&mut self.stdout)?;
+        let _reserved=read_u16(&mut self.stdout)?;
 
         if object_count > 4096 {
             return Err(NativeBridgeError::new(format!(
@@ -211,6 +224,9 @@ impl NativeClient {
             mario_health,
             coins,
             mario_action,
+            mario_pos,
+            mario_vel,
+            mario_yaw,
             objects,
         })
     }
