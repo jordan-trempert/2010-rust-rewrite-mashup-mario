@@ -212,7 +212,7 @@ pub(crate) fn spawn_world(
     ),
 ) {
     let (fpv, model_materials, fx_models) = prepared;
-    let external_world = external_world.is_some_and(|external| external.0);
+    let _external_world = external_world.is_some_and(|external| external.0);
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
     // the same way this one does.
@@ -224,17 +224,6 @@ pub(crate) fn spawn_world(
     if job.phase == WorldSpawnPhase::Gpu {
         let fpv_done = fpv.settled_for(&tess.catalog)
             && model_materials.settled_for(&tess.catalog);
-
-        if external_world {
-            if fpv_done {
-                finish_world_spawn(&mut scene, &mut job, &mut commands);
-                diag::info!(
-                    World,
-                    "world spawn: external donor FPV/model preparation ready; admission may continue"
-                );
-            }
-            return;
-        }
 
         if !paced {
             finish_world_spawn(&mut scene, &mut job, &mut commands);
@@ -749,44 +738,6 @@ pub(crate) fn spawn_world(
                 }),
                 None => host.0.glass = fx::FxGlassSystemHost::default(),
             }
-        }
-
-        if external_world {
-            // FPV preparation requires the same model-lighting atlas resource
-            // as a normal COD world, even though the donor BSP itself will not
-            // be drawn.
-            if let Some(dims)=lighting_iw4::model_lighting_atlas_dims(
-                super::world::SMODEL_LIGHTING_MAX_CLIENT_VIEWS,
-            ) {
-                let atlas=render_scene::WorldModelLightingAtlas::new(&mut images,dims);
-                scene.model_lighting_image=Some(atlas.image.clone());
-                scene.model_lighting_dims=Some(atlas.dims);
-                commands.insert_resource(atlas);
-            }
-
-            if let Some(view) = scene.intermission_view {
-                super::world_occupancy::place_external_camera(
-                    &mut commands,
-                    view.origin,
-                    view.angles,
-                );
-            } else {
-                super::world_occupancy::place_external_camera(
-                    &mut commands,
-                    [scene.center.x, scene.center.y, scene.center.z + 64.0],
-                    [0.0, 0.0, 0.0],
-                );
-            }
-
-            // Do not finish the world yet. prepare_fpv_compositions and
-            // prepare_model_materials run after this system; the Gpu phase
-            // above will admit the world as soon as those are settled.
-            job.phase=WorldSpawnPhase::Gpu;
-            diag::info!(
-                World,
-                "world spawn: external donor materials/images ready; waiting for FPV/model preparation"
-            );
-            return;
         }
 
         job.phase = WorldSpawnPhase::WorldTess;
