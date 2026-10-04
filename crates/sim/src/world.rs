@@ -134,17 +134,124 @@ pub struct SimClipMesh {
 
 impl SimClipMesh {
     pub fn from_linear_triangles(verts: Vec<[f32; 3]>) -> Self {
+        const TRIS_PER_PARTITION: usize = 64;
+        const SORT_CELL: f32 = 512.0;
+
         let max_index = verts.len().min(u16::MAX as usize + 1);
         let usable = max_index - (max_index % 3);
-        let verts = verts.into_iter().take(usable).collect::<Vec<_>>();
-        let tri_count = usable / 3;
-        let tri_indices = (0..usable).map(|index| index as u16).collect::<Vec<_>>();
+        let mut triangles = verts
+            .into_iter()
+            .take(usable)
+            .collect::<Vec<_>>()
+            .chunks_exact(3)
+            .map(|tri| [tri[0], tri[1], tri[2]])
+            .collect::<Vec<_>>();
+
+        // Keep nearby SM64 triangles next to each other before partitioning so
+        // each root AABB covers a small part of the course instead of the
+        // whole level. The clip walker can then reject almost all partitions
+        // before doing capsule/triangle work.
+        triangles.sort_by_key(|tri| {
+            let center = [
+                (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0,
+                (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0,
+                (tri[0][2] + tri[1][2] + tri[2][2]) / 3.0,
+            ];
+            (
+                (center[0] / SORT_CELL).floor() as i32,
+                (center[1] / SORT_CELL).floor() as i32,
+                (center[2] / SORT_CELL).floor() as i32,
+            )
+        });
+
+        let mut flat = Vec::with_capacity(triangles.len() * 3);
+        for tri in &triangles {
+            flat.extend_from_slice(tri);
+        }
+        let tri_count = triangles.len();
+        let tri_indices = (0..flat.len())
+            .map(|index| index as u16)
+            .collect::<Vec<_>>();
+
+        let mut edge_walkable = vec![0u8; (tri_count * 3).div_ceil(8)];
+        for (ti, tri) in triangles.iter().enumerate() {
+            let a = [
+                tri[0][0] - tri[2][0],
+                tri[0][1] - tri[2][1],
+                tri[0][2] - tri[2][2],
+            ];
+            let b = [
+                tri[0][0] - tri[1][0],
+                tri[0][1] - tri[1][1],
+                tri[0][2] - tri[1][2],
+            ];
+            let n = [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if len > 0.0001 && n[2] / len >= 0.7 {
+                for k in 0..3 {
+                    let bit = ti * 3 + k;
+                    edge_walkable[bit >> 3] |= 1 << (bit & 7);
+                }
+            }
+        }
+
+        let mut partitions = Vec::new();
+        let mut aabb_trees = Vec::new();
+        let mut aabb_roots = Vec::new();
+        for (partition_index, chunk) in triangles.chunks(TRIS_PER_PARTITION).enumerate() {
+            let first_tri = partition_index * TRIS_PER_PARTITION;
+            let mut mins = [f32::INFINITY; 3];
+            let mut maxs = [f32::NEG_INFINITY; 3];
+            for tri in chunk {
+                for v in tri {
+                    for axis in 0..3 {
+                        mins[axis] = mins[axis].min(v[axis]);
+                        maxs[axis] = maxs[axis].max(v[axis]);
+                    }
+                }
+            }
+            let origin = [
+                (mins[0] + maxs[0]) * 0.5,
+                (mins[1] + maxs[1]) * 0.5,
+                (mins[2] + maxs[2]) * 0.5,
+            ];
+            let half_size = [
+                (maxs[0] - mins[0]) * 0.5 + 0.5,
+                (maxs[1] - mins[1]) * 0.5 + 0.5,
+                (maxs[2] - mins[2]) * 0.5 + 0.5,
+            ];
+            partitions.push(clipmap_iw4::ClipPartition {
+                tri_count: chunk.len() as u8,
+                first_tri: first_tri as i32,
+                first_vert_segment: 0,
+                border_count: 0,
+                first_border: 0,
+            });
+            let node_index = aabb_trees.len();
+            aabb_trees.push(clipmap_iw4::ClipAabbNode {
+                origin,
+                half_size,
+                material_index: 0,
+                child_count: 0,
+                u: partition_index as i32,
+            });
+            aabb_roots.push(node_index as u16);
+        }
+
         let tables = clipmap_iw4::ClipMeshTables {
-            verts,
+            verts: flat,
             tri_indices,
+            tri_edge_is_walkable: edge_walkable,
             tri_surface_flags: vec![0; tri_count],
             // Empty content flags make the mesh use CONTENTS_SOLID, matching
             // the ordinary world mesh fallback in clipmap_iw4.
+            aabb_trees,
+            partitions,
+            aabb_roots,
             ..Default::default()
         };
         Self {
