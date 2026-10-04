@@ -665,12 +665,15 @@ fn spawn_display_list_geometry(
         let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
 
         for triangle in batch.vertices.chunks_exact(3) {
-            let a=sm64_render_vec3(triangle[0].position);
-            let b=sm64_render_vec3(triangle[1].position);
-            let c=sm64_render_vec3(triangle[2].position);
+            // Y/Z conversion flips handedness. Reverse the triangle so the
+            // original SM64 front face remains front-facing in Bevy/COD.
+            let ordered=[&triangle[0],&triangle[2],&triangle[1]];
+            let a=sm64_render_vec3(ordered[0].position);
+            let b=sm64_render_vec3(ordered[1].position);
+            let c=sm64_render_vec3(ordered[2].position);
             let normal=(b-a).cross(c-a).try_normalize().unwrap_or(Vec3::Z).to_array();
 
-            for vertex in triangle {
+            for vertex in ordered {
                 positions.push(sm64_render_pos(vertex.position));
                 normals.push(normal);
                 let [width,height]=batch.texture_size.unwrap_or([32,32]);
@@ -730,7 +733,6 @@ fn spawn_display_list_geometry(
                 alpha_mode,
                 perceptual_roughness:1.0,
                 unlit:true,
-                cull_mode:None,
                 ..default()
             })),
             Sm64DebugWorld,
