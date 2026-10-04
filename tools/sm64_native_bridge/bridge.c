@@ -272,12 +272,16 @@ static void write_snapshot(void) {
         const struct Object *object = objects[i];
         write_u32(object_id(object));
         write_i32(model_id_for_object(object));
-        write_f32(object->oPosX);
-        write_f32(object->oPosY);
-        write_f32(object->oPosZ);
-        write_i16((int16_t)object->oFaceAnglePitch);
-        write_i16((int16_t)object->oFaceAngleYaw);
-        write_i16((int16_t)object->oFaceAngleRoll);
+
+        /* Use the exact graphics-node transform the original SM64 renderer
+           consumes. Behaviors often keep oPos/oFaceAngle as gameplay state
+           while header.gfx contains the render-facing interpolation/offset. */
+        write_f32(object->header.gfx.pos[0]);
+        write_f32(object->header.gfx.pos[1]);
+        write_f32(object->header.gfx.pos[2]);
+        write_i16(object->header.gfx.angle[0]);
+        write_i16(object->header.gfx.angle[1]);
+        write_i16(object->header.gfx.angle[2]);
         write_f32(object->header.gfx.scale[0]);
         write_f32(object->header.gfx.scale[1]);
         write_f32(object->header.gfx.scale[2]);
