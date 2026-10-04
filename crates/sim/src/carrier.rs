@@ -282,6 +282,14 @@ impl SimWorld {
     pub fn set_viewangles(&mut self, id: ClientId, viewangles: [f32; 3]) -> bool {
         self.frame().set_viewangles(id, viewangles)
     }
+    pub fn set_velocity(&mut self, id: ClientId, velocity: [f32; 3]) -> bool {
+        self.frame().set_velocity(id, velocity)
+    }
+
+    pub fn set_health(&mut self, id: ClientId, health: i32) -> bool {
+        self.frame().set_health(id, health)
+    }
+
 
     pub fn set_e_flags(&mut self, id: ClientId, e_flags: u32) -> bool {
         self.frame().set_e_flags(id, e_flags)
