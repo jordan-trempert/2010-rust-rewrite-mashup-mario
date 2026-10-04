@@ -101,6 +101,12 @@ struct Sm64NativeRuntime {
 }
 
 
+#[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeDynamicCollision {
+    pub triangles: Vec<[[f32;3];3]>,
+    pub tick: u32,
+}
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64NativePlayerOutput {
     pub active: bool,
@@ -182,6 +188,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64NativePlayerOutput>()
+            .init_resource::<Sm64NativeDynamicCollision>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>();
         app.insert_non_send_resource(Sm64NativeRuntime::default());
@@ -1315,6 +1322,7 @@ fn advance_sm64_runtime(
     external: Res<Sm64ExternalPlayer>,
     mut native: NonSendMut<Sm64NativeRuntime>,
     mut native_output: ResMut<Sm64NativePlayerOutput>,
+    mut native_collision: ResMut<Sm64NativeDynamicCollision>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
     if !enabled.0 { return; }
@@ -1336,6 +1344,8 @@ fn advance_sm64_runtime(
                 attack_flags:external.attack_flags,
             }) {
                 Ok(snapshot)=>{
+                    native_collision.tick=snapshot.tick;
+                    native_collision.triangles=snapshot.dynamic_surfaces.clone();
                     native_output.active=true;
                     native_output.sm64_pos=snapshot.mario_pos;
                     native_output.sm64_vel=snapshot.mario_vel;
@@ -1354,10 +1364,12 @@ fn advance_sm64_runtime(
                     native.client=None;
                     native.active=false;
                     native_output.active=false;
+                    native_collision.triangles.clear();
                 }
             }
         } else {
             native_output.active=false;
+            native_collision.triangles.clear();
             runtime.latest=Some(if external.active {
                 runtime.world.step_external_player(
                     external.sm64_pos,
