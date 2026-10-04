@@ -93,6 +93,14 @@ pub struct Sm64Runtime {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ControllerInput(pub Sm64Input);
 
+#[derive(Default)]
+struct Sm64NativeRuntime {
+    client: Option<sm64_native::NativeClient>,
+    model_symbols: HashMap<i32,String>,
+    active: bool,
+}
+
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
@@ -158,18 +166,19 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64LoadStatus>()
-            .init_resource::<Sm64DebugView>()
-            .add_systems(
-                Update,
-                (
-                    launch_requested_sm64_map,
-                    update_debug_input.after(launch_requested_sm64_map),
-                    advance_sm64_runtime.after(launch_requested_sm64_map),
-                    sync_mario_presentation.after(advance_sm64_runtime),
-                    sync_object_presentations.after(advance_sm64_runtime),
-                    follow_mario_camera.after(advance_sm64_runtime),
-                ),
-            );
+            .init_resource::<Sm64DebugView>();
+        app.insert_non_send_resource(Sm64NativeRuntime::default());
+        app.add_systems(
+            Update,
+            (
+                launch_requested_sm64_map,
+                update_debug_input.after(launch_requested_sm64_map),
+                advance_sm64_runtime.after(launch_requested_sm64_map),
+                sync_mario_presentation.after(advance_sm64_runtime),
+                sync_object_presentations.after(advance_sm64_runtime),
+                follow_mario_camera.after(advance_sm64_runtime),
+            ),
+        );
     }
 }
 
@@ -192,6 +201,7 @@ fn launch_requested_sm64_map(
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
+    mut native: NonSendMut<Sm64NativeRuntime>,
     mut status: ResMut<Sm64LoadStatus>,
 ) {
     let Some(request)=request else {return;};
@@ -199,6 +209,9 @@ fn launch_requested_sm64_map(
     for entity in &existing {
         commands.entity(entity).despawn();
     }
+    native.client=None;
+    native.model_symbols.clear();
+    native.active=false;
 
     let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
         enabled.0=false;
@@ -298,6 +311,28 @@ fn launch_requested_sm64_map(
         .and_then(|value|value.parse::<u8>().ok())
         .filter(|value|(1..=6).contains(value))
         .unwrap_or(1);
+
+    if cod_active.is_some() {
+        native.model_symbols=sm64_assets::load_model_id_symbols(&root,&level)
+            .unwrap_or_else(|error|{
+                warn!("SM64 native model-id mapping failed: {error}");
+                HashMap::new()
+            });
+        match sm64_native::NativeClient::launch(&root,&level,area,selected_act) {
+            Ok(client)=>{
+                native.client=Some(client);
+                native.active=true;
+                info!(
+                    "SM64 COD map: native decomp gameplay runtime active for {level} area {area} act {selected_act}"
+                );
+            }
+            Err(error)=>{
+                warn!(
+                    "SM64 COD map: native gameplay bridge unavailable ({error}); falling back to partial Rust behavior port. Build tools/sm64_native_bridge/build.ps1 against sm64-port and set SM64_NATIVE_ROOT."
+                );
+            }
+        }
+    }
 
     let surface_count=parsed.world.surfaces.len();
     let special_count=parsed.specials.len();
@@ -451,7 +486,11 @@ fn spawn_runtime_object_presentations(
 
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
-            Transform::from_translation(sm64_render_vec3(object.pos)),
+            Transform {
+                translation:sm64_render_vec3(object.pos),
+                rotation:Quat::IDENTITY,
+                scale:Vec3::from_array(object.scale),
+            },
             Visibility::default(),
             Sm64ObjectPresentation{id:object.id},
         )).id();
@@ -1186,6 +1225,7 @@ fn advance_sm64_runtime(
     enabled: Res<Sm64Enabled>,
     input: Res<Sm64ControllerInput>,
     external: Res<Sm64ExternalPlayer>,
+    mut native: NonSendMut<Sm64NativeRuntime>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
     if !enabled.0 { return; }
@@ -1193,16 +1233,84 @@ fn advance_sm64_runtime(
     let mut steps=0;
     while runtime.accumulator >= SM64_TICK_SECONDS && steps < 8 {
         runtime.accumulator -= SM64_TICK_SECONDS;
-        runtime.latest=Some(if external.active {
-            runtime.world.step_external_player(
-                external.sm64_pos,
-                external.sm64_vel,
-                external.sm64_yaw,
-            )
+        if external.active && native.active {
+            let Some(client)=native.client.as_mut() else {
+                native.active=false;
+                continue;
+            };
+            match client.step(sm64_native::NativePlayerProxy {
+                pos:external.sm64_pos,
+                vel:external.sm64_vel,
+                yaw:external.sm64_yaw,
+                health:external.health,
+                attack_flags:0,
+            }) {
+                Ok(snapshot)=>{
+                    runtime.latest=Some(native_snapshot_to_sm64(
+                        snapshot,
+                        &runtime.world.mario,
+                        &native.model_symbols,
+                    ));
+                }
+                Err(error)=>{
+                    error!("SM64 native gameplay bridge failed: {error}");
+                    native.client=None;
+                    native.active=false;
+                }
+            }
         } else {
-            runtime.world.step(input.0)
-        });
+            runtime.latest=Some(if external.active {
+                runtime.world.step_external_player(
+                    external.sm64_pos,
+                    external.sm64_vel,
+                    external.sm64_yaw,
+                )
+            } else {
+                runtime.world.step(input.0)
+            });
+        }
         steps += 1;
+    }
+}
+
+fn native_snapshot_to_sm64(
+    native:sm64_native::NativeSnapshot,
+    previous_mario:&sm64_core::MarioState,
+    model_symbols:&HashMap<i32,String>,
+)->Sm64Snapshot {
+    let mut mario=previous_mario.clone();
+    mario.global_timer=native.tick;
+    mario.health=native.mario_health.clamp(i16::MIN as i32,i16::MAX as i32) as i16;
+    mario.num_coins=native.coins.clamp(i16::MIN as i32,i16::MAX as i32) as i16;
+    mario.action=native.mario_action;
+
+    let objects=native.objects.into_iter().map(|source|{
+        let model=model_symbols.get(&source.model_id)
+            .cloned()
+            .unwrap_or_else(||if source.model_id==0 {
+                "MODEL_NONE".to_owned()
+            } else {
+                format!("MODEL_NATIVE_{:02X}",source.model_id)
+            });
+        let mut object=sm64_core::Sm64Object::new(
+            sm64_core::ObjectId(source.id),
+            model,
+            "native_decomp",
+            sm64_core::ObjectList::Default,
+            source.pos,
+            source.face_angle,
+        );
+        object.scale=source.scale;
+        object.interact_status=source.interact_status;
+        object.damage_or_coin_value=source.damage_or_coin_value;
+        object.active=source.active_flags!=0;
+        object
+    }).collect();
+
+    Sm64Snapshot {
+        tick:native.tick as u64,
+        mario,
+        objects,
     }
 }
 
@@ -1216,6 +1324,7 @@ fn sync_mario_presentation(
         let yaw=snapshot.mario.face_angle[1] as u16 as f32
             * core::f32::consts::TAU / 65536.0;
         transform.rotation=Quat::from_rotation_z(yaw);
+        transform.scale=Vec3::from_array(object.scale);
     }
 }
 
