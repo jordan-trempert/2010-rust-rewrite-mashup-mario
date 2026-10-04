@@ -31,6 +31,32 @@
 #define OP_STEP 1u
 #define OP_SHUTDOWN 2u
 
+OSMesg gMainReceivedMesg;
+OSMesgQueue gSIEventMesgQueue;
+
+s8 gResetTimer;
+s8 gNmiResetBarsTimer;
+s8 gDebugLevelSelect;
+s8 gShowProfiler;
+s8 gShowDebugText;
+
+extern void thread5_game_loop(void *arg);
+
+void dispatch_audio_sptask(UNUSED struct SPTask *spTask) {
+}
+
+void set_vblank_handler(
+    UNUSED s32 index,
+    UNUSED struct VblankHandler *handler,
+    UNUSED OSMesgQueue *queue,
+    UNUSED OSMesg *msg
+) {
+}
+
+void exec_display_list(UNUSED struct SPTask *spTask) {
+    /* Headless bridge: the host renders every SM64 object itself. */
+}
+
 #define DEFINE_LEVEL(internal, level_enum, course_enum, folder, texture, acoustic, echo1, echo2, echo3, dyn, cam) \
     extern const LevelScript level_##folder##_entry[];
 #define STUB_LEVEL(internal, level_enum, course_enum, acoustic, echo1, echo2, echo3, dyn, cam)
@@ -236,7 +262,7 @@ static void write_snapshot(void) {
     fflush(stdout);
 }
 
-int main(int argc, char **argv) {
+static int bridge_main(int argc, char **argv) {
     const char *level_name = "bob";
     int area = 1;
     int act = 1;
@@ -265,10 +291,21 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+#ifdef USE_SYSTEM_MALLOC
     main_pool_init();
     gGfxAllocOnlyPool = alloc_only_pool_init();
+#else
+    static u64 pool[0x165000/8 / 4 * sizeof(void *)];
+    main_pool_init(pool, pool + sizeof(pool) / sizeof(pool[0]));
+#endif
     gEffectsMemoryPool = mem_pool_init(0x4000, MEMORY_POOL_LEFT);
-    gfx_init(&gfx_dummy_wm_api, &gfx_dummy_renderer_api, "IW4L SM64 Gameplay Bridge", 0);
+
+    gfx_init(
+        &gfx_dummy_wm_api,
+        &gfx_dummy_renderer_api,
+        "IW4L SM64 Gameplay Bridge",
+        false
+    );
     audio_init();
     sound_init();
     thread5_game_loop(NULL);
@@ -321,3 +358,19 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+int WINAPI WinMain(
+    UNUSED HINSTANCE hInstance,
+    UNUSED HINSTANCE hPrevInstance,
+    UNUSED LPSTR pCmdLine,
+    UNUSED int nCmdShow
+) {
+    return bridge_main(__argc, __argv);
+}
+#else
+int main(int argc, char **argv) {
+    return bridge_main(argc, argv);
+}
+#endif
