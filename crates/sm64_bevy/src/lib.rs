@@ -155,6 +155,9 @@ struct Sm64ObjectPresentation {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
+struct Sm64BillboardPart;
+
+#[derive(Component, Debug, Clone, Copy)]
 struct Sm64DebugWorld;
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -190,6 +193,7 @@ impl Plugin for Sm64Plugin {
                 advance_sm64_runtime.after(launch_requested_sm64_map),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
+                face_sm64_billboards.after(sync_object_presentations),
                 follow_mario_camera.after(advance_sm64_runtime),
             ),
         );
@@ -661,7 +665,7 @@ fn spawn_hierarchical_object_geometry(
             texture_cache.insert(symbol.clone(),handle.clone());
             Some(handle)
         });
-        commands.spawn((
+        let mut entity=commands.spawn((
             Name::new(format!("SM64 object part {part_index} mesh {batch_index}")),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(StandardMaterial{
@@ -682,6 +686,9 @@ fn spawn_hierarchical_object_geometry(
             ChildOf(parent),
             Sm64DebugWorld,
         ));
+        if part.spec.billboard {
+            entity.insert(Sm64BillboardPart);
+        }
       }
     }
 }
@@ -1362,6 +1369,29 @@ fn advance_sm64_runtime(
             });
         }
         steps += 1;
+    }
+}
+
+fn face_sm64_billboards(
+    cameras:Query<&GlobalTransform,With<render_scene::FlyCamera>>,
+    parent_transforms:Query<&GlobalTransform,Without<Sm64BillboardPart>>,
+    mut billboards:Query<(&ChildOf,&GlobalTransform,&mut Transform),With<Sm64BillboardPart>>,
+) {
+    let Some(camera)=cameras.iter().next() else {return;};
+    let camera_pos=camera.translation();
+
+    for (child_of,global,mut local) in &mut billboards {
+        let Ok(parent)=parent_transforms.get(child_of.parent()) else {continue;};
+        let delta=camera_pos-global.translation();
+        let flat=Vec2::new(delta.x,delta.y);
+        if flat.length_squared()<1e-6 {
+            continue;
+        }
+
+        // Billboard around IW4/Bevy Z-up while preserving the object's parent
+        // translation/scale. This matches SM64's camera-facing sprite pieces.
+        let yaw=flat.y.atan2(flat.x)-core::f32::consts::FRAC_PI_2;
+        local.rotation=parent.rotation().inverse()*Quat::from_rotation_z(yaw);
     }
 }
 
