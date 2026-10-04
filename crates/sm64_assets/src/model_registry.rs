@@ -34,6 +34,43 @@ pub fn load_model_registry(
     Ok(registry)
 }
 
+pub fn load_model_id_symbols(
+    decomp_root: impl AsRef<Path>,
+    level: &str,
+)->Result<HashMap<i32,String>,CollisionParseError>{
+    let root=decomp_root.as_ref();
+    let model_ids_path=root.join("include").join("model_ids.h");
+    let source=fs::read_to_string(&model_ids_path)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",model_ids_path.display())))?;
+    let registry=load_model_registry(root,level)?;
+    let mut out=HashMap::new();
+
+    for raw in source.lines() {
+        let line=raw.trim();
+        if !line.starts_with("#define MODEL_") {
+            continue;
+        }
+        let mut parts=line.split_whitespace();
+        let _define=parts.next();
+        let Some(symbol)=parts.next() else {continue;};
+        let Some(value)=parts.next() else {continue;};
+        if !registry.contains_key(symbol) {
+            continue;
+        }
+        let value=value.trim_matches(|ch:char|ch=='('||ch==')');
+        let id=if let Some(hex)=value.strip_prefix("0x").or_else(||value.strip_prefix("0X")) {
+            i32::from_str_radix(hex,16).ok()
+        } else {
+            value.parse::<i32>().ok()
+        };
+        if let Some(id)=id {
+            out.insert(id,symbol.to_owned());
+        }
+    }
+
+    Ok(out)
+}
+
 pub fn resolve_geo_model_geometry(
     decomp_root:impl AsRef<Path>,
     geo_symbol:&str,
