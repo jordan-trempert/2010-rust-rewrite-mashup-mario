@@ -4,7 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{CollisionParseError, ParsedRenderGeometry, load_model_display_lists};
+use crate::{
+    CollisionParseError, ParsedRenderGeometry, load_actor_texture_sources,
+    load_model_display_lists, load_texture_sources,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModelSource {
@@ -70,6 +73,70 @@ pub fn resolve_geo_model_geometry(
     Err(CollisionParseError::new(format!(
         "could not find actor GeoLayout {geo_symbol}"
     )))
+}
+
+pub fn resolve_display_list_model_geometry(
+    decomp_root: impl AsRef<Path>,
+    level: &str,
+    display_list: &str,
+    layer: &str,
+)->Result<(ParsedRenderGeometry,HashMap<String,PathBuf>),CollisionParseError>{
+    let root=decomp_root.as_ref();
+
+    // Level-local display lists first.
+    for path in [
+        root.join("levels").join(level).join("model.inc.c"),
+        root.join("levels").join(level).join("areas").join("1").join("model.inc.c"),
+    ] {
+        if !path.exists(){continue;}
+        let source=fs::read_to_string(&path)
+            .map_err(|e|CollisionParseError::new(format!("{}: {e}",path.display())))?;
+        if !source.contains(&format!("{display_list}[]")){continue;}
+        let relative=path.strip_prefix(root)
+            .map_err(|_|CollisionParseError::new(format!("{} is outside decomp root",path.display())))?;
+        let roots=[(layer,display_list)];
+        let geometry=load_model_display_lists(root,relative,&roots)?;
+        let textures=load_texture_sources(root,level).unwrap_or_default();
+        return Ok((geometry,textures));
+    }
+
+    // Shared actor display lists (trees, signs, particles, etc.).
+    let actors=root.join("actors");
+    let mut model_files=Vec::new();
+    collect_model_files(&actors,&mut model_files)
+        .map_err(|e|CollisionParseError::new(format!("{}: {e}",actors.display())))?;
+    for path in model_files {
+        let Ok(source)=fs::read_to_string(&path) else {continue;};
+        if !source.contains(&format!("{display_list}[]")){continue;}
+        let relative=path.strip_prefix(root)
+            .map_err(|_|CollisionParseError::new(format!("{} is outside decomp root",path.display())))?;
+        let roots=[(layer,display_list)];
+        let geometry=load_model_display_lists(root,relative,&roots)?;
+        let actor=path.parent()
+            .and_then(|p|p.file_name())
+            .and_then(|n|n.to_str())
+            .unwrap_or_default();
+        let textures=load_actor_texture_sources(root,actor).unwrap_or_default();
+        return Ok((geometry,textures));
+    }
+
+    Err(CollisionParseError::new(format!(
+        "could not find display list {display_list} for level {level}"
+    )))
+}
+
+fn collect_model_files(dir:&Path,out:&mut Vec<PathBuf>)->std::io::Result<()>{
+    if !dir.exists(){return Ok(());}
+    for entry in fs::read_dir(dir)?{
+        let entry=entry?;
+        let path=entry.path();
+        if path.is_dir(){
+            collect_model_files(&path,out)?;
+        }else if path.file_name().is_some_and(|name|name=="model.inc.c"){
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn parse_model_registry_source(source:&str,out:&mut HashMap<String,ModelSource>){
