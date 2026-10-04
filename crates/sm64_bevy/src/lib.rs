@@ -456,7 +456,7 @@ fn spawn_runtime_object_presentations(
 
         let root=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
-            Transform::from_xyz(object.pos[0],object.pos[2],object.pos[1]),
+            Transform::from_translation(sm64_render_vec3(object.pos)),
             Visibility::default(),
             Sm64ObjectPresentation{id:object.id},
         )).id();
@@ -630,12 +630,12 @@ fn spawn_debug_scene(
 
 #[inline]
 fn sm64_render_pos(v:[f32;3])->[f32;3] {
-    [v[0],v[2],v[1]]
+    [v[0],-v[2],v[1]]
 }
 
 #[inline]
 fn sm64_render_vec3(v:[f32;3])->Vec3 {
-    Vec3::new(v[0],v[2],v[1])
+    Vec3::new(v[0],-v[2],v[1])
 }
 
 fn sm64_render_rotation(degrees:[f32;3])->Quat {
@@ -648,7 +648,7 @@ fn sm64_render_rotation(degrees:[f32;3])->Quat {
     let basis=Mat3::from_cols(
         Vec3::X,
         Vec3::Z,
-        Vec3::Y,
+        -Vec3::Y,
     );
     Quat::from_mat3(&(basis * Mat3::from_quat(old) * basis))
 }
@@ -670,15 +670,12 @@ fn spawn_display_list_geometry(
         let mut uvs=Vec::<[f32;2]>::with_capacity(batch.vertices.len());
 
         for triangle in batch.vertices.chunks_exact(3) {
-            // Y/Z conversion flips handedness. Reverse the triangle so the
-            // original SM64 front face remains front-facing in Bevy/COD.
-            let ordered=[&triangle[0],&triangle[2],&triangle[1]];
-            let a=sm64_render_vec3(ordered[0].position);
-            let b=sm64_render_vec3(ordered[1].position);
-            let c=sm64_render_vec3(ordered[2].position);
+            let a=sm64_render_vec3(triangle[0].position);
+            let b=sm64_render_vec3(triangle[1].position);
+            let c=sm64_render_vec3(triangle[2].position);
             let normal=(b-a).cross(c-a).try_normalize().unwrap_or(Vec3::Z).to_array();
 
-            for vertex in ordered {
+            for vertex in triangle {
                 positions.push(sm64_render_pos(vertex.position));
                 normals.push(normal);
                 let [width,height]=batch.texture_size.unwrap_or([32,32]);
@@ -1110,14 +1107,10 @@ fn sync_mario_presentation(
 ) {
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
     for mut transform in &mut query {
-        transform.translation=Vec3::new(
-            snapshot.mario.pos[0],
-            snapshot.mario.pos[1],
-            snapshot.mario.pos[2],
-        );
+        transform.translation=sm64_render_vec3(snapshot.mario.pos);
         let yaw=snapshot.mario.face_angle[1] as u16 as f32
             * core::f32::consts::TAU / 65536.0;
-        transform.rotation=Quat::from_rotation_y(yaw);
+        transform.rotation=Quat::from_rotation_z(yaw);
     }
 }
 
@@ -1136,9 +1129,9 @@ fn sync_object_presentations(
             commands.entity(entity).despawn();
             continue;
         };
-        transform.translation=Vec3::new(object.pos[0],object.pos[2],object.pos[1]);
+        transform.translation=sm64_render_vec3(object.pos);
         let yaw=object.face_angle[1] as u16 as f32*core::f32::consts::TAU/65536.0;
-        transform.rotation=Quat::from_rotation_z(-yaw);
+        transform.rotation=Quat::from_rotation_z(yaw);
     }
 }
 
