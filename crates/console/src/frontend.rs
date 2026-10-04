@@ -231,12 +231,16 @@ pub(crate) fn route(
                         let target = request.map_key();
                         commands.insert_resource(frame::ExternalWorldPresentation(true));
                         commands.insert_resource(request);
+                        // Follow the Minecraft custom-world path: the logical
+                        // session map remains the custom world key, while
+                        // assets::minecraft_map::find_zone_file resolves that
+                        // key to mp_rust only as the IW4 donor zone.
                         let id = transition
-                            .request_zone("iw4:mp_rust".to_owned())
+                            .request_zone(target.clone())
                             .map_err(|error| error.to_string())?;
                         commands.insert_resource(mode);
                         echo.write(format!(
-                            "menu: starting {target} over iw4:mp_rust {} (swap #{id})",
+                            "menu: starting {target} using iw4:mp_rust as donor {} (swap #{id})",
                             mode.token()
                         ));
                     } else if state.public {
