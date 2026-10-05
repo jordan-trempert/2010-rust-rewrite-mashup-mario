@@ -502,6 +502,15 @@ static int bridge_main(int argc, char **argv) {
     gCurrLevelNum = level->level;
     gCurrCourseNum = level->course;
 
+    /*
+     * The bridge jumps directly into a course. A blank/fresh SM64 save causes
+     * init_level() to put Mario into ACT_INTRO_CUTSCENE, which is the castle
+     * opening state machine and is invalid inside BOB/WF/etc. Mark file 1 as
+     * existing before course initialization so the native decomp selects its
+     * normal in-course idle path instead.
+     */
+    save_file_set_flags(SAVE_FLAG_FILE_EXISTS);
+
     /* The COD mashup has no Mario dialogue UI yet, so Bob-omb Buddy cannot
        perform the vanilla cannon-unlock conversation. Unlock the course
        cannon flag before the level initializes; the original bhvCannonClosed,
@@ -522,9 +531,18 @@ static int bridge_main(int argc, char **argv) {
         return 3;
     }
 
+    if ((gMarioState->action & ACT_GROUP_MASK) == ACT_GROUP_CUTSCENE) {
+        fprintf(
+            stderr,
+            "iw4l-sm64-bridge: normalizing unexpected startup cutscene action 0x%08X to ACT_IDLE\n",
+            gMarioState->action
+        );
+        set_mario_action(gMarioState, ACT_IDLE, 0);
+    }
+
     fprintf(stderr,
-            "iw4l-sm64-bridge: native decomp gameplay ready: level=%s area=%d act=%d\n",
-            level_name, area, act);
+            "iw4l-sm64-bridge: native decomp gameplay ready: level=%s area=%d act=%d action=0x%08X\n",
+            level_name, area, act, gMarioState->action);
 
     for (;;) {
         struct Request request;
