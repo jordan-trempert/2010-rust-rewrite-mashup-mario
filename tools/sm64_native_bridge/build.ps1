@@ -571,17 +571,18 @@ $shaderInfoNeedle = @"
 $shaderInfoReplacement = @"
     uint8_t num_inputs;
     bool used_textures[2];
-#ifdef IW4L_SM64_EMBEDDED
-    {
-        struct CCFeatures native_features;
-        gfx_cc_get_features(cc_id, &native_features);
-        num_inputs = (uint8_t) native_features.num_inputs;
-        used_textures[0] = native_features.used_textures[0];
-        used_textures[1] = native_features.used_textures[1];
-    }
-#else
+    /*
+     * IMPORTANT: ask the renderer backend about prg, not gfx_cc_get_features
+     * on the raw N64 cc_id. gfx_generate_cc() first rewrites the N64 combiner
+     * into a generated shader_id (SHADER_TEXEL0/1, numbered color inputs,
+     * alpha/fog flags). Passing cc_id directly misclassifies nearly every
+     * textured SM64 draw as untextured.
+     *
+     * The embedded dummy backend keeps shader_id in its ShaderProgram and its
+     * shader_get_info callback calls gfx_cc_get_features(shader_id), matching
+     * the normal sm64-port renderer contract.
+     */
     gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
-#endif
 "@
 if (-not $gfxPcText.Contains($shaderInfoNeedle)) {
     throw "Could not locate shader info in $gfxPcSource"
