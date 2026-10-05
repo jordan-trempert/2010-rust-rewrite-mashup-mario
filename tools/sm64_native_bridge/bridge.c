@@ -735,6 +735,120 @@ static void apply_external_attack(const struct Request *request) {
     }
 }
 
+
+/*
+ * COD locomotion is mirrored into gMarioObject immediately before native
+ * update_objects(). The original collision/interaction path normally owns
+ * enemy contact damage. Keep a conservative fallback for the external-player
+ * mode because some actor hitboxes are initialized during their behavior
+ * update, after SM64's collision pass has already run for that frame.
+ *
+ * Only apply this when the vanilla interaction pass did not change health.
+ * This preserves native damage whenever it works and prevents a missed first
+ * collision frame from making enemies harmless forever.
+ */
+static void bridge_contact_damage_fallback(int32_t health_before) {
+    const uint32_t harmful =
+        INTERACT_DAMAGE |
+        INTERACT_BOUNCE_TOP |
+        INTERACT_BOUNCE_TOP2 |
+        INTERACT_BULLY |
+        INTERACT_FLAME |
+        INTERACT_MR_BLIZZARD |
+        INTERACT_HIT_FROM_BELOW |
+        INTERACT_CLAM_OR_BUBBA |
+        INTERACT_SNUFIT_BULLET |
+        INTERACT_SHOCK;
+    struct Object *best = NULL;
+    float best_distance2 = 1.0e30f;
+    int list_index;
+
+    if (gMarioState == NULL || gMarioObject == NULL || gObjectLists == NULL) {
+        return;
+    }
+    if (gMarioState->health != health_before || gMarioState->invincTimer != 0) {
+        return;
+    }
+
+    for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+        struct ObjectNode *head = &gObjectLists[list_index];
+        struct ObjectNode *node = head->next;
+        while (node != head) {
+            struct Object *object = (struct Object *)node;
+            float mario_bottom;
+            float mario_top;
+            float object_bottom;
+            float object_top;
+            float dx;
+            float dz;
+            float radius;
+            float distance2;
+
+            node = node->next;
+            if (object == gMarioObject ||
+                (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                object->oIntangibleTimer != 0 ||
+                (object->oInteractType & harmful) == 0 ||
+                object->oDamageOrCoinValue <= 0) {
+                continue;
+            }
+
+            radius = gMarioObject->hitboxRadius + object->hitboxRadius;
+            if (radius <= 0.0f) {
+                continue;
+            }
+            dx = gMarioObject->oPosX - object->oPosX;
+            dz = gMarioObject->oPosZ - object->oPosZ;
+            distance2 = dx * dx + dz * dz;
+            if (distance2 >= radius * radius) {
+                continue;
+            }
+
+            mario_bottom = gMarioObject->oPosY - gMarioObject->hitboxDownOffset;
+            mario_top = mario_bottom + gMarioObject->hitboxHeight;
+            object_bottom = object->oPosY - object->hitboxDownOffset;
+            object_top = object_bottom + object->hitboxHeight;
+            if (mario_bottom > object_top || mario_top < object_bottom) {
+                continue;
+            }
+
+            if (distance2 < best_distance2) {
+                best_distance2 = distance2;
+                best = object;
+            }
+        }
+    }
+
+    if (best != NULL) {
+        int damage = best->oDamageOrCoinValue;
+        if (!(gMarioState->flags & MARIO_CAP_ON_HEAD)) {
+            damage += (damage + 1) / 2;
+        }
+        if (gMarioState->flags & MARIO_METAL_CAP) {
+            damage = 0;
+        }
+
+        if (damage > 0) {
+            const int32_t amount = damage * 0x100;
+            gMarioState->health -= amount;
+            if (gMarioState->health < 0) {
+                gMarioState->health = 0;
+            }
+            gMarioState->invincTimer = 30;
+            best->oInteractStatus |= INT_STATUS_INTERACTED | INT_STATUS_ATTACKED_MARIO;
+            play_sound(SOUND_MARIO_ATTACKED, gMarioObject->header.gfx.cameraToObject);
+            fprintf(
+                stderr,
+                "iw4l-sm64-native: contact damage fallback model=%d damage=%d health=%d\n",
+                (int)model_id_for_object(best),
+                damage,
+                (int)gMarioState->health
+            );
+            fflush(stderr);
+        }
+    }
+}
+
 void iw4l_sm64_capture_begin_frame(void) {
     gIw4lRenderTriangleCount = 0;
 }
@@ -1343,6 +1457,8 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gBridgeStage = "level_script_execute";
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gGlobalTimer++;
+    gBridgeStage = "contact_damage_fallback";
+    bridge_contact_damage_fallback(health_before);
     gBridgeStage = "audio_tick";
     bridge_audio_tick();
     if (gMarioState != NULL && gMarioState->health != health_before) {
