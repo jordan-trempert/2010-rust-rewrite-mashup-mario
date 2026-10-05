@@ -1060,9 +1060,11 @@ fn apply_sm64_native_player_output(
             if bridge_state.force_native_reposition {
                 let sm64_yaw_degrees =
                     output.sm64_yaw as u16 as f32 * 360.0 / 65536.0;
+                let native_view = [0.0, sm64_yaw_degrees - 90.0, 0.0];
+                authority.0.set_viewangles(id, native_view);
                 if let Some(spawn) = spawn.as_deref_mut() {
                     spawn.origin = native_origin;
-                    spawn.view = [0.0, sm64_yaw_degrees - 90.0, 0.0];
+                    spawn.view = native_view;
                 }
             }
 
