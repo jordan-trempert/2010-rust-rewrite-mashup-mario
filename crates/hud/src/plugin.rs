@@ -736,6 +736,7 @@ fn flush_sm64_tess(
     mut pass: ResMut<HudTessPass>,
     mut hud_images: ResMut<HudImages>,
     mut images: ResMut<Assets<Image>>,
+    mut frame: ResMut<crate::gpu_list::HudTessGpuFrame>,
     mut raster: Query<
         (Entity, &mut Node, &mut crate::gpu_list::GpuListLatch),
         With<crate::sm64_overlay::Sm64HudRaster>,
