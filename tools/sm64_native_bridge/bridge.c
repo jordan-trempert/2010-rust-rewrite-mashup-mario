@@ -28,6 +28,7 @@
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
 #include "engine/level_script.h"
+#include "engine/surface_collision.h"
 #include "engine/surface_load.h"
 
 #define REQUEST_MAGIC 0x31514D53u /* SMQ1 */
@@ -225,6 +226,30 @@ static void apply_proxy(const struct Request *request) {
     gMarioState->faceAngle[1] = request->yaw;
     gMarioState->faceAngle[0] = request->pitch;
     gMarioState->input = 0;
+
+    /*
+     * MarioState caches collision pointers/heights. Because COD can move the
+     * proxy arbitrarily between native ticks, those caches must be rebuilt at
+     * the new position before any vanilla Mario/object behavior runs. Keeping
+     * a floor/ceiling pointer from the previous external position can leave a
+     * dangling dynamic-surface reference and eventually crash update_level().
+     */
+    gMarioState->floorHeight = find_floor(
+        gMarioState->pos[0],
+        gMarioState->pos[1],
+        gMarioState->pos[2],
+        &gMarioState->floor
+    );
+    gMarioState->ceilHeight = find_ceil(
+        gMarioState->pos[0],
+        gMarioState->pos[1],
+        gMarioState->pos[2],
+        &gMarioState->ceil
+    );
+    gMarioState->waterLevel = find_water_level(
+        gMarioState->pos[0],
+        gMarioState->pos[2]
+    );
 
     gMarioObject->oPosX = request->pos[0];
     gMarioObject->oPosY = request->pos[1];
