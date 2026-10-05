@@ -24,6 +24,7 @@ mod plugin;
 mod presentation_scale;
 mod reticle;
 mod scorebar;
+mod sm64_overlay;
 mod scoreboard;
 mod splash;
 mod surface;
