@@ -506,7 +506,7 @@ fn spawn_runtime_object_presentations(
         }
     };
     let mut geo_cache=HashMap::<
-        String,
+        (String,i32),
         (sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)
     >::new();
     let mut dl_cache=HashMap::<
@@ -527,7 +527,11 @@ fn spawn_runtime_object_presentations(
                 rotation:sm64_object_rotation(object.face_angle),
                 scale:Vec3::from_array(object.scale),
             },
-            Visibility::default(),
+            if (object.render_flags & 1)!=0 && (object.render_flags & (1<<4))==0 {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
             Sm64ObjectPresentation{id:object.id},
         )).id();
 
@@ -538,9 +542,10 @@ fn spawn_runtime_object_presentations(
 
         match source {
             sm64_assets::ModelSource::Geo{geo_symbol}=>{
-                if !geo_cache.contains_key(&object.model) {
-                    match sm64_assets::resolve_geo_model_parts_for_level(
-                        decomp_root,level,geo_symbol
+                let geo_key=(object.model.clone(),object.anim_state);
+                if !geo_cache.contains_key(&geo_key) {
+                    match sm64_assets::resolve_geo_model_parts_for_level_state(
+                        decomp_root,level,geo_symbol,object.anim_state
                     ) {
                         Ok(model)=>{
                             let mut textures=sm64_assets::load_actor_texture_sources(
@@ -556,7 +561,7 @@ fn spawn_runtime_object_presentations(
                                     decomp_root,level
                                 ).unwrap_or_default();
                             }
-                            geo_cache.insert(object.model.clone(),(model,textures));
+                            geo_cache.insert(geo_key.clone(),(model,textures));
                         }
                         Err(hierarchy_error)=>{
                             // Some generated decomp GeoLayouts are simple
@@ -591,7 +596,7 @@ fn spawn_runtime_object_presentations(
                         }
                     }
                 }
-                if let Some((model,textures))=geo_cache.get(&object.model) {
+                if let Some((model,textures))=geo_cache.get(&geo_key) {
                     spawn_hierarchical_object_geometry(
                         commands,meshes,materials,images,root,model,textures,
                     );
@@ -1475,7 +1480,7 @@ fn sync_object_presentations(
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
     mut images:ResMut<Assets<Image>>,
-    mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform)>,
+    mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform,&mut Visibility)>,
 ) {
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
     let by_id=snapshot.objects.iter()
@@ -1483,7 +1488,7 @@ fn sync_object_presentations(
         .collect::<HashMap<_,_>>();
     let mut presented=std::collections::HashSet::new();
 
-    for (entity,presentation,mut transform) in &mut query {
+    for (entity,presentation,mut transform,mut visibility) in &mut query {
         let Some(object)=by_id.get(&presentation.id) else {
             commands.entity(entity).despawn();
             continue;
@@ -1492,6 +1497,11 @@ fn sync_object_presentations(
         transform.translation=sm64_render_vec3(object.pos);
         transform.rotation=sm64_object_rotation(object.face_angle);
         transform.scale=Vec3::from_array(object.scale);
+        *visibility=if (object.render_flags & 1)!=0 && (object.render_flags & (1<<4))==0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // Native SM64 behaviors create objects at runtime (coin formations,
