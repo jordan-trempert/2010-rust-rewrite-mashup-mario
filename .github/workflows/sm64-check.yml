@@ -7,6 +7,9 @@ on:
       - "crates/sm64_core/**"
       - "crates/sm64_sim/**"
       - "crates/sm64_bevy/**"
+      - "crates/bootstrap/**"
+      - "crates/launcher/**"
+      - "tools/sm64_native_bridge/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/sm64-check.yml"
@@ -18,5 +21,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Check SM64 crates
-        run: cargo check -p sm64_core -p sm64_assets -p sm64_sim -p sm64_bevy --tests
+      - name: Check SM64 integration
+        run: cargo check -p sm64_core -p sm64_assets -p sm64_sim -p sm64_bevy -p bootstrap -p launcher --tests
