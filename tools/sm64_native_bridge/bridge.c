@@ -664,6 +664,43 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
                 behavior != segmented_to_virtual(bhvStarDoor)) {
                 continue;
             }
+
+            /*
+             * Never let an unlocked star door enter Mario's native
+             * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR path in the
+             * embedded host. Those actions dereference and animate hidden
+             * Mario/door state during level_script_execute(), so trying to
+             * bypass them after the native frame is too late if that same
+             * frame faults.
+             *
+             * Star doors are not level warps: bhvStarDoor simply slides the
+             * paired gate halves apart. Once the star requirement is met,
+             * disable its INTERACT_DOOR contribution and drive the exact
+             * vanilla bhvStarDoor animation through oInteractStatus instead.
+             *
+             * If the player does NOT have enough stars, leave oInteractType
+             * alone so vanilla interact_door() can still show the normal
+             * "need N more stars" dialog.
+             */
+            if (behavior == segmented_to_virtual(bhvStarDoor) &&
+                bridge_door_is_unlocked(object)) {
+                const u32 save_flag = get_door_save_file_flag(object);
+                const u32 old_flags = save_file_get_flags();
+
+                object->oInteractType = 0;
+
+                if (save_flag != 0 && !(old_flags & save_flag)) {
+                    save_file_set_flags(save_flag);
+                    fprintf(
+                        stderr,
+                        "iw4l-sm64-native: star door pre-unlocked safely flag=0x%08X required=%d\n",
+                        (unsigned)save_flag,
+                        (int)((s16)(object->oBehParams >> 24))
+                    );
+                    fflush(stderr);
+                }
+            }
+
             if (!bridge_door_is_unlocked(object) || object->oAction != 0) {
                 continue;
             }
@@ -968,38 +1005,36 @@ static void bridge_bypass_star_door_unlock_cutscene(void) {
     u32 save_flag;
 
     if (gMarioState == NULL
-        || gMarioState->action != ACT_UNLOCKING_STAR_DOOR
+        || (gMarioState->action != ACT_UNLOCKING_STAR_DOOR
+            && gMarioState->action != ACT_ENTERING_STAR_DOOR)
         || gMarioState->usedObj == NULL) {
         return;
     }
 
     /*
-     * In the embedded host, the vanilla summon-star unlock cutscene runs for
-     * ~70 frames and spawns bhvUnlockDoorStar while COD continues owning the
-     * first-person presentation. That cutscene is the point at which the host
-     * process is dying. The star requirement has already been checked by
-     * interact_door() before ACT_UNLOCKING_STAR_DOOR is entered, so persist the
-     * same door-unlocked save flag vanilla would set at the end of the cutscene
-     * and continue directly into the normal star-door traversal action.
+     * Fallback only: normal unlocked star doors are suppressed before
+     * level_script_execute(). If a stale collision/interact record still gets
+     * through, do not advance into either native star-door Mario action.
      */
     save_flag = get_door_save_file_flag(gMarioState->usedObj);
     if (save_flag != 0) {
         save_file_set_flags(save_flag);
     }
 
+    gMarioState->usedObj->oInteractType = 0;
+    gMarioState->usedObj->oInteractStatus |= 0x00010000u;
+
     fprintf(
         stderr,
-        "iw4l-sm64-native: star door unlock cutscene bypassed save_flag=0x%08X action_arg=0x%X\n",
-        (unsigned)save_flag,
-        (unsigned)gMarioState->actionArg
+        "iw4l-sm64-native: star door Mario action cancelled action=0x%08X save_flag=0x%08X\n",
+        (unsigned)gMarioState->action,
+        (unsigned)save_flag
     );
     fflush(stderr);
 
-    set_mario_action(
-        gMarioState,
-        ACT_ENTERING_STAR_DOOR,
-        gMarioState->actionArg
-    );
+    set_mario_action(gMarioState, ACT_WALKING, 0);
+    gMarioState->interactObj = NULL;
+    gMarioState->usedObj = NULL;
 }
 
 static int bridge_capture_star_or_death_exit(void) {
