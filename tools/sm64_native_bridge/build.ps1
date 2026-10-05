@@ -279,6 +279,60 @@ if (-not $levelUpdateText.Contains($updateNeedle)) {
     throw "Could not locate lvl_init_or_update update case in $levelUpdateSource"
 }
 $levelUpdateText = $levelUpdateText.Replace($updateNeedle, $updateReplacement)
+
+# Painting warps are level changes too, but the stock transition spends 74
+# native frames in ACT_DISAPPEARED/basic_update before lvl_init_or_update
+# returns the destination. In the embedded DLL that transition can run through
+# PC-render/camera state which belongs to the course we are about to unload and
+# has been observed to terminate the host process before the destination is
+# published. COD already owns the outer level transition, so publish the exact
+# painting destination immediately and leave the current native course stable
+# until Rust replaces the DLL on the next host update.
+$paintingNeedle = @"
+                initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
+                check_if_should_set_warp_checkpoint(&warpNode);
+
+                play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+"@
+$paintingReplacement = @"
+                initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
+                check_if_should_set_warp_checkpoint(&warpNode);
+
+#ifdef IW4L_SM64_EMBEDDED
+                {
+                    extern void iw4l_sm64_capture_level_warp(
+                        s32 level_num,
+                        u32 area,
+                        u32 node,
+                        u32 arg
+                    );
+                    iw4l_sm64_capture_level_warp(
+                        sWarpDest.levelNum,
+                        sWarpDest.areaIdx,
+                        sWarpDest.nodeId,
+                        sWarpDest.arg
+                    );
+
+                    /*
+                     * The Rust host now owns the actual unload/reload. Do not
+                     * enter ACT_DISAPPEARED or the native painting fade while
+                     * this source course is still embedded in the IW4L process.
+                     */
+                    sWarpDest.type = WARP_TYPE_NOT_WARPING;
+                    sDelayedWarpOp = WARP_OP_NONE;
+                    sTransitionTimer = 0;
+                    sTransitionUpdate = NULL;
+                    set_play_mode(PLAY_MODE_NORMAL);
+                    return;
+                }
+#endif
+
+                play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+"@
+if (-not $levelUpdateText.Contains($paintingNeedle)) {
+    throw "Could not locate initiate_painting_warp transition in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($paintingNeedle, $paintingReplacement)
 # Defensive guard: a malformed/unsupported native warp must never crash the
 # helper. This is especially important while COD is authoritative for map
 # transitions and the selected SM64 course remains loaded.
