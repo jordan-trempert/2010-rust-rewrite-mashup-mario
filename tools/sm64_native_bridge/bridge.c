@@ -1201,6 +1201,13 @@ static int bridge_attackable_object(const struct Object *object) {
      * so don't require interactType to already be nonzero. But also avoid
      * targeting inert scenery with no interaction/hit volume at all.
      */
+    if (model == MODEL_WHOMP ||
+        model == MODEL_KING_BOBOMB ||
+        model == MODEL_BOWSER ||
+        model == MODEL_BOWSER_NO_SHADOW) {
+        return 1;
+    }
+
     if (object->oInteractType == 0 &&
         object->hitboxRadius <= 1.0f &&
         object->hurtboxRadius <= 1.0f) {
@@ -1341,6 +1348,84 @@ static void apply_external_attack(const struct Request *request) {
      * firing cannot accidentally become a pound.
      */
     if (ground_pound) {
+        /*
+         * Whomps do not consume Mario's generic attacked bits. Their native
+         * behavior only checks cur_obj_is_mario_ground_pounding_platform().
+         * With COD owning the physical capsule that platform identity is not
+         * guaranteed to match, so resolve the same gameplay result explicitly
+         * on the landing pulse.
+         */
+        if (gCurrLevelNum == LEVEL_WF) {
+            struct Object *whomp = NULL;
+            float whomp_score = 1.0e30f;
+
+            for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+                struct ObjectNode *head = &gObjectLists[list_index];
+                struct ObjectNode *node = head->next;
+                while (node != head) {
+                    struct Object *object = (struct Object *)node;
+                    float dx;
+                    float dz;
+                    float dy;
+                    float score;
+
+                    node = node->next;
+                    if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0
+                        || model_id_for_object(object) != MODEL_WHOMP) {
+                        continue;
+                    }
+
+                    dx = object->oPosX - request->pos[0];
+                    dz = object->oPosZ - request->pos[2];
+                    dy = request->pos[1] - object->oPosY;
+                    if (dx * dx + dz * dz > 360.0f * 360.0f
+                        || dy < -120.0f
+                        || dy > 520.0f) {
+                        continue;
+                    }
+
+                    score = dx * dx + dz * dz + dy * dy * 0.10f;
+                    if (score < whomp_score) {
+                        whomp_score = score;
+                        whomp = object;
+                    }
+                }
+            }
+
+            if (whomp != NULL && whomp->oAction == 6) {
+                if (whomp->oBhvParams2ndByte != WHOMP_BP_SMALL) {
+                    if (whomp->oSubAction == 0 && whomp->oHealth > 0) {
+                        const s32 old_health = whomp->oHealth;
+                        whomp->oHealth--;
+                        whomp->oSubAction = 1;
+                        if (whomp->oHealth <= 0) {
+                            whomp->oSubAction = 0;
+                            whomp->oAction = 8;
+                        }
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-native: COD ground pound hit King Whomp health=%d->%d action=%d\n",
+                            (int)old_health,
+                            (int)whomp->oHealth,
+                            (int)whomp->oAction
+                        );
+                        fflush(stderr);
+                        return;
+                    }
+                } else {
+                    whomp->oNumLootCoins = 5;
+                    whomp->oSubAction = 0;
+                    whomp->oAction = 8;
+                    fprintf(
+                        stderr,
+                        "iw4l-sm64-native: COD ground pound defeated small Whomp\n"
+                    );
+                    fflush(stderr);
+                    return;
+                }
+            }
+        }
+
         /*
          * The Chain Chomp post does not use normal attack status. Its vanilla
          * behavior asks whether Mario is ground-pounding THIS platform. COD is
