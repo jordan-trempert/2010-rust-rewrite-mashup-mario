@@ -100,6 +100,20 @@ struct Sm64NativeRuntime {
     active: bool,
 }
 
+#[derive(Resource, Default)]
+struct Sm64PresentationCache {
+    level:String,
+    registry:HashMap<String,sm64_assets::ModelSource>,
+    geo:HashMap<
+        (String,i32),
+        (sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)
+    >,
+    dl:HashMap<
+        String,
+        (sm64_assets::ParsedRenderGeometry,HashMap<String,std::path::PathBuf>)
+    >,
+}
+
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct Sm64NativeDynamicCollision {
@@ -195,6 +209,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64NativePlayerOutput>()
             .init_resource::<Sm64NativeDynamicCollision>()
+            .init_resource::<Sm64PresentationCache>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>();
         app.insert_non_send_resource(Sm64NativeRuntime::default());
@@ -235,6 +250,7 @@ fn launch_requested_sm64_map(
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
     mut native: NonSendMut<Sm64NativeRuntime>,
+    mut presentation_cache: ResMut<Sm64PresentationCache>,
     mut status: ResMut<Sm64LoadStatus>,
 ) {
     let Some(request)=request else {return;};
@@ -441,6 +457,7 @@ fn launch_requested_sm64_map(
             &root,
             &level,
             &runtime.world.objects,
+            &mut presentation_cache,
         );
     }
     runtime.accumulator=0.0;
@@ -522,22 +539,20 @@ fn spawn_runtime_object_presentations(
     decomp_root:&std::path::Path,
     level:&str,
     objects:&[sm64_core::Sm64Object],
+    cache:&mut Sm64PresentationCache,
 ) {
-    let registry=match sm64_assets::load_model_registry(decomp_root,level) {
-        Ok(registry)=>registry,
-        Err(error)=>{
-            warn!("SM64 model registry load failed: {error}");
-            return;
-        }
-    };
-    let mut geo_cache=HashMap::<
-        (String,i32),
-        (sm64_assets::ResolvedGeoModel,HashMap<String,std::path::PathBuf>)
-    >::new();
-    let mut dl_cache=HashMap::<
-        String,
-        (sm64_assets::ParsedRenderGeometry,HashMap<String,std::path::PathBuf>)
-    >::new();
+    if cache.level!=level {
+        cache.level=level.to_owned();
+        cache.geo.clear();
+        cache.dl.clear();
+        cache.registry=match sm64_assets::load_model_registry(decomp_root,level) {
+            Ok(registry)=>registry,
+            Err(error)=>{
+                warn!("SM64 model registry load failed: {error}");
+                HashMap::new()
+            }
+        };
+    }
 
     for object in objects {
         if object.model=="MODEL_NONE" {continue;}
@@ -564,7 +579,7 @@ fn spawn_runtime_object_presentations(
         }
         let root=root_entity.id();
 
-        let Some(source)=registry.get(&object.model) else {
+        let Some(source)=cache.registry.get(&object.model).cloned() else {
             warn!("SM64 object model {} is not registered",object.model);
             continue;
         };
@@ -572,9 +587,9 @@ fn spawn_runtime_object_presentations(
         match source {
             sm64_assets::ModelSource::Geo{geo_symbol}=>{
                 let geo_key=(object.model.clone(),object.anim_state);
-                if !geo_cache.contains_key(&geo_key) {
+                if !cache.geo.contains_key(&geo_key) {
                     match sm64_assets::resolve_geo_model_parts_for_level_state(
-                        decomp_root,level,geo_symbol,object.anim_state
+                        decomp_root,level,&geo_symbol,object.anim_state
                     ) {
                         Ok(model)=>{
                             let mut textures=sm64_assets::load_actor_texture_sources(
@@ -590,7 +605,7 @@ fn spawn_runtime_object_presentations(
                                     decomp_root,level
                                 ).unwrap_or_default();
                             }
-                            geo_cache.insert(geo_key.clone(),(model,textures));
+                            cache.geo.insert(geo_key.clone(),(model,textures));
                         }
                         Err(hierarchy_error)=>{
                             // Some generated decomp GeoLayouts are simple
@@ -598,7 +613,7 @@ fn spawn_runtime_object_presentations(
                             // when hierarchy parsing fails. Use that before
                             // dropping the model entirely (notably stars).
                             match sm64_assets::resolve_geo_model_geometry(
-                                decomp_root,geo_symbol
+                                decomp_root,&geo_symbol
                             ) {
                                 Ok((geometry,actor_name))=>{
                                     let mut textures=sm64_assets::load_actor_texture_sources(
@@ -609,7 +624,7 @@ fn spawn_runtime_object_presentations(
                                             decomp_root,level
                                         ).unwrap_or_default();
                                     }
-                                    dl_cache.insert(
+                                    cache.dl.insert(
                                         object.model.clone(),
                                         (geometry,textures),
                                     );
@@ -625,23 +640,23 @@ fn spawn_runtime_object_presentations(
                         }
                     }
                 }
-                if let Some((model,textures))=geo_cache.get(&geo_key) {
+                if let Some((model,textures))=cache.geo.get(&geo_key) {
                     spawn_hierarchical_object_geometry(
                         commands,meshes,materials,images,root,model,textures,
                     );
-                } else if let Some((geometry,textures))=dl_cache.get(&object.model) {
+                } else if let Some((geometry,textures))=cache.dl.get(&object.model) {
                     spawn_flat_object_geometry(
                         commands,meshes,materials,images,root,geometry,textures,
                     );
                 }
             }
             sm64_assets::ModelSource::DisplayList{display_list,layer}=>{
-                if !dl_cache.contains_key(&object.model) {
+                if !cache.dl.contains_key(&object.model) {
                     match sm64_assets::resolve_display_list_model_geometry(
-                        decomp_root,level,display_list,layer,
+                        decomp_root,level,&display_list,&layer,
                     ) {
                         Ok(resolved)=>{
-                            dl_cache.insert(object.model.clone(),resolved);
+                            cache.dl.insert(object.model.clone(),resolved);
                         }
                         Err(error)=>{
                             warn!(
@@ -652,7 +667,7 @@ fn spawn_runtime_object_presentations(
                         }
                     }
                 }
-                let Some((geometry,textures))=dl_cache.get(&object.model) else {continue;};
+                let Some((geometry,textures))=cache.dl.get(&object.model) else {continue;};
                 spawn_flat_object_geometry(
                     commands,meshes,materials,images,root,geometry,textures,
                 );
@@ -1649,6 +1664,7 @@ fn sync_object_presentations(
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
     mut images:ResMut<Assets<Image>>,
+    mut presentation_cache:ResMut<Sm64PresentationCache>,
     mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform,&mut Visibility)>,
 ) {
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
@@ -1697,6 +1713,7 @@ fn sync_object_presentations(
             root,
             level,
             &missing,
+            &mut presentation_cache,
         );
     }
 }
