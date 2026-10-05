@@ -888,13 +888,12 @@ fn sync_sm64_cap_collision(
         collision_state.normal_static_vertices.clone()
     };
 
-    let s = sm64_core::SM64_TO_IW4_SCALE;
     let mut verts = collision_state.static_vertices.clone();
-    verts.reserve(collision_state.last_dynamic_triangles.len() * 3);
+    verts.reserve(collision_state.last_dynamic_triangles.len() * 6);
     for tri in &collision_state.last_dynamic_triangles {
-        for vertex in [tri[0], tri[2], tri[1]] {
-            verts.push([vertex[0] * s, -vertex[2] * s, vertex[1] * s]);
-        }
+        let [v0, v1, v2] = sm64_dynamic_triangle_to_iw4(tri);
+        verts.extend_from_slice(&[v0, v2, v1]);
+        verts.extend_from_slice(&[v0, v1, v2]);
     }
     let mesh = sim::SimClipMesh::from_linear_triangles(verts);
     let content = authority.0.content().with_clip_mesh(mesh);
