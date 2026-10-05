@@ -123,6 +123,14 @@ pub struct Sm64NativeDynamicCollision {
 }
 
 #[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeAudioFrame {
+    pub tick: u32,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub samples: Vec<i16>,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
 pub struct Sm64NativeRenderFrame {
     pub tick:u32,
     pub triangles:Vec<sm64_native::NativeRenderTriangle>,
@@ -305,6 +313,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64NativePlayerOutput>()
             .init_resource::<Sm64NativeDialogOutput>()
             .init_resource::<Sm64NativeDynamicCollision>()
+            .init_resource::<Sm64NativeAudioFrame>()
             .init_resource::<Sm64NativeRenderFrame>()
             .init_resource::<Sm64NativeRenderCache>()
             .init_resource::<Sm64PresentationCache>()
@@ -1739,6 +1748,7 @@ fn advance_sm64_runtime(
     mut native_output: ResMut<Sm64NativePlayerOutput>,
     mut native_dialog: ResMut<Sm64NativeDialogOutput>,
     mut native_collision: ResMut<Sm64NativeDynamicCollision>,
+    mut native_audio: ResMut<Sm64NativeAudioFrame>,
     mut native_render: ResMut<Sm64NativeRenderFrame>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
@@ -1781,8 +1791,12 @@ fn advance_sm64_runtime(
                 health:external.health,
                 attack_flags:external.attack_flags,
             }) {
-                Ok(snapshot)=>{
+                Ok(mut snapshot)=>{
                     let native_object_count=snapshot.objects.len();
+                    native_audio.tick=snapshot.tick;
+                    native_audio.sample_rate=snapshot.audio_sample_rate;
+                    native_audio.channels=snapshot.audio_channels;
+                    native_audio.samples=std::mem::take(&mut snapshot.audio_samples);
                     native_dialog.id=snapshot.dialog_id;
                     native_dialog.text=snapshot.dialog_text.clone();
                     native_collision.tick=snapshot.tick;
@@ -1818,6 +1832,8 @@ fn advance_sm64_runtime(
                     native_dialog.id=-1;
                     native_dialog.text.clear();
                     native_collision.triangles.clear();
+                    native_audio.samples.clear();
+                    native_audio.tick=0;
                     native_render.triangles.clear();
                     native_render.texture_updates.clear();
                     runtime.latest=None;
@@ -1829,6 +1845,8 @@ fn advance_sm64_runtime(
             native_dialog.id=-1;
             native_dialog.text.clear();
             native_collision.triangles.clear();
+            native_audio.samples.clear();
+            native_audio.tick=0;
             runtime.latest=Some(runtime.world.step(input.0));
         }
         steps += 1;
