@@ -17,6 +17,7 @@
 #include "behavior_data.h"
 #include "level_commands.h"
 #include "dialog_ids.h"
+#include "course_table.h"
 #include "levels/scripts.h"
 #include "game/area.h"
 #include "game/game_init.h"
