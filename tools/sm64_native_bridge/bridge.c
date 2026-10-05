@@ -54,7 +54,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 4u
+#define IW4L_SM64_ABI_VERSION 5u
 static volatile const char *gBridgeStage = "startup";
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -256,6 +256,7 @@ struct Iw4lSm64TextureView {
 struct Iw4lSm64SnapshotView {
     uint32_t abi_version;
     uint32_t tick;
+    uint32_t area_index;
     int32_t mario_health;
     int32_t coins;
     uint32_t mario_action;
@@ -288,6 +289,13 @@ static int gIw4lInitialized = 0;
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
 int gIw4lRunMarioAction = 0;
+/*
+ * read_controller_inputs() runs inside the native frame after apply_proxy().
+ * Keep bridge buttons in globals so the temporary game_init.c patch can merge
+ * them AFTER the port has polled/cleared its dummy controller state.
+ */
+u16 gIw4lBridgeButtonDown = 0;
+u16 gIw4lBridgeButtonPressed = 0;
 static char gIw4lLastError[512];
 static char gIw4lDialogText[4096];
 static struct Iw4lSm64Object gIw4lObjects[4096];
@@ -384,18 +392,26 @@ static int read_request(struct Request *request) {
     return 1;
 }
 
-static int native_owns_mario_motion(void) {
+static int native_runs_mario_action(void) {
     u32 action;
     u32 group;
+
     if (gMarioState == NULL) {
         return 0;
     }
+
     action = gMarioState->action;
     group = action & ACT_GROUP_MASK;
 
+    /*
+     * Dialogs, star dances, warps, automatic object actions and real native
+     * mechanics still need Mario's original action state machine to advance.
+     * This does NOT mean native SM64 gets to own the COD player's transform.
+     */
     if (group == ACT_GROUP_OBJECT ||
         group == ACT_GROUP_AUTOMATIC ||
-        group == ACT_GROUP_CUTSCENE) {
+        group == ACT_GROUP_CUTSCENE ||
+        get_dialog_id() != DIALOG_NONE) {
         return 1;
     }
 
@@ -414,20 +430,35 @@ static int native_owns_mario_motion(void) {
         case ACT_SPECIAL_EXIT_AIRBORNE:
             return 1;
         default:
-            break;
+            return 0;
+    }
+}
+
+static int native_owns_mario_motion(void) {
+    if (gMarioState == NULL) {
+        return 0;
     }
 
-    /* Dialogs/cutscene text can remain active while Mario's action changes
-       briefly. Never let the COD proxy stomp the hidden Mario state while a
-       native dialog is open. */
-    if (get_dialog_id() != DIALOG_NONE) {
-        return 1;
+    /*
+     * Only mechanics whose gameplay is fundamentally native movement are
+     * allowed to drive the COD player. Dialogs, star collection and warps keep
+     * running their SM64 state machines while COD remains freely controllable.
+     */
+    switch (gMarioState->action) {
+        case ACT_SHOT_FROM_CANNON:
+        case ACT_TORNADO_TWIRLING:
+        case ACT_GRABBED:
+        case ACT_RIDING_HOOT:
+            return 1;
+        default:
+            return 0;
     }
-
-    return 0;
 }
 
 static void set_bridge_controller_buttons(u16 down, u16 pressed) {
+    gIw4lBridgeButtonDown = down;
+    gIw4lBridgeButtonPressed = pressed;
+
     if (gPlayer1Controller != NULL) {
         gPlayer1Controller->buttonDown = down;
         gPlayer1Controller->buttonPressed = pressed;
@@ -452,6 +483,7 @@ static void set_bridge_controller_buttons(u16 down, u16 pressed) {
 }
 
 static void apply_proxy(const struct Request *request) {
+    int native_runs;
     int native_owns;
     u16 buttons = 0;
 
@@ -459,22 +491,24 @@ static void apply_proxy(const struct Request *request) {
         return;
     }
 
+    native_runs = native_runs_mario_action();
     native_owns = native_owns_mario_motion();
-    gIw4lRunMarioAction = native_owns;
+    gIw4lRunMarioAction = native_runs;
 
     if (!native_owns) {
         /*
-         * COD owns normal locomotion. Only in this mode may the bridge replace
-         * Mario's transform/collision cache with the external player state.
-         * Previously this happened even inside cannons and dialog cutscenes,
-         * pinning Mario to stale COD coordinates and trapping the action.
+         * COD owns the transform even while SM64 is advancing a dialog, star
+         * dance or transition. Only collapse back to ACT_IDLE when there is no
+         * native state machine that must be preserved.
          */
-        if (gMarioState->action != ACT_IDLE) {
+        if (!native_runs && gMarioState->action != ACT_IDLE) {
             set_mario_action(gMarioState, ACT_IDLE, 0);
         }
 
-        clear_mario_platform();
-        gMarioObject->platform = NULL;
+        if (!native_runs) {
+            clear_mario_platform();
+            gMarioObject->platform = NULL;
+        }
 
         gMarioState->pos[0] = request->pos[0];
         gMarioState->pos[1] = request->pos[1];
@@ -610,6 +644,31 @@ static int bridge_attackable_object(const struct Object *object) {
     return 1;
 }
 
+static struct Object *bridge_canonical_boss_target(struct Object *object) {
+    struct Object *cur = object;
+    int depth;
+
+    for (depth = 0; cur != NULL && depth < 6; ++depth) {
+        const int32_t model = model_id_for_object(cur);
+
+        if ((gCurrLevelNum == LEVEL_BOB && model == MODEL_KING_BOBOMB) ||
+            (gCurrLevelNum == LEVEL_WF && model == MODEL_WHOMP) ||
+            ((gCurrLevelNum == LEVEL_BOWSER_1 ||
+              gCurrLevelNum == LEVEL_BOWSER_2 ||
+              gCurrLevelNum == LEVEL_BOWSER_3) &&
+             (model == MODEL_BOWSER || model == MODEL_BOWSER_NO_SHADOW))) {
+            return cur;
+        }
+
+        if (cur->parentObj == NULL || cur->parentObj == cur) {
+            break;
+        }
+        cur = cur->parentObj;
+    }
+
+    return object;
+}
+
 static int apply_external_boss_damage(struct Object *object, uint32_t attack_flags) {
     int32_t model;
 
@@ -618,9 +677,13 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
         return 0;
     }
 
+    object = bridge_canonical_boss_target(object);
     model = model_id_for_object(object);
     switch (model) {
         case MODEL_KING_BOBOMB:
+            if (gCurrLevelNum != LEVEL_BOB) {
+                break;
+            }
             /*
              * Vanilla only removes King Bob-omb health after a successful
              * throw/landing. A COD bullet cannot produce that held-object
@@ -640,6 +703,9 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
             break;
 
         case MODEL_WHOMP:
+            if (gCurrLevelNum != LEVEL_WF) {
+                break;
+            }
             /*
              * King Whomp normally loses health only while Mario ground-pounds
              * his fallen platform. Direct COD shots (and the COD ground-pound
@@ -657,6 +723,12 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
             break;
 
         case MODEL_BOWSER:
+        case MODEL_BOWSER_NO_SHADOW:
+            if (gCurrLevelNum != LEVEL_BOWSER_1 &&
+                gCurrLevelNum != LEVEL_BOWSER_2 &&
+                gCurrLevelNum != LEVEL_BOWSER_3) {
+                break;
+            }
             /*
              * Bowser's vanilla damage path is tied to mine collisions. Reuse
              * the exact reaction/death actions after a bullet rather than
@@ -814,11 +886,30 @@ static void apply_external_attack(const struct Request *request) {
     }
 
     if (best != NULL) {
-        if (!apply_external_boss_damage(best, request->attack_flags)) {
+        struct Object *damage_target = bridge_canonical_boss_target(best);
+        const int32_t hit_model = model_id_for_object(damage_target);
+        const int32_t before_health = damage_target->oHealth;
+        const int handled_boss =
+            apply_external_boss_damage(damage_target, request->attack_flags);
+
+        if (!handled_boss) {
             best->oInteractStatus |=
                 INT_STATUS_INTERACTED |
                 INT_STATUS_WAS_ATTACKED |
                 ATTACK_FAST_ATTACK;
+        }
+
+        if (request->attack_flags & BRIDGE_INPUT_ATTACK_PRESS) {
+            fprintf(
+                stderr,
+                "iw4l-sm64-native: COD shot hit model=%d action=%d health=%d->%d boss=%d\n",
+                (int)hit_model,
+                (int)damage_target->oAction,
+                (int)before_health,
+                (int)damage_target->oHealth,
+                handled_boss
+            );
+            fflush(stderr);
         }
     }
 }
@@ -1137,6 +1228,7 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
     gIw4lSnapshot.abi_version = IW4L_SM64_ABI_VERSION;
     gIw4lSnapshot.tick = gGlobalTimer;
+    gIw4lSnapshot.area_index = gCurrentArea != NULL ? (uint32_t)gCurrAreaIndex : 0u;
     gIw4lSnapshot.mario_health = gMarioState != NULL ? gMarioState->health : 0;
     gIw4lSnapshot.coins = gMarioState != NULL ? gMarioState->numCoins : 0;
     gIw4lSnapshot.mario_action = gMarioState != NULL ? gMarioState->action : 0;
@@ -1435,6 +1527,8 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     select_gfx_pool();
     gBridgeStage = "level_script_execute";
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
+    gIw4lBridgeButtonDown = 0;
+    gIw4lBridgeButtonPressed = 0;
     gGlobalTimer++;
     gBridgeStage = "audio_tick";
     bridge_audio_tick();
@@ -1466,6 +1560,8 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
     gIw4lAudioFrameCount = 0;
     gIw4lAudioCadence = 0;
     gIw4lRunMarioAction = 0;
+    gIw4lBridgeButtonDown = 0;
+    gIw4lBridgeButtonPressed = 0;
     gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
