@@ -391,28 +391,28 @@ fn launch_requested_sm64_map(
             });
         match sm64_native::NativeClient::launch(&root,&level,area,selected_act) {
             Ok(client)=>{
+                let loaded_path=client.module_path().to_path_buf();
                 native.client=Some(client);
                 native.active=true;
                 info!(
-                    "SM64 COD map: embedded native decomp runtime active in-process for {level} area {area} act {selected_act}"
+                    "SM64 COD map: EMBEDDED DLL LOADED in-process: {} | level={level} area={area} act={selected_act}",
+                    loaded_path.display()
                 );
             }
             Err(error)=>{
-                let allow_partial=std::env::var("SM64_ALLOW_PARTIAL_FALLBACK")
-                    .is_ok_and(|value|value=="1" || value.eq_ignore_ascii_case("true"));
-                if !allow_partial {
-                    enabled.0=false;
-                    status.loaded=false;
-                    status.message=format!(
-                        "SM64 COD map requires the embedded native decomp module: {error}. Build tools/sm64_native_bridge/build.ps1 against sm64-port (or set SM64_NATIVE_MODULE)."
-                    );
-                    error!("{}",status.message);
-                    commands.remove_resource::<Sm64LaunchRequest>();
-                    return;
-                }
-                warn!(
-                    "SM64 COD map: embedded native module unavailable ({error}); SM64_ALLOW_PARTIAL_FALLBACK is enabled, so only the incomplete Rust behavior subset will run."
+                // sm64cod:* is the native-decomp mode. Never silently drop back
+                // to the incomplete Rust behavior subset here; doing so makes
+                // it impossible to tell whether COD is actually using the DLL.
+                enabled.0=false;
+                native.client=None;
+                native.active=false;
+                status.loaded=false;
+                status.message=format!(
+                    "SM64 COD map REFUSED TO START because the embedded DLL did not load: {error}. Build tools/sm64_native_bridge/build.ps1 against sm64-port or set SM64_NATIVE_MODULE to iw4l-sm64-native.dll."
                 );
+                error!("{}",status.message);
+                commands.remove_resource::<Sm64LaunchRequest>();
+                return;
             }
         }
     }
