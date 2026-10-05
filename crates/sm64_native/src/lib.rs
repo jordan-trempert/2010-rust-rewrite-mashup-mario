@@ -365,6 +365,34 @@ impl Drop for NativeClient {
 }
 
 
+
+fn symbolize_from_map(bridge:&Path,address:u64)->Option<String>{
+    let map=bridge.with_extension("sym");
+    let text=std::fs::read_to_string(map).ok()?;
+    let image_base=0x1_4000_0000u64;
+    let rva=address.checked_sub(image_base).unwrap_or(address);
+    let mut best:Option<(u64,String)>=None;
+
+    for line in text.lines() {
+        let mut parts=line.split_whitespace();
+        let Some(addr_text)=parts.next() else {continue;};
+        let Some(kind)=parts.next() else {continue;};
+        let Some(name)=parts.next() else {continue;};
+        if !matches!(kind,"t"|"T"|"w"|"W") {
+            continue;
+        }
+        let Ok(symbol_addr)=u64::from_str_radix(addr_text,16) else {continue;};
+        let symbol_rva=symbol_addr.checked_sub(image_base).unwrap_or(symbol_addr);
+        if symbol_rva<=rva && best.as_ref().is_none_or(|(best_addr,_)|symbol_rva>*best_addr) {
+            best=Some((symbol_rva,name.to_owned()));
+        }
+    }
+
+    best.map(|(symbol_rva,name)|{
+        format!("{name}+0x{:x}",rva.saturating_sub(symbol_rva))
+    })
+}
+
 fn symbolize_native_fault(
     bridge:&Path,
     stderr_lines:&[String],
@@ -383,6 +411,14 @@ fn symbolize_native_fault(
             None
         }
     })?;
+
+    if let Some(hex)=address.strip_prefix("0x").or_else(||address.strip_prefix("0X")) {
+        if let Ok(value)=u64::from_str_radix(hex,16) {
+            if let Some(symbol)=symbolize_from_map(bridge,value) {
+                return Some(format!("{address} => {symbol}"));
+            }
+        }
+    }
 
     let mut candidates=vec![address.clone()];
     // MinGW PE executables normally load at 0x140000000. Some addr2line
