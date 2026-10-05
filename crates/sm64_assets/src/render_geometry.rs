@@ -49,6 +49,7 @@ enum GfxCommand {
     },
     Triangle([usize; 3]),
     DisplayList(String),
+    BranchList(String),
     End,
 }
 
@@ -372,6 +373,11 @@ fn parse_display_list(body: &str) -> Result<Vec<GfxCommand>, CollisionParseError
             }
         } else if let Some(args) = macro_args(line, "gsSPDisplayList") {
             commands.push(GfxCommand::DisplayList(args.trim().to_owned()));
+        } else if let Some(args) = macro_args(line, "gsSPBranchList") {
+            // BranchList is a tail-call: execute the target display list and
+            // do not resume the current one. Coins and many shared actor
+            // models put their actual triangle commands behind this opcode.
+            commands.push(GfxCommand::BranchList(args.trim().to_owned()));
         } else if line.starts_with("gsSPEndDisplayList") {
             commands.push(GfxCommand::End);
         }
@@ -451,6 +457,17 @@ fn execute_display_list(
                     output,
                     recursion,
                 )?;
+            }
+            GfxCommand::BranchList(child) => {
+                execute_display_list(
+                    child,
+                    display_lists,
+                    vertex_arrays,
+                    state,
+                    output,
+                    recursion,
+                )?;
+                break;
             }
             GfxCommand::End => break,
         }
