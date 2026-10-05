@@ -659,11 +659,24 @@ static void apply_proxy(const struct Request *request) {
          * dance or transition. Only collapse back to ACT_IDLE when there is no
          * native state machine that must be preserved.
          */
-        if (!native_runs && gMarioState->action != ACT_IDLE) {
-            set_mario_action(gMarioState, ACT_IDLE, 0);
-        }
-
         if (!native_runs) {
+            /*
+             * Keep the hidden SM64 interaction state consistent with the COD
+             * player's locomotion without ever executing SM64 locomotion.
+             * Vanilla door/warp-door handlers intentionally accept WALKING or
+             * DECELERATING rather than IDLE, so an always-idle proxy made
+             * castle doors animate but never perform their original warp.
+             */
+            const float planar_speed2 =
+                request->vel[0] * request->vel[0] +
+                request->vel[2] * request->vel[2];
+            const u32 proxy_action =
+                planar_speed2 > 0.20f * 0.20f ? ACT_WALKING : ACT_IDLE;
+
+            if (gMarioState->action != proxy_action) {
+                set_mario_action(gMarioState, proxy_action, 0);
+            }
+
             clear_mario_platform();
             gMarioObject->platform = NULL;
         }
