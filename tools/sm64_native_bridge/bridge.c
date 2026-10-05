@@ -783,17 +783,40 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
             float distance2;
 
             node = node->next;
-            if (object == gMarioObject ||
-                (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-                object->oIntangibleTimer != 0 ||
-                (object->oInteractType & harmful) == 0 ||
-                object->oDamageOrCoinValue <= 0) {
-                continue;
-            }
+            {
+                const int32_t model = model_id_for_object(object);
+                const int known_enemy = model == MODEL_GOOMBA;
+                float mario_radius;
+                float object_radius;
 
-            radius = gMarioObject->hitboxRadius + object->hitboxRadius;
-            if (radius <= 0.0f) {
-                continue;
+                if (object == gMarioObject ||
+                    (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
+                    object->oIntangibleTimer != 0 ||
+                    (!known_enemy && (object->oInteractType & harmful) == 0) ||
+                    (!known_enemy && object->oDamageOrCoinValue <= 0)) {
+                    continue;
+                }
+
+                /*
+                 * External COD motion can meet an actor on the same native tick
+                 * that actor initializes its interaction hitbox. Vanilla's
+                 * collision pass then sees a zero/stale radius for one frame.
+                 * Known enemies get conservative SM64-sized fallback bounds so
+                 * walking into a Goomba cannot become harmless.
+                 */
+                mario_radius = gMarioObject->hitboxRadius;
+                if (mario_radius <= 1.0f) mario_radius = 50.0f;
+                object_radius = object->hitboxRadius;
+                if (object->hurtboxRadius > object_radius) {
+                    object_radius = object->hurtboxRadius;
+                }
+                if (known_enemy && object_radius <= 1.0f) {
+                    object_radius = 100.0f;
+                }
+                radius = mario_radius + object_radius;
+                if (radius <= 0.0f) {
+                    continue;
+                }
             }
             dx = gMarioObject->oPosX - object->oPosX;
             dz = gMarioObject->oPosZ - object->oPosZ;
@@ -803,9 +826,12 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
             }
 
             mario_bottom = gMarioObject->oPosY - gMarioObject->hitboxDownOffset;
-            mario_top = mario_bottom + gMarioObject->hitboxHeight;
+            mario_top = mario_bottom +
+                (gMarioObject->hitboxHeight > 1.0f ? gMarioObject->hitboxHeight : 160.0f);
             object_bottom = object->oPosY - object->hitboxDownOffset;
-            object_top = object_bottom + object->hitboxHeight;
+            object_top = object_bottom +
+                (object->hitboxHeight > 1.0f ? object->hitboxHeight :
+                    (model_id_for_object(object) == MODEL_GOOMBA ? 160.0f : 0.0f));
             if (mario_bottom > object_top || mario_top < object_bottom) {
                 continue;
             }
@@ -819,6 +845,9 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
 
     if (best != NULL) {
         int damage = best->oDamageOrCoinValue;
+        if (damage <= 0 && model_id_for_object(best) == MODEL_GOOMBA) {
+            damage = 1;
+        }
         if (!(gMarioState->flags & MARIO_CAP_ON_HEAD)) {
             damage += (damage + 1) / 2;
         }
