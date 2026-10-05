@@ -106,6 +106,19 @@ $updateReplacement = @"
         case 1:
             result = update_level();
             if (result != 0) {
+                /*
+                 * IW4L owns map/session transitions. Vanilla update_level()
+                 * returns the destination level after a delayed cross-level
+                 * warp, but leaving sWarpDest populated while suppressing that
+                 * return makes the next play_mode_normal() call treat the stale
+                 * destination as an in-area warp. That reaches
+                 * init_mario_after_warp() with a node that does not exist in
+                 * the current area.
+                 */
+                sWarpDest.type = WARP_TYPE_NOT_WARPING;
+                sDelayedWarpOp = WARP_OP_NONE;
+                sTransitionTimer = 0;
+                sTransitionUpdate = NULL;
                 set_play_mode(PLAY_MODE_NORMAL);
                 result = 0;
             }
@@ -115,6 +128,31 @@ if (-not $levelUpdateText.Contains($updateNeedle)) {
     throw "Could not locate lvl_init_or_update update case in $levelUpdateSource"
 }
 $levelUpdateText = $levelUpdateText.Replace($updateNeedle, $updateReplacement)
+# Defensive guard: a malformed/unsupported native warp must never crash the
+# helper. This is especially important while COD is authoritative for map
+# transitions and the selected SM64 course remains loaded.
+$warpNeedle = @"
+void init_mario_after_warp(void) {
+    struct ObjectWarpNode *spawnNode = area_get_warp_node(sWarpDest.nodeId);
+    u32 marioSpawnType = get_mario_spawn_type(spawnNode->object);
+"@
+$warpReplacement = @"
+void init_mario_after_warp(void) {
+    struct ObjectWarpNode *spawnNode = area_get_warp_node(sWarpDest.nodeId);
+    if (spawnNode == NULL || spawnNode->object == NULL) {
+        sWarpDest.type = WARP_TYPE_NOT_WARPING;
+        sDelayedWarpOp = WARP_OP_NONE;
+        sTransitionTimer = 0;
+        sTransitionUpdate = NULL;
+        set_play_mode(PLAY_MODE_NORMAL);
+        return;
+    }
+    u32 marioSpawnType = get_mario_spawn_type(spawnNode->object);
+"@
+if (-not $levelUpdateText.Contains($warpNeedle)) {
+    throw "Could not locate init_mario_after_warp in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
 Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
 
 try {
