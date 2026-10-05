@@ -213,6 +213,9 @@ struct Iw4lSm64SnapshotView {
 };
 
 static struct LevelCommand *gIw4lLevelCommand = NULL;
+/* Defined in mario.c but not exported by upstream mario.h. */
+extern void mario_update_hitbox_and_cap_model(struct MarioState *m);
+
 static int gIw4lInitialized = 0;
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
@@ -470,6 +473,14 @@ static void apply_proxy(const struct Request *request) {
         gMarioObject->header.gfx.pos[0] = request->pos[0];
         gMarioObject->header.gfx.pos[1] = request->pos[1];
         gMarioObject->header.gfx.pos[2] = request->pos[2];
+
+        /*
+         * update_objects() runs detect_object_collisions() before Mario's
+         * behavior update. Refresh Mario's hitbox here, immediately after the
+         * COD proxy move, so native enemies collide with the current COD
+         * position rather than the previous frame's Mario bounds.
+         */
+        mario_update_hitbox_and_cap_model(gMarioState);
     }
 
     {
