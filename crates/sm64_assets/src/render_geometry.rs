@@ -44,6 +44,7 @@ enum GfxCommand {
     SetTileSize([u32; 2]),
     Vertex {
         array: String,
+        source_offset: usize,
         count: usize,
         first_slot: usize,
     },
@@ -342,8 +343,10 @@ fn parse_display_list(body: &str) -> Result<Vec<GfxCommand>, CollisionParseError
         } else if let Some(args) = macro_args(line, "gsSPVertex") {
             let parts = split_args(args);
             if parts.len() >= 3 {
+                let (array,source_offset)=parse_vertex_ref(parts[0].trim());
                 commands.push(GfxCommand::Vertex {
-                    array: parts[0].trim().to_owned(),
+                    array,
+                    source_offset,
                     count: parse_i32(parts[1]).unwrap_or(0).max(0) as usize,
                     first_slot: parse_i32(parts[2]).unwrap_or(0).max(0) as usize,
                 });
@@ -420,6 +423,7 @@ fn execute_display_list(
             }
             GfxCommand::Vertex {
                 array,
+                source_offset,
                 count,
                 first_slot,
             } => {
@@ -427,7 +431,7 @@ fn execute_display_list(
                     CollisionParseError::new(format!("missing SM64 Vtx array {array}"))
                 })?;
                 for offset in 0..*count {
-                    let Some(vertex) = vertices.get(offset).cloned() else {
+                    let Some(vertex) = vertices.get(source_offset + offset).cloned() else {
                         break;
                     };
                     let slot = first_slot + offset;
@@ -611,6 +615,16 @@ fn split_args(args: &str) -> Vec<&str> {
     parts
 }
 
+fn parse_vertex_ref(text:&str)->(String,usize) {
+    let text=text.trim().trim_start_matches('&').trim();
+    if let Some((base,offset))=text.rsplit_once('+') {
+        if let Ok(value)=parse_i32(offset.trim()) {
+            return (base.trim().to_owned(),value.max(0) as usize);
+        }
+    }
+    (text.to_owned(),0)
+}
+
 fn parse_i32(text: &str) -> Result<i32, String> {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix("-0x") {
@@ -647,4 +661,10 @@ mod tests {
             vec!["0", "CALC_DXT(32, G_IM_SIZ_16b_BYTES)", "4"]
         );
     }
+    #[test]
+    fn vertex_ref_accepts_pointer_offsets() {
+        assert_eq!(parse_vertex_ref("goomba_vtx + 12"),("goomba_vtx".to_owned(),12));
+        assert_eq!(parse_vertex_ref("plain_vtx"),("plain_vtx".to_owned(),0));
+    }
+
 }
