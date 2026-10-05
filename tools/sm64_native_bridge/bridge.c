@@ -14,6 +14,7 @@
 #include "object_fields.h"
 #include "object_constants.h"
 #include "model_ids.h"
+#include "behavior_data.h"
 #include "level_commands.h"
 #include "dialog_ids.h"
 #include "levels/scripts.h"
@@ -54,7 +55,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 5u
+#define IW4L_SM64_ABI_VERSION 6u
 static volatile const char *gBridgeStage = "startup";
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -257,6 +258,10 @@ struct Iw4lSm64SnapshotView {
     uint32_t abi_version;
     uint32_t tick;
     uint32_t area_index;
+    char transition_level[32];
+    uint32_t transition_area;
+    uint32_t transition_node;
+    uint32_t transition_arg;
     int32_t mario_health;
     int32_t coins;
     uint32_t mario_action;
@@ -298,6 +303,10 @@ u16 gIw4lBridgeButtonDown = 0;
 u16 gIw4lBridgeButtonPressed = 0;
 static char gIw4lLastError[512];
 static char gIw4lDialogText[4096];
+static char gIw4lPendingTransitionLevel[32];
+static uint32_t gIw4lPendingTransitionArea = 0;
+static uint32_t gIw4lPendingTransitionNode = 0;
+static uint32_t gIw4lPendingTransitionArg = 0;
 static struct Iw4lSm64Object gIw4lObjects[4096];
 static struct Iw4lSm64Triangle gIw4lDynamicSurfaces[8192];
 static struct Iw4lSm64SnapshotView gIw4lSnapshot;
@@ -363,6 +372,16 @@ static const struct LevelSpec *find_level(const char *name) {
     return NULL;
 }
 
+static const struct LevelSpec *find_level_by_id(s16 level_id) {
+    size_t i;
+    for (i = 0; i < sizeof(kLevels) / sizeof(kLevels[0]); ++i) {
+        if (kLevels[i].level == level_id) {
+            return &kLevels[i];
+        }
+    }
+    return NULL;
+}
+
 static int read_exact(void *dst, size_t size) {
     return fread(dst, 1, size, stdin) == size;
 }
@@ -390,6 +409,145 @@ static int read_request(struct Request *request) {
     if (!read_i16(&request->yaw) || !read_i16(&request->pitch)) return 0;
     if (!read_i32(&request->health) || !read_u32(&request->attack_flags)) return 0;
     return 1;
+}
+
+void iw4l_sm64_capture_level_warp(
+    int32_t level_num,
+    uint32_t area,
+    uint32_t node,
+    uint32_t arg
+) {
+    const struct LevelSpec *level = find_level_by_id((s16)level_num);
+
+    memset(gIw4lPendingTransitionLevel, 0, sizeof(gIw4lPendingTransitionLevel));
+    gIw4lPendingTransitionArea = 0;
+    gIw4lPendingTransitionNode = 0;
+    gIw4lPendingTransitionArg = 0;
+
+    if (level == NULL) {
+        fprintf(
+            stderr,
+            "iw4l-sm64-native: host transition requested unknown level=%d area=%u node=%u\n",
+            (int)level_num,
+            (unsigned)area,
+            (unsigned)node
+        );
+        fflush(stderr);
+        return;
+    }
+
+    strncpy(
+        gIw4lPendingTransitionLevel,
+        level->name,
+        sizeof(gIw4lPendingTransitionLevel) - 1
+    );
+    gIw4lPendingTransitionArea = area;
+    gIw4lPendingTransitionNode = node;
+    gIw4lPendingTransitionArg = arg;
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-native: host transition requested %s area=%u node=%u arg=%u\n",
+        gIw4lPendingTransitionLevel,
+        (unsigned)area,
+        (unsigned)node,
+        (unsigned)arg
+    );
+    fflush(stderr);
+}
+
+static int bridge_door_is_unlocked(const struct Object *object) {
+    const BehaviorScript *behavior;
+    s16 required_stars;
+    s16 total_stars;
+
+    if (object == NULL) {
+        return 0;
+    }
+
+    behavior = object->behavior;
+    required_stars = (s16)(object->oBehParams >> 24);
+    total_stars = save_file_get_total_star_count(
+        gCurrSaveFileNum - 1,
+        COURSE_MIN - 1,
+        COURSE_MAX - 1
+    );
+
+    if (behavior == segmented_to_virtual(bhvStarDoor) ||
+        behavior == segmented_to_virtual(bhvDoor)) {
+        if (required_stars > 0 && total_stars < required_stars) {
+            return 0;
+        }
+    }
+
+    if (behavior == segmented_to_virtual(bhvDoorWarp)) {
+        const u32 flags = save_file_get_flags();
+        const s16 warp_door_id = required_stars;
+
+        if (warp_door_id == 1 &&
+            !(flags & SAVE_FLAG_UNLOCKED_UPSTAIRS_DOOR) &&
+            !(flags & SAVE_FLAG_HAVE_KEY_2)) {
+            return 0;
+        }
+        if (warp_door_id == 2 &&
+            !(flags & SAVE_FLAG_UNLOCKED_BASEMENT_DOOR) &&
+            !(flags & SAVE_FLAG_HAVE_KEY_1)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void bridge_auto_open_nearby_doors(const struct Request *request) {
+    int list_index;
+    const float open_radius = 300.0f;
+    const float open_radius2 = open_radius * open_radius;
+
+    if (request == NULL || gObjectLists == NULL) {
+        return;
+    }
+
+    for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+        struct ObjectNode *head = &gObjectLists[list_index];
+        struct ObjectNode *node = head->next;
+
+        while (node != head) {
+            struct Object *object = (struct Object *)node;
+            const BehaviorScript *behavior;
+            float dx;
+            float dy;
+            float dz;
+
+            node = node->next;
+            if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 || object == gMarioObject) {
+                continue;
+            }
+
+            behavior = object->behavior;
+            if (behavior != segmented_to_virtual(bhvDoor) &&
+                behavior != segmented_to_virtual(bhvDoorWarp) &&
+                behavior != segmented_to_virtual(bhvStarDoor)) {
+                continue;
+            }
+            if (!bridge_door_is_unlocked(object) || object->oAction != 0) {
+                continue;
+            }
+
+            dx = object->oPosX - request->pos[0];
+            dy = object->oPosY - request->pos[1];
+            dz = object->oPosZ - request->pos[2];
+
+            if (dx * dx + dz * dz <= open_radius2 && dy > -220.0f && dy < 280.0f) {
+                /*
+                 * The stock door behavior consumes 0x10000/0x20000 as its
+                 * open request. Star doors accept either bit as well. Let the
+                 * original animation/collision code own opening and closing.
+                 */
+                object->oInteractStatus |= 0x00010000u;
+            }
+        }
+    }
 }
 
 static int native_runs_mario_action(void) {
@@ -1229,6 +1387,18 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     gIw4lSnapshot.abi_version = IW4L_SM64_ABI_VERSION;
     gIw4lSnapshot.tick = gGlobalTimer;
     gIw4lSnapshot.area_index = gCurrentArea != NULL ? (uint32_t)gCurrAreaIndex : 0u;
+    memcpy(
+        gIw4lSnapshot.transition_level,
+        gIw4lPendingTransitionLevel,
+        sizeof(gIw4lSnapshot.transition_level)
+    );
+    gIw4lSnapshot.transition_area = gIw4lPendingTransitionArea;
+    gIw4lSnapshot.transition_node = gIw4lPendingTransitionNode;
+    gIw4lSnapshot.transition_arg = gIw4lPendingTransitionArg;
+    gIw4lPendingTransitionLevel[0] = '\0';
+    gIw4lPendingTransitionArea = 0;
+    gIw4lPendingTransitionNode = 0;
+    gIw4lPendingTransitionArg = 0;
     gIw4lSnapshot.mario_health = gMarioState != NULL ? gMarioState->health : 0;
     gIw4lSnapshot.coins = gMarioState != NULL ? gMarioState->numCoins : 0;
     gIw4lSnapshot.mario_action = gMarioState != NULL ? gMarioState->action : 0;
@@ -1408,7 +1578,13 @@ IW4L_SM64_API const char *iw4l_sm64_last_error(void) {
     return gIw4lLastError;
 }
 
-IW4L_SM64_API int iw4l_sm64_init(const char *level_name, int area, int act) {
+IW4L_SM64_API int iw4l_sm64_init(
+    const char *level_name,
+    int area,
+    int act,
+    int warp_node,
+    uint32_t warp_arg
+) {
     const struct LevelSpec *level;
 
     if (gIw4lInitialized) {
@@ -1467,6 +1643,11 @@ IW4L_SM64_API int iw4l_sm64_init(const char *level_name, int area, int act) {
     gGlobalTimer++;
     gDebugLevelSelect = FALSE;
 
+    if (gCurrentArea != NULL && warp_node >= 0) {
+        initiate_warp(level->level, (s16)area, (s16)warp_node, (s32)warp_arg);
+        warp_area();
+    }
+
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
         snprintf(
             gIw4lLastError,
@@ -1489,10 +1670,11 @@ IW4L_SM64_API int iw4l_sm64_init(const char *level_name, int area, int act) {
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
-        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d action=0x%08X\n",
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d action=0x%08X\n",
         level_name,
         area,
         act,
+        warp_node,
         gMarioState->action
     );
     fflush(stderr);
@@ -1523,6 +1705,8 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     apply_proxy(&request);
     gBridgeStage = "apply_external_attack";
     apply_external_attack(&request);
+    gBridgeStage = "auto_open_doors";
+    bridge_auto_open_nearby_doors(&request);
     gBridgeStage = "select_gfx_pool";
     select_gfx_pool();
     gBridgeStage = "level_script_execute";
@@ -1562,6 +1746,10 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
     gIw4lRunMarioAction = 0;
     gIw4lBridgeButtonDown = 0;
     gIw4lBridgeButtonPressed = 0;
+    gIw4lPendingTransitionLevel[0] = '\0';
+    gIw4lPendingTransitionArea = 0;
+    gIw4lPendingTransitionNode = 0;
+    gIw4lPendingTransitionArg = 0;
     gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
