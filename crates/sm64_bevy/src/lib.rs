@@ -1790,7 +1790,6 @@ fn sync_native_render_frame(
     mut commands:Commands,
     cod_active:Option<Res<Sm64CodActive>>,
     frame:Res<Sm64NativeRenderFrame>,
-    cameras:Query<&GlobalTransform,With<render_scene::FpvLens>>,
     mut cache:ResMut<Sm64NativeRenderCache>,
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
@@ -1800,10 +1799,6 @@ fn sync_native_render_frame(
     if cod_active.is_none() || frame.tick==0 || frame.tick==*last_tick {
         return;
     }
-    let Some(camera)=cameras.iter().next() else {
-        return;
-    };
-    let camera_matrix=camera.to_matrix();
     *last_tick=frame.tick;
 
     for update in &frame.texture_updates {
@@ -1891,20 +1886,15 @@ fn sync_native_render_frame(
 
         for triangle in triangles {
             /*
-             * The DLL exports final native CAMERA-SPACE vertices after SM64
-             * GeoLayout/animation/billboard processing. Reapply the live COD
-             * FPV lens transform here. This preserves native billboards and
-             * animated multipart actors exactly instead of attempting to
-             * invert SM64's camera matrix inside the DLL.
+             * The embedded DLL already converted the native MODELVIEW result
+             * back through the exact same SM64 camera used for that frame.
+             * These are stable SM64 world-space vertices, including native
+             * billboard/animation results.
              */
-            let s=sm64_core::SM64_TO_IW4_SCALE;
-            let to_world=|p:[f32;3]| {
-                camera_matrix.transform_point3(Vec3::new(p[0]*s,p[1]*s,p[2]*s))
-            };
             let converted=[
-                to_world(triangle.pos[0]),
-                to_world(triangle.pos[1]),
-                to_world(triangle.pos[2]),
+                sm64_render_vec3(triangle.pos[0]),
+                sm64_render_vec3(triangle.pos[1]),
+                sm64_render_vec3(triangle.pos[2]),
             ];
             let a=converted[0];
             let b=converted[1];
