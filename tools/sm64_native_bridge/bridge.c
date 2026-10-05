@@ -718,10 +718,19 @@ static int bridge_auto_open_nearby_doors(const struct Request *request) {
                             (s16)(source_node->node.destLevel & 0x7Fu);
                         const s16 dest_area = (s16)source_node->node.destArea;
                         const s16 dest_node = (s16)source_node->node.destNode;
-                        const s32 action_arg =
-                            gMarioState != NULL
-                                ? (s32)should_push_or_pull_door(gMarioState, object) + 4
-                                : 5;
+                        s32 action_arg = 5;
+
+                        if (gMarioState != NULL) {
+                            const float door_dx = object->oPosX - gMarioState->pos[0];
+                            const float door_dz = object->oPosZ - gMarioState->pos[2];
+                            const s16 door_d_yaw =
+                                object->oMoveAngleYaw - atan2s(door_dz, door_dx);
+                            const s32 push_or_pull =
+                                (door_d_yaw >= -0x4000 && door_d_yaw <= 0x4000)
+                                    ? 1
+                                    : 2;
+                            action_arg = push_or_pull + 4;
+                        }
 
                         /*
                          * Consume a Bowser key exactly once when entering its
