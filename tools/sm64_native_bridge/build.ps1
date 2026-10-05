@@ -291,12 +291,15 @@ void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3) {
 "@
 $primeWarpHelper = @"
 #ifdef IW4L_SM64_EMBEDDED
+static s32 sIw4lHostWarpPrimed = FALSE;
+
 void iw4l_sm64_prime_level_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3) {
     sWarpDest.type = WARP_TYPE_CHANGE_LEVEL;
     sWarpDest.levelNum = destLevel;
     sWarpDest.areaIdx = destArea;
     sWarpDest.nodeId = destWarpNode;
     sWarpDest.arg = arg3;
+    sIw4lHostWarpPrimed = TRUE;
 }
 #endif
 
@@ -306,6 +309,51 @@ if (-not $levelUpdateText.Contains($primeWarpAnchor)) {
     throw "Could not locate initiate_warp in $levelUpdateSource"
 }
 $levelUpdateText = $levelUpdateText.Replace($primeWarpAnchor, $primeWarpHelper)
+
+# level_main_scripts_entry always calls lvl_init_from_save_file() before the
+# selected level script. That vanilla initializer clears sWarpDest because the
+# normal game kept it in the same process. Our destination is a fresh DLL, so
+# keep the host-primed warp alive until init_level()->warp_level() consumes it.
+$warpResetNeedle = @"
+    sWarpDest.type = WARP_TYPE_NOT_WARPING;
+    sDelayedWarpOp = WARP_OP_NONE;
+    gNeverEnteredCastle = !save_file_exists(gCurrSaveFileNum - 1);
+"@
+$warpResetReplacement = @"
+#ifdef IW4L_SM64_EMBEDDED
+    if (!sIw4lHostWarpPrimed) {
+        sWarpDest.type = WARP_TYPE_NOT_WARPING;
+    }
+#else
+    sWarpDest.type = WARP_TYPE_NOT_WARPING;
+#endif
+    sDelayedWarpOp = WARP_OP_NONE;
+    gNeverEnteredCastle = !save_file_exists(gCurrSaveFileNum - 1);
+"@
+if (-not $levelUpdateText.Contains($warpResetNeedle)) {
+    throw "Could not locate lvl_init_from_save_file warp reset in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($warpResetNeedle, $warpResetReplacement)
+
+$consumeHostWarpNeedle = @"
+        } else {
+            warp_level();
+        }
+    } else {
+"@
+$consumeHostWarpReplacement = @"
+        } else {
+            warp_level();
+#ifdef IW4L_SM64_EMBEDDED
+            sIw4lHostWarpPrimed = FALSE;
+#endif
+        }
+    } else {
+"@
+if (-not $levelUpdateText.Contains($consumeHostWarpNeedle)) {
+    throw "Could not locate init_level warp_level call in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($consumeHostWarpNeedle, $consumeHostWarpReplacement)
 
 # Painting warps are level changes too, but the stock transition spends 74
 # native frames in ACT_DISAPPEARED/basic_update before lvl_init_or_update
