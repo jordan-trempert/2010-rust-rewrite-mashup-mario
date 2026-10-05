@@ -897,6 +897,45 @@ static int bridge_capture_authored_warp_node(u8 source_node, const char *reason)
     return gIw4lPendingTransitionLevel[0] != '\0';
 }
 
+static void bridge_bypass_star_door_unlock_cutscene(void) {
+    u32 save_flag;
+
+    if (gMarioState == NULL
+        || gMarioState->action != ACT_UNLOCKING_STAR_DOOR
+        || gMarioState->usedObj == NULL) {
+        return;
+    }
+
+    /*
+     * In the embedded host, the vanilla summon-star unlock cutscene runs for
+     * ~70 frames and spawns bhvUnlockDoorStar while COD continues owning the
+     * first-person presentation. That cutscene is the point at which the host
+     * process is dying. The star requirement has already been checked by
+     * interact_door() before ACT_UNLOCKING_STAR_DOOR is entered, so persist the
+     * same door-unlocked save flag vanilla would set at the end of the cutscene
+     * and continue directly into the normal star-door traversal action.
+     */
+    save_flag = get_door_save_file_flag(gMarioState->usedObj);
+    if (save_flag != 0) {
+        save_file_set_flags(save_flag);
+    }
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-native: star door unlock cutscene bypassed required_stars=%d save_flag=0x%08X action_arg=0x%X\n",
+        (int)(gMarioState->usedObj->oBhvParams >> 24),
+        (unsigned)save_flag,
+        (unsigned)gMarioState->actionArg
+    );
+    fflush(stderr);
+
+    set_mario_action(
+        gMarioState,
+        ACT_ENTERING_STAR_DOOR,
+        gMarioState->actionArg
+    );
+}
+
 static int bridge_capture_star_or_death_exit(void) {
     if (gMarioState == NULL || gCurrentArea == NULL) {
         return 0;
@@ -2098,6 +2137,14 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gIw4lBridgeButtonDown = 0;
     gIw4lBridgeButtonPressed = 0;
+
+    /*
+     * Do this immediately after the frame that first selected
+     * ACT_UNLOCKING_STAR_DOOR, before the next native frame can advance the
+     * summon-star animation/spawn path.
+     */
+    gBridgeStage = "star_door_unlock_bypass";
+    bridge_bypass_star_door_unlock_cutscene();
 
     gBridgeStage = "star_death_warp_probe";
     if (bridge_capture_star_or_death_exit()) {
