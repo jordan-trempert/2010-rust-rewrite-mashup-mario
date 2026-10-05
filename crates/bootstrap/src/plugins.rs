@@ -43,13 +43,6 @@ struct Sm64CodNativeState {
 }
 
 
-#[derive(Component)]
-struct Sm64CodHudRoot;
-
-#[derive(Component)]
-struct Sm64CodHudText;
-
-
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -82,7 +75,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
             apply_sm64_native_player_output,
-            sync_sm64_cod_hud,
+            publish_sm64_cod_hud,
             apply_sm64_dynamic_collision,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
@@ -558,65 +551,20 @@ fn apply_sm64_native_player_output(
     }
 }
 
-fn sync_sm64_cod_hud(
-    mut commands: Commands,
+fn publish_sm64_cod_hud(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
-    cameras: Query<Entity, With<render_frontend::prepare::scene::camera::FpvLens>>,
-    roots: Query<Entity, With<Sm64CodHudRoot>>,
-    mut texts: Query<&mut Text, With<Sm64CodHudText>>,
+    mut hud: ResMut<frame::Sm64HudView>,
 ) {
-    if active.is_none() {
-        for entity in &roots {
-            commands.entity(entity).try_despawn();
-        }
+    if active.is_none() || !output.active {
+        *hud = frame::Sm64HudView::default();
         return;
     }
-
-    let wedges = ((output.health.max(0) + 0xff) / 0x100).clamp(0, 8);
-    let meter = format!(
-        "MARIO  {}{}    COIN x {}",
-        "♥".repeat(wedges as usize),
-        "·".repeat((8 - wedges) as usize),
-        output.coins.max(0),
-    );
-
-    if let Some(mut text) = texts.iter_mut().next() {
-        *text = Text::new(meter);
-        return;
-    }
-
-    // Render on the actual IW4 first-person lens. A separate Camera2d can be
-    // skipped by this custom render path even while its UI entities exist.
-    let Some(camera) = cameras.iter().next() else {
-        return;
+    *hud = frame::Sm64HudView {
+        active: true,
+        health: output.health,
+        coins: output.coins,
     };
-
-    commands
-        .spawn((
-            Sm64CodHudRoot,
-            UiTargetCamera(camera),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(22.0),
-                top: Val::Px(20.0),
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(7.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.50)),
-            GlobalZIndex(1_000_000),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Sm64CodHudText,
-                Text::new(meter),
-                TextFont {
-                    font_size: bevy::text::FontSize::Px(24.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
 }
 
 fn suppress_sm64_player_view(
@@ -649,6 +597,7 @@ fn clear_sm64_cod_on_return(
     commands.insert_resource(Sm64CodCollisionState::default());
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
+    commands.insert_resource(frame::Sm64HudView::default());
 }
 
 pub fn assemble_listen_app() -> App {
