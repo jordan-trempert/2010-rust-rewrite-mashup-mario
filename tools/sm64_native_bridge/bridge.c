@@ -1845,6 +1845,8 @@ IW4L_SM64_API int iw4l_sm64_init(
 
     gIw4lInitialized = 1;
     gIw4lLastError[0] = '\0';
+    gBridgeStage = "capture_initial_static_surfaces";
+    capture_static_surfaces();
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
