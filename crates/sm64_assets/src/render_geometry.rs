@@ -25,6 +25,8 @@ pub struct RenderBatch {
     pub texture_size: Option<[u32; 2]>,
     /// Active N64 light/color group when this batch was emitted.
     pub light_symbol: Option<String>,
+    /// Approximate diffuse RGB from the active N64 Lights1 definition.
+    pub light_color: Option<[u8;3]>,
     /// Flattened triangle vertices, three entries per triangle.
     pub vertices: Vec<RenderVertex>,
 }
@@ -112,6 +114,7 @@ pub fn load_level_render_geometry(
 
     let mut vertex_arrays = HashMap::<String, Vec<RenderVertex>>::new();
     let mut display_lists = HashMap::<String, Vec<GfxCommand>>::new();
+    let mut light_colors = HashMap::<String,[u8;3]>::new();
 
     for path in model_files {
         let source = fs::read_to_string(&path).map_err(|error| {
@@ -124,6 +127,7 @@ pub fn load_level_render_geometry(
         for (name, body) in extract_arrays(&source, "Gfx") {
             display_lists.insert(name, parse_display_list(&body)?);
         }
+        light_colors.extend(parse_light_colors(&source));
     }
 
     let mut output = ParsedRenderGeometry::default();
@@ -139,6 +143,7 @@ pub fn load_level_render_geometry(
             &mut recursion,
         )?;
     }
+    apply_light_colors(&mut output,&light_colors);
     coalesce_opaque_batches(&mut output);
     Ok(output)
 }
@@ -154,6 +159,7 @@ fn coalesce_opaque_batches(output: &mut ParsedRenderGeometry) {
             Option<String>,
             Option<[u32; 2]>,
             Option<String>,
+            Option<[u8;3]>,
             (i32, i32, i32),
         ),
         usize,
@@ -184,6 +190,7 @@ fn coalesce_opaque_batches(output: &mut ParsedRenderGeometry) {
                 batch.texture_symbol.clone(),
                 batch.texture_size,
                 batch.light_symbol.clone(),
+                batch.light_color,
                 cell,
             );
             if let Some(&index) = by_key.get(&key) {
@@ -196,6 +203,7 @@ fn coalesce_opaque_batches(output: &mut ParsedRenderGeometry) {
                     texture_symbol: batch.texture_symbol.clone(),
                     texture_size: batch.texture_size,
                     light_symbol: batch.light_symbol.clone(),
+                    light_color: batch.light_color,
                     vertices: tri.to_vec(),
                 });
             }
@@ -222,6 +230,7 @@ pub fn load_model_display_lists(
     for (name,body) in extract_arrays(&source,"Gfx") {
         display_lists.insert(name,parse_display_list(&body)?);
     }
+    let light_colors=parse_light_colors(&source);
 
     let mut output=ParsedRenderGeometry::default();
     for (layer,name) in roots {
@@ -236,7 +245,47 @@ pub fn load_model_display_lists(
             &mut recursion,
         )?;
     }
+    apply_light_colors(&mut output,&light_colors);
     Ok(output)
+}
+
+fn parse_light_colors(source:&str)->HashMap<String,[u8;3]> {
+    let mut out=HashMap::new();
+    let Ok(re)=Regex::new(
+        r"(?s)(?:static\s+|UNUSED\s+static\s+)?const\s+Lights1\s+([A-Za-z0-9_]+)\s*=\s*gdSPDefLights1\s*\((.*?)\)"
+    ) else { return out; };
+    let Ok(number)=Regex::new(r"0x[0-9A-Fa-f]+|-?\d+") else { return out; };
+
+    for cap in re.captures_iter(source) {
+        let Some(name)=cap.get(1) else {continue;};
+        let Some(body)=cap.get(2) else {continue;};
+        let values=number.find_iter(body.as_str())
+            .filter_map(|m|parse_i32(m.as_str()).ok())
+            .collect::<Vec<_>>();
+        if values.len()>=6 {
+            out.insert(
+                name.as_str().to_owned(),
+                [
+                    values[3].clamp(0,255) as u8,
+                    values[4].clamp(0,255) as u8,
+                    values[5].clamp(0,255) as u8,
+                ],
+            );
+        }
+    }
+    out
+}
+
+fn apply_light_colors(
+    geometry:&mut ParsedRenderGeometry,
+    colors:&HashMap<String,[u8;3]>,
+) {
+    for batch in &mut geometry.batches {
+        batch.light_color=batch.light_symbol
+            .as_ref()
+            .and_then(|symbol|colors.get(symbol))
+            .copied();
+    }
 }
 
 fn collect_model_files(dir: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -499,6 +548,7 @@ fn push_triangle(
             texture_symbol: state.texture_symbol.clone(),
             texture_size: state.texture_size,
             light_symbol: state.light_symbol.clone(),
+            light_color: None,
             vertices: Vec::new(),
         });
     }
