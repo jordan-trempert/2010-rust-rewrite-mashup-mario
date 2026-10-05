@@ -70,6 +70,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         .add_plugins(SessionPlugin)
         .add_plugins(Sm64Plugin)
         .add_systems(Update, (
+            arm_sm64_cod_external_presentation,
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
@@ -131,8 +132,7 @@ fn arm_sm64_cod_external_presentation(
     }
 }
 
-fn arm_sm64_cod_external_presentation,
-                launch_installed_sm64_cod_map(
+fn launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
     pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
