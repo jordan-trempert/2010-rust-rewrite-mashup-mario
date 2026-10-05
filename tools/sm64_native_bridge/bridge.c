@@ -425,6 +425,13 @@ static void apply_external_attack(const struct Request *request) {
     if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0 || gObjectLists == NULL) {
         return;
     }
+    /* In a cannon, fire belongs to Mario's A-button cannon action. During
+       dialogs/cutscenes it belongs to the native state machine, never to the
+       hitscan adapter. */
+    if (gMarioState != NULL &&
+        (gMarioState->action == ACT_IN_CANNON || get_dialog_id() != DIALOG_NONE)) {
+        return;
+    }
 
     /*
      * COD bullets are translated into the original SM64 object interaction
