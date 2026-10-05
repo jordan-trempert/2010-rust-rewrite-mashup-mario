@@ -2068,8 +2068,12 @@ fn advance_sm64_runtime(
                         .is_some_and(|snapshot| snapshot.tick <= 3 || snapshot.tick % 300 == 0)
                     {
                         info!(
-                            "SM64 COD native DLL snapshot tick={} objects={} (Rust gameplay objects=0)",
+                            "SM64 COD native DLL snapshot tick={} area={} action=0x{:08x} mario_pos={:?} static_surfaces={} objects={} (Rust gameplay objects=0)",
                             runtime.latest.as_ref().map_or(0, |snapshot| snapshot.tick),
+                            native_output.area_index,
+                            native_output.action,
+                            native_output.sm64_pos,
+                            native_static_collision.triangles.len(),
                             native_object_count
                         );
                     }
