@@ -52,7 +52,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 2u
+#define IW4L_SM64_ABI_VERSION 3u
 static volatile const char *gBridgeStage = "startup";
 static int gBridgeDialogPendingReset = 0;
 
@@ -85,42 +85,68 @@ extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 #define IW4L_AUDIO_SAMPLES_LOW 528
 #endif
 
-static struct AudioAPI *gIw4lAudioApi = NULL;
+/*
+ * Never open a second Windows audio device from the embedded SM64 DLL.
+ * COD/Bevy owns the process audio device. Running sm64-port's WASAPI backend
+ * beside Bevy/rodio let a later COD voice steal/reset the device and made the
+ * SM64 stream go permanently silent.
+ *
+ * Instead, generate the original 32 kHz stereo PCM for this native tick and
+ * expose it in the snapshot. Rust queues it into the same match audio bus as
+ * COD, so both games are mixed by one device owner.
+ */
+#define IW4L_AUDIO_SAMPLE_RATE 32000u
+#define IW4L_AUDIO_CHANNELS 2u
+#define IW4L_AUDIO_MAX_FRAMES 1088u
+
+static s16 gIw4lAudioSamples[IW4L_AUDIO_MAX_FRAMES * IW4L_AUDIO_CHANNELS];
+static uint32_t gIw4lAudioFrameCount = 0;
+static uint32_t gIw4lAudioFrameRemainder = 0;
 
 static void bridge_audio_backend_init(void) {
-#if HAVE_WASAPI
-    if (audio_wasapi.init()) {
-        gIw4lAudioApi = &audio_wasapi;
-    }
-#endif
-    if (gIw4lAudioApi == NULL) {
-        gIw4lAudioApi = &audio_null;
-    }
+    gIw4lAudioFrameCount = 0;
+    gIw4lAudioFrameRemainder = 0;
+    memset(gIw4lAudioSamples, 0, sizeof(gIw4lAudioSamples));
 }
 
 static void bridge_audio_tick(void) {
-    s16 audio_buffer[IW4L_AUDIO_SAMPLES_HIGH * 2 * 2];
-    u32 num_audio_samples;
-    int samples_left;
-    int i;
+    uint32_t total_frames;
+    uint32_t first_frames;
+    uint32_t second_frames;
 
-    if (gIw4lAudioApi == NULL) {
-        return;
+    /*
+     * 32000 / 30 = 1066 2/3 frames per native game tick. Carry the fraction
+     * so the host stream has the exact long-term sample rate instead of slowly
+     * drifting against COD audio.
+     */
+    gIw4lAudioFrameRemainder += IW4L_AUDIO_SAMPLE_RATE;
+    total_frames = gIw4lAudioFrameRemainder / 30u;
+    gIw4lAudioFrameRemainder %= 30u;
+    if (total_frames > IW4L_AUDIO_MAX_FRAMES) {
+        total_frames = IW4L_AUDIO_MAX_FRAMES;
     }
 
-    samples_left = gIw4lAudioApi->buffered();
-    num_audio_samples =
-        samples_left < gIw4lAudioApi->get_desired_buffered()
-            ? IW4L_AUDIO_SAMPLES_HIGH
-            : IW4L_AUDIO_SAMPLES_LOW;
+    /*
+     * sm64-port's synthesis path is traditionally fed buffers in the
+     * 528..544-frame range. Split the 1066/1067 host chunk into two legal
+     * synthesis calls while keeping one continuous interleaved stereo block.
+     */
+    first_frames = IW4L_AUDIO_SAMPLES_LOW;
+    if (first_frames > total_frames) {
+        first_frames = total_frames;
+    }
+    second_frames = total_frames - first_frames;
 
-    for (i = 0; i < 2; ++i) {
+    if (first_frames != 0) {
+        create_next_audio_buffer(gIw4lAudioSamples, first_frames);
+    }
+    if (second_frames != 0) {
         create_next_audio_buffer(
-            audio_buffer + i * (num_audio_samples * 2),
-            num_audio_samples
+            gIw4lAudioSamples + first_frames * IW4L_AUDIO_CHANNELS,
+            second_frames
         );
     }
-    gIw4lAudioApi->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
+    gIw4lAudioFrameCount = total_frames;
 }
 
 void dispatch_audio_sptask(UNUSED struct SPTask *spTask) {
@@ -262,6 +288,11 @@ struct Iw4lSm64SnapshotView {
     uint32_t render_triangle_count;
     const struct Iw4lSm64TextureView *textures;
     uint32_t texture_count;
+    const int16_t *audio_samples;
+    uint32_t audio_frame_count;
+    uint32_t audio_sample_rate;
+    uint16_t audio_channels;
+    uint16_t audio_reserved;
 };
 
 static struct LevelCommand *gIw4lLevelCommand = NULL;
@@ -1250,6 +1281,11 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     }
     gIw4lSnapshot.textures=gIw4lTextureViews;
     gIw4lSnapshot.texture_count=gIw4lTextureCount;
+    gIw4lSnapshot.audio_samples=gIw4lAudioSamples;
+    gIw4lSnapshot.audio_frame_count=gIw4lAudioFrameCount;
+    gIw4lSnapshot.audio_sample_rate=IW4L_AUDIO_SAMPLE_RATE;
+    gIw4lSnapshot.audio_channels=IW4L_AUDIO_CHANNELS;
+    gIw4lSnapshot.audio_reserved=0;
     return &gIw4lSnapshot;
 }
 
@@ -1513,6 +1549,8 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
         gIw4lRenderTriangleCount=0;
     }
     gIw4lInitialized = 0;
+    gIw4lAudioFrameCount = 0;
+    gIw4lAudioFrameRemainder = 0;
     gIw4lRunMarioAction = 0;
     gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
