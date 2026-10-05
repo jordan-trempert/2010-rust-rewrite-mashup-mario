@@ -121,6 +121,28 @@ pub struct Sm64NativeDynamicCollision {
     pub tick: u32,
 }
 
+#[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeRenderFrame {
+    pub tick:u32,
+    pub triangles:Vec<sm64_native::NativeRenderTriangle>,
+    pub texture_updates:Vec<sm64_native::NativeTextureUpdate>,
+}
+
+#[derive(Resource, Default)]
+struct Sm64NativeRenderCache {
+    textures:HashMap<u32,Handle<Image>>,
+    batches:HashMap<(u32,bool),NativeRenderBatchHandles>,
+}
+
+struct NativeRenderBatchHandles {
+    entity:Entity,
+    mesh:Handle<Mesh>,
+    material:Handle<StandardMaterial>,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64NativeRenderPresentation;
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64NativePlayerOutput {
     pub active: bool,
@@ -224,6 +246,8 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64NativePlayerOutput>()
             .init_resource::<Sm64NativeDialogOutput>()
             .init_resource::<Sm64NativeDynamicCollision>()
+            .init_resource::<Sm64NativeRenderFrame>()
+            .init_resource::<Sm64NativeRenderCache>()
             .init_resource::<Sm64PresentationCache>()
             .init_resource::<Sm64LoadStatus>()
             .init_resource::<Sm64DebugView>();
@@ -235,6 +259,7 @@ impl Plugin for Sm64Plugin {
                 update_debug_input.after(launch_requested_sm64_map),
                 advance_sm64_runtime.after(launch_requested_sm64_map),
                 sync_sm64_dialog_overlay.after(advance_sm64_runtime),
+                sync_native_render_frame.after(advance_sm64_runtime),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
                 face_sm64_billboard_objects.after(sync_object_presentations),
@@ -258,6 +283,7 @@ fn launch_requested_sm64_map(
             With<Sm64DebugCamera>,
             With<Sm64SkyboxPresentation>,
             With<Sm64DialogRoot>,
+            With<Sm64NativeRenderPresentation>,
         )>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -266,6 +292,8 @@ fn launch_requested_sm64_map(
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
+    mut native_render: ResMut<Sm64NativeRenderFrame>,
+    mut native_render_cache: ResMut<Sm64NativeRenderCache>,
     mut native: NonSendMut<Sm64NativeRuntime>,
     mut presentation_cache: ResMut<Sm64PresentationCache>,
     mut status: ResMut<Sm64LoadStatus>,
@@ -278,6 +306,11 @@ fn launch_requested_sm64_map(
     native.client=None;
     native.model_symbols.clear();
     native.active=false;
+    native_render.tick=0;
+    native_render.triangles.clear();
+    native_render.texture_updates.clear();
+    native_render_cache.textures.clear();
+    native_render_cache.batches.clear();
 
     let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
         enabled.0=false;
@@ -442,6 +475,8 @@ fn launch_requested_sm64_map(
                 warn!("SM64 skybox {skybox} failed: {error}");
             }
         }
+    }
+    if debug_view.0 && cod_active.is_none() {
         spawn_debug_scene(
             &mut commands,
             &mut meshes,
@@ -454,7 +489,7 @@ fn launch_requested_sm64_map(
             mario_geometry.as_ref(),
             &mario_texture_sources,
             [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
-            debug_view.0 && cod_active.is_none(),
+            true,
         );
     }
 
@@ -1612,6 +1647,7 @@ fn advance_sm64_runtime(
     mut native_output: ResMut<Sm64NativePlayerOutput>,
     mut native_dialog: ResMut<Sm64NativeDialogOutput>,
     mut native_collision: ResMut<Sm64NativeDynamicCollision>,
+    mut native_render: ResMut<Sm64NativeRenderFrame>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
     if !enabled.0 { return; }
@@ -1659,6 +1695,9 @@ fn advance_sm64_runtime(
                     native_dialog.text=snapshot.dialog_text.clone();
                     native_collision.tick=snapshot.tick;
                     native_collision.triangles=snapshot.dynamic_surfaces.clone();
+                    native_render.tick=snapshot.tick;
+                    native_render.triangles=snapshot.render_triangles.clone();
+                    native_render.texture_updates=snapshot.texture_updates.clone();
                     native_output.active=true;
                     native_output.sm64_pos=snapshot.mario_pos;
                     native_output.sm64_vel=snapshot.mario_vel;
@@ -1687,6 +1726,8 @@ fn advance_sm64_runtime(
                     native_dialog.id=-1;
                     native_dialog.text.clear();
                     native_collision.triangles.clear();
+                    native_render.triangles.clear();
+                    native_render.texture_updates.clear();
                     runtime.latest=None;
                 }
             }
@@ -1699,6 +1740,154 @@ fn advance_sm64_runtime(
             runtime.latest=Some(runtime.world.step(input.0));
         }
         steps += 1;
+    }
+}
+
+fn sync_native_render_frame(
+    mut commands:Commands,
+    cod_active:Option<Res<Sm64CodActive>>,
+    frame:Res<Sm64NativeRenderFrame>,
+    mut cache:ResMut<Sm64NativeRenderCache>,
+    mut meshes:ResMut<Assets<Mesh>>,
+    mut materials:ResMut<Assets<StandardMaterial>>,
+    mut images:ResMut<Assets<Image>>,
+    mut last_tick:Local<u32>,
+) {
+    if cod_active.is_none() || frame.tick==0 || frame.tick==*last_tick {
+        return;
+    }
+    *last_tick=frame.tick;
+
+    for update in &frame.texture_updates {
+        let mut image=Image::new(
+            Extent3d {
+                width:update.width,
+                height:update.height,
+                depth_or_array_layers:1,
+            },
+            TextureDimension::D2,
+            update.rgba.clone(),
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        let mut sampler=ImageSamplerDescriptor::nearest();
+        sampler.address_mode_u=ImageAddressMode::Repeat;
+        sampler.address_mode_v=ImageAddressMode::Repeat;
+        sampler.address_mode_w=ImageAddressMode::ClampToEdge;
+        image.sampler=ImageSampler::Descriptor(sampler);
+
+        if let Some(handle)=cache.textures.get(&update.id) {
+            if let Some(existing)=images.get_mut(handle) {
+                *existing=image;
+            }
+        } else {
+            let handle=images.add(image);
+            cache.textures.insert(update.id,handle);
+        }
+    }
+
+    let mut groups=HashMap::<(u32,bool),Vec<&sm64_native::NativeRenderTriangle>>::new();
+    for triangle in &frame.triangles {
+        let texture_id=triangle.texture_id.unwrap_or(u32::MAX);
+        groups.entry((texture_id,triangle.alpha)).or_default().push(triangle);
+    }
+
+    let active_keys=groups.keys().copied().collect::<std::collections::HashSet<_>>();
+    let stale=cache.batches.keys()
+        .filter(|key|!active_keys.contains(key))
+        .copied()
+        .collect::<Vec<_>>();
+    for key in stale {
+        if let Some(batch)=cache.batches.remove(&key) {
+            commands.entity(batch.entity).despawn();
+            meshes.remove(&batch.mesh);
+            materials.remove(&batch.material);
+        }
+    }
+
+    for (key,triangles) in groups {
+        let mut positions=Vec::<[f32;3]>::with_capacity(triangles.len()*3);
+        let mut normals=Vec::<[f32;3]>::with_capacity(triangles.len()*3);
+        let mut uvs=Vec::<[f32;2]>::with_capacity(triangles.len()*3);
+        let mut colors=Vec::<[f32;4]>::with_capacity(triangles.len()*3);
+
+        for triangle in triangles {
+            let converted=[
+                sm64_render_vec3(triangle.pos[0]),
+                sm64_render_vec3(triangle.pos[1]),
+                sm64_render_vec3(triangle.pos[2]),
+            ];
+            let a=Vec3::from_array(converted[0]);
+            let b=Vec3::from_array(converted[1]);
+            let d=Vec3::from_array(converted[2]);
+            let normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Z).to_array();
+
+            for i in 0..3 {
+                positions.push(converted[i]);
+                normals.push(normal);
+                uvs.push(triangle.uv[i]);
+                colors.push([
+                    triangle.rgba[i][0] as f32/255.0,
+                    triangle.rgba[i][1] as f32/255.0,
+                    triangle.rgba[i][2] as f32/255.0,
+                    triangle.rgba[i][3] as f32/255.0,
+                ]);
+            }
+        }
+
+        let mesh_data=Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR,colors);
+
+        if let Some(existing)=cache.batches.get(&key) {
+            if let Some(mesh)=meshes.get_mut(&existing.mesh) {
+                *mesh=mesh_data;
+            }
+            continue;
+        }
+
+        let texture=if key.0==u32::MAX {
+            None
+        } else {
+            cache.textures.get(&key.0).cloned()
+        };
+        let material=materials.add(StandardMaterial {
+            base_color:Color::WHITE,
+            base_color_texture:texture,
+            unlit:true,
+            alpha_mode:if key.1 {AlphaMode::Blend} else {AlphaMode::Opaque},
+            cull_mode:None,
+            ..default()
+        });
+        let mesh=meshes.add(mesh_data);
+        let entity=commands.spawn((
+            Name::new(format!("SM64 native render batch tex={} alpha={}",key.0,key.1)),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::IDENTITY,
+            Sm64NativeRenderPresentation,
+            Sm64DebugWorld,
+        )).id();
+        cache.batches.insert(key,NativeRenderBatchHandles {
+            entity,
+            mesh,
+            material,
+        });
+    }
+
+    if frame.tick<=3 || frame.tick%300==0 {
+        info!(
+            "SM64 native renderer frame tick={} triangles={} textures={} batches={}",
+            frame.tick,
+            frame.triangles.len(),
+            cache.textures.len(),
+            cache.batches.len()
+        );
     }
 }
 
@@ -1865,6 +2054,7 @@ fn sync_mario_presentation(
 
 fn sync_object_presentations(
     mut commands:Commands,
+    cod_active:Option<Res<Sm64CodActive>>,
     runtime:Res<Sm64Runtime>,
     mut last_tick:Local<u64>,
     status:Res<Sm64LoadStatus>,
@@ -1874,6 +2064,9 @@ fn sync_object_presentations(
     mut presentation_cache:ResMut<Sm64PresentationCache>,
     mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform,&mut Visibility)>,
 ) {
+    if cod_active.is_some() {
+        return;
+    }
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
     if snapshot.tick==*last_tick {
         return;
