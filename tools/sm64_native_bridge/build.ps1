@@ -214,7 +214,7 @@ void bhv_mario_update(void) {
         i = 0;
         while (sParticleTypes[i].particleFlag != 0) {
             if (particleFlags & sParticleTypes[i].particleFlag) {
-                spawn_particle(particleFlags & sParticleTypes[i].particleFlag,
+                spawn_particle(sParticleTypes[i].activeParticleFlag,
                                sParticleTypes[i].model,
                                sParticleTypes[i].behavior);
             }
