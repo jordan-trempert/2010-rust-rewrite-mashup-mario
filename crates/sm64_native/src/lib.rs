@@ -114,6 +114,7 @@ pub struct NativeClient {
     stdin: ChildStdin,
     stdout: ChildStdout,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    bridge_path: PathBuf,
 }
 
 impl NativeClient {
@@ -187,6 +188,7 @@ impl NativeClient {
             stdin,
             stdout,
             stderr_tail,
+            bridge_path: bridge,
         })
     }
 
@@ -204,15 +206,21 @@ impl NativeClient {
                         "; failed to query native bridge process status: {status_error}"
                     ),
                 };
-                let native_tail=self.stderr_tail
+                let tail_lines=self.stderr_tail
                     .lock()
                     .ok()
-                    .map(|tail|tail.iter().cloned().collect::<Vec<_>>().join(" | "))
-                    .filter(|tail|!tail.is_empty())
-                    .map(|tail|format!("; native stderr tail: {tail}"))
+                    .map(|tail|tail.iter().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let native_tail=if tail_lines.is_empty() {
+                    String::new()
+                } else {
+                    format!("; native stderr tail: {}",tail_lines.join(" | "))
+                };
+                let symbolized=symbolize_native_fault(&self.bridge_path,&tail_lines)
+                    .map(|value|format!("; native symbol: {value}"))
                     .unwrap_or_default();
                 Err(NativeBridgeError::new(format!(
-                    "{error}{child_state}{native_tail}"
+                    "{error}{child_state}{native_tail}{symbolized}"
                 )))
             }
         }
@@ -354,6 +362,49 @@ impl Drop for NativeClient {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+
+fn symbolize_native_fault(
+    bridge:&Path,
+    stderr_lines:&[String],
+)->Option<String>{
+    let address=stderr_lines.iter().rev().find_map(|line|{
+        let marker="address=";
+        let start=line.find(marker)?+marker.len();
+        let tail=&line[start..];
+        let end=tail.find(char::is_whitespace).unwrap_or(tail.len());
+        let value=&tail[..end];
+        if value.starts_with("0x") || value.starts_with("0X") {
+            Some(value.to_owned())
+        } else if value.chars().all(|ch|ch.is_ascii_hexdigit()) {
+            Some(format!("0x{value}"))
+        } else {
+            None
+        }
+    })?;
+
+    for tool in ["addr2line","x86_64-w64-mingw32-addr2line"] {
+        let output=Command::new(tool)
+            .arg("-f")
+            .arg("-C")
+            .arg("-e")
+            .arg(bridge)
+            .arg(&address)
+            .output();
+        let Ok(output)=output else {continue;};
+        if !output.status.success() {continue;}
+        let text=String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line|!line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" @ ");
+        if !text.is_empty() && !text.contains("??") {
+            return Some(format!("{address} => {text}"));
+        }
+    }
+    None
 }
 
 fn write_u32(writer: &mut impl Write, value: u32) -> Result<(), NativeBridgeError> {
