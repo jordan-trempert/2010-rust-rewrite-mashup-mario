@@ -679,7 +679,17 @@ $captureReplacement = @"
             native_rgba[native_i * 4 + 0] = v_arr[native_i]->color.r;
             native_rgba[native_i * 4 + 1] = v_arr[native_i]->color.g;
             native_rgba[native_i * 4 + 2] = v_arr[native_i]->color.b;
-            native_rgba[native_i * 4 + 3] = use_alpha ? v_arr[native_i]->color.a : 255;
+            /*
+             * v_arr[].color.a is a color-combiner input, not the final surface
+             * opacity. Treating it as Bevy vertex alpha makes ordinary SM64
+             * terrain translucent. For textured draws, let the decoded texture
+             * alpha provide cutouts/transparency; keep vertex alpha opaque.
+             *
+             * Preserve native vertex alpha only for genuinely untextured alpha
+             * draws where there is no texture alpha channel to carry opacity.
+             */
+            native_rgba[native_i * 4 + 3] =
+                (!native_textured && use_alpha) ? v_arr[native_i]->color.a : 255;
         }
 
         iw4l_sm64_capture_triangle(
