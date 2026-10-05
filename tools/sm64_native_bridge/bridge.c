@@ -305,10 +305,11 @@ extern void mario_update_hitbox_and_cap_model(struct MarioState *m);
 static int gIw4lInitialized = 0;
 /*
  * After a host level handoff the freshly initialized SM64 runtime already
- * contains the exact destination warp-node position. The first COD proxy step
- * must not overwrite it before Rust has consumed that spawn.
+ * contains the exact destination warp-node position. Keep that position until
+ * COD has actually teleported to it; multiple native ticks may run in one host
+ * frame while the destination is loading.
  */
-static int gIw4lPreserveNativeSpawnOneStep = 0;
+static int gIw4lPreserveNativeSpawn = 0;
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
 int gIw4lRunMarioAction = 0;
@@ -1721,9 +1722,9 @@ IW4L_SM64_API int iw4l_sm64_init(
     if (gCurrentArea != NULL && warp_node >= 0) {
         initiate_warp(level->level, (s16)area, (s16)warp_node, (s32)warp_arg);
         warp_area();
-        gIw4lPreserveNativeSpawnOneStep = 1;
+        gIw4lPreserveNativeSpawn = 1;
     } else {
-        gIw4lPreserveNativeSpawnOneStep = 0;
+        gIw4lPreserveNativeSpawn = 0;
     }
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
@@ -1753,7 +1754,7 @@ IW4L_SM64_API int iw4l_sm64_init(
         area,
         act,
         warp_node,
-        gIw4lPreserveNativeSpawnOneStep,
+        gIw4lPreserveNativeSpawn,
         gMarioState->pos[0],
         gMarioState->pos[1],
         gMarioState->pos[2],
@@ -1774,15 +1775,25 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
         return NULL;
     }
 
-    if (gIw4lPreserveNativeSpawnOneStep) {
+    if (gIw4lPreserveNativeSpawn && gMarioState != NULL) {
+        const float dx = player->pos[0] - gMarioState->pos[0];
+        const float dy = player->pos[1] - gMarioState->pos[1];
+        const float dz = player->pos[2] - gMarioState->pos[2];
+        const float distance2 = dx * dx + dy * dy + dz * dz;
+
         /*
-         * The destination level/warp was initialized in iw4l_sm64_init().
-         * Return that exact native position once before apply_proxy() can copy
-         * the source-level COD coordinates over it.
+         * A level-load frame can execute multiple 30 Hz native ticks before
+         * Rust gets a chance to consume the first snapshot. Keep returning the
+         * destination warp spawn until COD has actually moved to it; otherwise
+         * a second tick in the same frame would overwrite Mario with the old
+         * source-level coordinates again.
          */
-        gIw4lPreserveNativeSpawnOneStep = 0;
-        gBridgeStage = "initial_warp_snapshot";
-        return fill_snapshot_view();
+        if (distance2 > 16.0f * 16.0f) {
+            gBridgeStage = "initial_warp_snapshot";
+            return fill_snapshot_view();
+        }
+
+        gIw4lPreserveNativeSpawn = 0;
     }
 
     memset(&request, 0, sizeof(request));
@@ -1834,7 +1845,7 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
         gIw4lRenderTriangleCount=0;
     }
     gIw4lInitialized = 0;
-    gIw4lPreserveNativeSpawnOneStep = 0;
+    gIw4lPreserveNativeSpawn = 0;
     gIw4lAudioFrameCount = 0;
     gIw4lAudioCadence = 0;
     gIw4lRunMarioAction = 0;
