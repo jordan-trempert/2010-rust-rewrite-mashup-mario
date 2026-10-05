@@ -766,6 +766,10 @@ fn spawn_flat_object_geometry(
                 base_color:Color::WHITE,
                 base_color_texture:texture,
                 unlit:true,
+                // Many SM64 props (notably BOB's bubbly trees) are authored as
+                // thin textured planes. N64 render state allows them to remain
+                // visible from the gameplay camera; never back-face cull them.
+                cull_mode:None,
                 alpha_mode:if batch.layer.contains("TRANSPARENT"){AlphaMode::Blend}
                     else if batch.layer.contains("ALPHA"){AlphaMode::Mask(0.5)}
                     else{AlphaMode::Opaque},
