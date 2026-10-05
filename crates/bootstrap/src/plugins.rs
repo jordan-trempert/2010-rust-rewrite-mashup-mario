@@ -445,6 +445,7 @@ fn sm64_cod_native_owns_motion(action: u32) -> bool {
             | sm64_core::ACT_RIDING_HOOT
             | sm64_core::ACT_EXIT_AIRBORNE
             | sm64_core::ACT_DEATH_EXIT
+            | sm64_core::ACT_FALLING_DEATH_EXIT
             | sm64_core::ACT_UNUSED_DEATH_EXIT
             | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
             | sm64_core::ACT_SPECIAL_DEATH_EXIT
@@ -463,6 +464,7 @@ fn sm64_cod_native_reposition_action(action: u32) -> bool {
             | sm64_core::ACT_TELEPORT_FADE_IN
             | sm64_core::ACT_EXIT_AIRBORNE
             | sm64_core::ACT_DEATH_EXIT
+            | sm64_core::ACT_FALLING_DEATH_EXIT
             | sm64_core::ACT_UNUSED_DEATH_EXIT
             | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
             | sm64_core::ACT_SPECIAL_DEATH_EXIT
