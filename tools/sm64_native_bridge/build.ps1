@@ -459,6 +459,41 @@ if (-not $levelUpdateText.Contains($warpNeedle)) {
     throw "Could not locate init_mario_after_warp in $levelUpdateSource"
 }
 $levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
+
+# The Bowser-key doors (warpDoorId 1 upstairs, 2 basement) are same-level
+# castle area warps. COD can move independently of hidden Mario, so the stock
+# 20-frame delayed warp leaves enough time to walk through an opened key door
+# into an area that has not been loaded yet. Keep ordinary warp doors untouched,
+# but make the two actual key-door warps fire on the next native tick.
+$keyWarpDelayNeedle = @"
+            case WARP_OP_WARP_DOOR:
+                sDelayedWarpTimer = 20;
+                sDelayedWarpArg = m->actionArg;
+                sSourceWarpNodeId = (m->usedObj->oBhvParams & 0x00FF0000) >> 16;
+"@
+$keyWarpDelayReplacement = @"
+            case WARP_OP_WARP_DOOR:
+#ifdef IW4L_SM64_EMBEDDED
+                {
+                    const s16 iw4lWarpDoorId =
+                        m->usedObj != NULL ? (s16)(m->usedObj->oBhvParams >> 24) : 0;
+                    sDelayedWarpTimer =
+                        (iw4lWarpDoorId == 1 || iw4lWarpDoorId == 2) ? 1 : 20;
+                }
+#else
+                sDelayedWarpTimer = 20;
+#endif
+                sDelayedWarpArg = m->actionArg;
+                sSourceWarpNodeId = (m->usedObj->oBhvParams & 0x00FF0000) >> 16;
+"@
+if (-not $levelUpdateText.Contains($keyWarpDelayNeedle)) {
+    throw "Could not locate WARP_OP_WARP_DOOR delay in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace(
+    $keyWarpDelayNeedle,
+    $keyWarpDelayReplacement
+)
+
 Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
 
 # read_controller_inputs() runs after bridge.c supplies the COD input for this
