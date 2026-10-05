@@ -66,6 +66,12 @@ pub struct Sm64Object {
     pub face_angle: Vec3s,
     pub angle_vel: Vec3s,
     pub scale: Vec3f,
+    /// Original GraphNodeObject render flags from the native decomp.
+    pub render_flags: u16,
+    /// Live decomp animation selection/frame. These are presentation state;
+    /// gameplay remains authoritative in the native runtime.
+    pub anim_id: i16,
+    pub anim_frame: i16,
 
     pub action: i32,
     pub prev_action: i32,
@@ -138,6 +144,9 @@ impl Sm64Object {
             face_angle,
             angle_vel: [0; 3],
             scale: [1.0; 3],
+            render_flags: 1,
+            anim_id: -1,
+            anim_frame: 0,
             action: 0,
             prev_action: 0,
             sub_action: 0,
