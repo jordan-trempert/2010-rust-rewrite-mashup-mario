@@ -68,20 +68,35 @@ fn sm64_static_collision_vertices(
     vanish_cap: bool,
 ) -> Vec<[f32; 3]> {
     let s = sm64_core::SM64_TO_IW4_SCALE;
-    let mut verts = Vec::with_capacity(parsed.world.surfaces.len() * 3);
+    /*
+     * clipmap_iw4 triangle sweeps are front-face only. SM64's collision
+     * routines are not: interior walls and room boundaries may be approached
+     * from either side depending on the current room. Emit both windings so
+     * the imported world behaves as solid geometry in COD instead of allowing
+     * the player to fall/walk through the back face of a valid SM64 surface.
+     */
+    let mut verts = Vec::with_capacity(parsed.world.surfaces.len() * 6);
     for surface in &parsed.world.surfaces {
         if vanish_cap && surface.surface_type as i32 == sm64_core::SURFACE_VANISH_CAP_WALLS {
             continue;
         }
-        // Proper rotation: SM64 (X,Y-up,Z) -> IW4 (X,-Z,Y-up), with reversed
-        // winding for clipmap_iw4's triangle cross-product convention.
-        for vertex in [surface.vertex1, surface.vertex3, surface.vertex2] {
-            verts.push([
+
+        let convert = |vertex: [i16; 3]| {
+            [
                 vertex[0] as f32 * s,
                 -(vertex[2] as f32) * s,
                 vertex[1] as f32 * s,
-            ]);
-        }
+            ]
+        };
+
+        let v1 = convert(surface.vertex1);
+        let v2 = convert(surface.vertex2);
+        let v3 = convert(surface.vertex3);
+
+        // Front face in clipmap_iw4's reversed cross-product convention.
+        verts.extend_from_slice(&[v1, v3, v2]);
+        // Matching back face so SM64 collision remains solid from either side.
+        verts.extend_from_slice(&[v1, v2, v3]);
     }
     verts
 }
@@ -907,10 +922,13 @@ fn apply_sm64_dynamic_collision(
     verts.reserve(dynamic.triangles.len() * 3);
 
     for tri in &dynamic.triangles {
-        // Same handedness/winding conversion used by the static course mesh.
-        for vertex in [tri[0], tri[2], tri[1]] {
-            verts.push([vertex[0] * s, -vertex[2] * s, vertex[1] * s]);
-        }
+        let v0 = [tri[0][0] * s, -tri[0][2] * s, tri[0][1] * s];
+        let v1 = [tri[1][0] * s, -tri[1][2] * s, tri[1][1] * s];
+        let v2 = [tri[2][0] * s, -tri[2][2] * s, tri[2][1] * s];
+
+        // Keep moving platforms/doors solid from both sides as well.
+        verts.extend_from_slice(&[v0, v2, v1]);
+        verts.extend_from_slice(&[v0, v1, v2]);
     }
 
     let mesh = sim::SimClipMesh::from_linear_triangles(verts);
