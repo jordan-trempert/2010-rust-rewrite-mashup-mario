@@ -174,6 +174,12 @@ struct Sm64DialogRoot;
 #[derive(Component, Debug, Clone, Copy)]
 struct Sm64DialogText;
 
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64HudRoot;
+
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64HudText;
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
@@ -267,6 +273,7 @@ impl Plugin for Sm64Plugin {
                 update_debug_input.after(launch_requested_sm64_map),
                 advance_sm64_runtime.after(launch_requested_sm64_map),
                 sync_sm64_dialog_overlay.after(advance_sm64_runtime),
+                sync_sm64_hud_overlay.after(advance_sm64_runtime),
                 sync_native_render_frame.after(advance_sm64_runtime),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
@@ -291,6 +298,7 @@ fn launch_requested_sm64_map(
             With<Sm64DebugCamera>,
             With<Sm64SkyboxPresentation>,
             With<Sm64DialogRoot>,
+            With<Sm64HudRoot>,
             With<Sm64NativeRenderPresentation>,
         )>,
     >,
@@ -1782,6 +1790,7 @@ fn sync_native_render_frame(
     mut commands:Commands,
     cod_active:Option<Res<Sm64CodActive>>,
     frame:Res<Sm64NativeRenderFrame>,
+    cameras:Query<&GlobalTransform,With<render_scene::FpvLens>>,
     mut cache:ResMut<Sm64NativeRenderCache>,
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
@@ -1791,6 +1800,10 @@ fn sync_native_render_frame(
     if cod_active.is_none() || frame.tick==0 || frame.tick==*last_tick {
         return;
     }
+    let Some(camera)=cameras.iter().next() else {
+        return;
+    };
+    let camera_matrix=camera.to_matrix();
     *last_tick=frame.tick;
 
     for update in &frame.texture_updates {
@@ -1877,10 +1890,21 @@ fn sync_native_render_frame(
         let mut colors=Vec::<[f32;4]>::with_capacity(triangles.len()*3);
 
         for triangle in triangles {
+            /*
+             * The DLL exports final native CAMERA-SPACE vertices after SM64
+             * GeoLayout/animation/billboard processing. Reapply the live COD
+             * FPV lens transform here. This preserves native billboards and
+             * animated multipart actors exactly instead of attempting to
+             * invert SM64's camera matrix inside the DLL.
+             */
+            let s=sm64_core::SM64_TO_IW4_SCALE;
+            let to_world=|p:[f32;3]| {
+                camera_matrix.transform_point3(Vec3::new(p[0]*s,p[1]*s,p[2]*s))
+            };
             let converted=[
-                sm64_render_vec3(triangle.pos[0]),
-                sm64_render_vec3(triangle.pos[1]),
-                sm64_render_vec3(triangle.pos[2]),
+                to_world(triangle.pos[0]),
+                to_world(triangle.pos[1]),
+                to_world(triangle.pos[2]),
             ];
             let a=converted[0];
             let b=converted[1];
@@ -2009,6 +2033,59 @@ fn sync_native_render_frame(
             cache.batches.len()
         );
     }
+}
+
+fn sync_sm64_hud_overlay(
+    mut commands:Commands,
+    cod_active:Option<Res<Sm64CodActive>>,
+    output:Res<Sm64NativePlayerOutput>,
+    roots:Query<Entity,With<Sm64HudRoot>>,
+    mut texts:Query<&mut Text,With<Sm64HudText>>,
+) {
+    if cod_active.is_none() || !output.active {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    let wedges=((output.health.max(0)+0xff)/0x100).clamp(0,8);
+    let meter=format!(
+        "MARIO  {}{}   COIN x {}",
+        "♥".repeat(wedges as usize),
+        "·".repeat((8-wedges) as usize),
+        output.coins.max(0)
+    );
+
+    if let Some(mut text)=texts.iter_mut().next() {
+        if output.is_changed() {
+            *text=Text::new(meter);
+        }
+        return;
+    }
+
+    commands.spawn((
+        Sm64HudRoot,
+        Node {
+            position_type:PositionType::Absolute,
+            left:Val::Px(24.0),
+            top:Val::Px(24.0),
+            padding:UiRect::axes(Val::Px(12.0),Val::Px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0,0.0,0.0,0.42)),
+        GlobalZIndex(100_000),
+    )).with_children(|parent|{
+        parent.spawn((
+            Sm64HudText,
+            Text::new(meter),
+            TextFont {
+                font_size:bevy::text::FontSize::Px(22.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
 }
 
 fn sync_sm64_dialog_overlay(
