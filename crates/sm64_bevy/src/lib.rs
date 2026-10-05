@@ -420,12 +420,14 @@ fn launch_requested_sm64_map(
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
-    mut native_output: ResMut<Sm64NativePlayerOutput>,
-    mut native_transition: ResMut<Sm64NativeTransitionOutput>,
-    mut native_dialog: ResMut<Sm64NativeDialogOutput>,
-    mut native_static_collision: ResMut<Sm64NativeStaticCollision>,
-    mut native_collision: ResMut<Sm64NativeDynamicCollision>,
-    mut native_audio: ResMut<Sm64NativeAudioFrame>,
+    mut native_reset: ParamSet<(
+        ResMut<Sm64NativePlayerOutput>,
+        ResMut<Sm64NativeTransitionOutput>,
+        ResMut<Sm64NativeDialogOutput>,
+        ResMut<Sm64NativeStaticCollision>,
+        ResMut<Sm64NativeDynamicCollision>,
+        ResMut<Sm64NativeAudioFrame>,
+    )>,
     mut native_render: ResMut<Sm64NativeRenderFrame>,
     mut native_render_cache: ResMut<Sm64NativeRenderCache>,
     mut native: NonSendMut<Sm64NativeRuntime>,
@@ -447,16 +449,34 @@ fn launch_requested_sm64_map(
     // previous DLL's last snapshot can still be sitting in these resources.
     // Never let host systems observe that stale source-level snapshot as if it
     // belonged to the freshly requested destination.
-    *native_output = Sm64NativePlayerOutput::default();
-    *native_transition = Sm64NativeTransitionOutput::default();
-    native_dialog.id = -1;
-    native_dialog.text.clear();
-    native_static_collision.tick = 0;
-    native_static_collision.triangles.clear();
-    native_collision.tick = 0;
-    native_collision.triangles.clear();
-    native_audio.tick = 0;
-    native_audio.samples.clear();
+    {
+        let mut output = native_reset.p0();
+        *output = Sm64NativePlayerOutput::default();
+    }
+    {
+        let mut transition = native_reset.p1();
+        *transition = Sm64NativeTransitionOutput::default();
+    }
+    {
+        let mut dialog = native_reset.p2();
+        dialog.id = -1;
+        dialog.text.clear();
+    }
+    {
+        let mut static_collision = native_reset.p3();
+        static_collision.tick = 0;
+        static_collision.triangles.clear();
+    }
+    {
+        let mut dynamic_collision = native_reset.p4();
+        dynamic_collision.tick = 0;
+        dynamic_collision.triangles.clear();
+    }
+    {
+        let mut audio = native_reset.p5();
+        audio.tick = 0;
+        audio.samples.clear();
+    }
     native_render.tick = 0;
     native_render.triangles.clear();
     native_render.texture_updates.clear();
