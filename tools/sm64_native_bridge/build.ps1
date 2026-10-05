@@ -32,6 +32,8 @@ $build = Join-Path $root "build\us_bridge"
 $bridgeSource = Join-Path $PSScriptRoot "bridge.c"
 $levelScriptSource = Join-Path $root "src\engine\level_script.c"
 $levelScriptBackup = Join-Path $root "level_script.iw4l-backup.txt"
+$levelUpdateSource = Join-Path $root "src\game\level_update.c"
+$levelUpdateBackup = Join-Path $root "level_update.iw4l-backup.txt"
 $armipsSource = Join-Path $root "tools\armips.cpp"
 if (Test-Path $armipsSource) {
     $armipsText = Get-Content $armipsSource -Raw
@@ -87,6 +89,33 @@ if (-not $levelScriptText.Contains($renderBlock)) {
 }
 $levelScriptText = $levelScriptText.Replace($renderBlock, $headlessBlock)
 Set-Content -Path $levelScriptSource -Value $levelScriptText -Encoding UTF8
+
+# COD owns level/session transitions. If native SM64 completes a death/star exit
+# or another level-changing warp, vanilla lvl_init_or_update would let the
+# course script fall through CLEAR_LEVEL/EXIT and unwind the main-pool stack.
+# The bridge intentionally stays inside the selected course, so consume that
+# transition result and resume normal play instead.
+Copy-Item $levelUpdateSource $levelUpdateBackup -Force
+$levelUpdateText = Get-Content $levelUpdateSource -Raw
+$updateNeedle = @"
+        case 1:
+            result = update_level();
+            break;
+"@
+$updateReplacement = @"
+        case 1:
+            result = update_level();
+            if (result != 0) {
+                set_play_mode(PLAY_MODE_NORMAL);
+                result = 0;
+            }
+            break;
+"@
+if (-not $levelUpdateText.Contains($updateNeedle)) {
+    throw "Could not locate lvl_init_or_update update case in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($updateNeedle, $updateReplacement)
+Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
 
 try {
     Push-Location $root
@@ -176,5 +205,9 @@ finally {
     if (Test-Path $levelScriptBackup) {
         Copy-Item $levelScriptBackup $levelScriptSource -Force
         Remove-Item $levelScriptBackup -Force
+    }
+    if (Test-Path $levelUpdateBackup) {
+        Copy-Item $levelUpdateBackup $levelUpdateSource -Force
+        Remove-Item $levelUpdateBackup -Force
     }
 }
