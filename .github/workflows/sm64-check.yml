@@ -27,8 +27,14 @@ jobs:
       - name: Parse native bridge build script
         shell: pwsh
         run: |
+          $tokens = $null
+          $errors = $null
           $null = [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path "./tools/sm64_native_bridge/build.ps1"),
-            [ref]$null,
-            [ref]$null
+            [ref]$tokens,
+            [ref]$errors
           )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
