@@ -1803,7 +1803,7 @@ fn sync_native_render_frame(
         image.sampler=ImageSampler::Descriptor(sampler);
 
         if let Some(handle)=cache.textures.get(&update.id) {
-            if let Some(existing)=images.get_mut(handle.id()) {
+            if let Some(mut existing)=images.get_mut(handle.id()) {
                 *existing=image;
             }
         } else {
@@ -1876,7 +1876,7 @@ fn sync_native_render_frame(
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR,colors);
 
         if let Some(existing)=cache.batches.get(&key) {
-            if let Some(mesh)=meshes.get_mut(&existing.mesh) {
+            if let Some(mut mesh)=meshes.get_mut(&existing.mesh) {
                 *mesh=mesh_data;
             }
             continue;
