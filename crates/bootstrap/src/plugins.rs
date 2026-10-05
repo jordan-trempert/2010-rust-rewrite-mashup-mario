@@ -796,7 +796,9 @@ fn apply_sm64_native_player_output(
             );
         }
     }
-    bridge_state.last_area=output.area_index;
+    if output.area_index!=0 {
+        bridge_state.last_area=output.area_index;
+    }
 
     if output.action!=bridge_state.last_action {
         diag::info!(
