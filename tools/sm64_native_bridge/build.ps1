@@ -679,10 +679,18 @@ $starDoorInteractionReplacement = @"
                     save_file_set_flags(doorSaveFileFlag);
                 }
 
+                /*
+                 * Some sm64-port forks do not expose INT_STATUS_UNK16/17 to
+                 * interaction.c even though door.inc.c still consumes the same
+                 * ABI bits. Use the canonical bit values directly so this
+                 * temporary embedded patch builds across both header layouts.
+                 * 0x00010000 = pull/open side A
+                 * 0x00020000 = push/open side B
+                 */
                 if (actionArg & 0x00000001) {
-                    o->oInteractStatus |= INT_STATUS_UNK16;
+                    o->oInteractStatus |= 0x00010000u;
                 } else {
-                    o->oInteractStatus |= INT_STATUS_UNK17;
+                    o->oInteractStatus |= 0x00020000u;
                 }
 
                 m->interactObj = NULL;
