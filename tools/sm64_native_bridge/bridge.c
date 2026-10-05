@@ -1759,7 +1759,7 @@ IW4L_SM64_API int iw4l_sm64_init(
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
-        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) action=0x%08X\n",
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) room=%d action=0x%08X\n",
         level_name,
         area,
         act,
@@ -1768,6 +1768,7 @@ IW4L_SM64_API int iw4l_sm64_init(
         gMarioState->pos[0],
         gMarioState->pos[1],
         gMarioState->pos[2],
+        (int)gMarioCurrentRoom,
         gMarioState->action
     );
     fflush(stderr);
