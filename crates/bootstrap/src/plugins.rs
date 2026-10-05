@@ -717,12 +717,15 @@ fn handle_sm64_cod_level_transition(
             }
         });
         if let Some(id) = first {
-            authority.0.set_external_motion(id, false);
-            if let Some(fallback) = fallback_spawn {
-                authority.0.teleport(id, fallback.origin);
-                authority.0.set_viewangles(id, fallback.view);
-                authority.0.set_velocity(id, [0.0; 3]);
-            }
+            /*
+             * Do not move the player to the level's generic MARIO_POS here.
+             * Cross-level doors and paintings have their own destination warp
+             * nodes, and the native DLL has already resolved the exact spawn.
+             * Hold COD movement for the handoff frame; the first native
+             * snapshot will reposition us to that exact point.
+             */
+            authority.0.set_external_motion(id, true);
+            authority.0.set_velocity(id, [0.0; 3]);
         }
     }
 
@@ -904,6 +907,7 @@ fn apply_sm64_native_player_output(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
     mut bridge_state: ResMut<Sm64CodNativeState>,
+    mut spawn: Option<ResMut<Sm64CodSpawn>>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
 ) {
     if active.is_none() {
@@ -1020,6 +1024,16 @@ fn apply_sm64_native_player_output(
         let distance2 = dx * dx + dy * dy + dz * dz;
         if bridge_state.force_native_reposition || area_changed || distance2 > 48.0 * 48.0 {
             authority.0.teleport(id, native_origin);
+
+            if bridge_state.force_native_reposition {
+                let sm64_yaw_degrees =
+                    output.sm64_yaw as u16 as f32 * 360.0 / 65536.0;
+                if let Some(spawn) = spawn.as_deref_mut() {
+                    spawn.origin = native_origin;
+                    spawn.view = [0.0, sm64_yaw_degrees - 90.0, 0.0];
+                }
+            }
+
             bridge_state.force_native_reposition = false;
             diag::info!(
                 World,
