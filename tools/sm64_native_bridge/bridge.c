@@ -29,10 +29,10 @@
 #include "game/platform_displacement.h"
 #include "game/save_file.h"
 #include "audio/external.h"
-#include "pc/audio/audio_api.h"
-#include "pc/audio/audio_null.h"
+#include "audio/audio_api.h"
+#include "audio/audio_null.h"
 #ifdef HAVE_WASAPI
-#include "pc/audio/audio_wasapi.h"
+#include "audio/audio_wasapi.h"
 #endif
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
