@@ -34,6 +34,8 @@
 #define SNAPSHOT_MAGIC 0x31534D53u /* SMS1 */
 #define OP_STEP 1u
 #define OP_SHUTDOWN 2u
+static volatile const char *gBridgeStage = "startup";
+
 
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -403,6 +405,7 @@ static void write_snapshot(void) {
         fprintf(stderr, "iw4l-sm64-bridge: snapshot %u collecting objects\n", snapshot_number);
         fflush(stderr);
     }
+    gBridgeStage = "collect_objects";
     count = collect_objects(objects, 4096);
 
     if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
@@ -410,6 +413,7 @@ static void write_snapshot(void) {
                 snapshot_number, count);
         fflush(stderr);
     }
+    gBridgeStage = "collect_dynamic_surfaces";
     dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
 
     if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
@@ -420,6 +424,7 @@ static void write_snapshot(void) {
 
     print_native_census_once(objects, count, dynamic_count);
 
+    gBridgeStage = "write_snapshot";
     write_u32(SNAPSHOT_MAGIC);
     write_u32(gGlobalTimer);
     write_u32(count);
@@ -489,10 +494,11 @@ static LONG WINAPI bridge_exception_filter(EXCEPTION_POINTERS *info) {
 
     fprintf(
         stderr,
-        "iw4l-sm64-bridge: FATAL native exception code=0x%08lX address=%p globalTimer=%u\n",
+        "iw4l-sm64-bridge: FATAL native exception code=0x%08lX address=%p globalTimer=%u stage=%s\n",
         (unsigned long)code,
         address,
-        (unsigned)gGlobalTimer
+        (unsigned)gGlobalTimer,
+        gBridgeStage != NULL ? (const char *)gBridgeStage : "unknown"
     );
     fflush(stderr);
     return EXCEPTION_EXECUTE_HANDLER;
@@ -532,6 +538,7 @@ static int bridge_main(int argc, char **argv) {
     }
 
 #ifdef USE_SYSTEM_MALLOC
+    gBridgeStage = "main_pool_init";
     main_pool_init();
     gGfxAllocOnlyPool = alloc_only_pool_init();
 #else
@@ -546,8 +553,11 @@ static int bridge_main(int argc, char **argv) {
         "IW4L SM64 Gameplay Bridge",
         0
     );
+    gBridgeStage = "audio_init";
     audio_init();
+    gBridgeStage = "sound_init";
     sound_init();
+    gBridgeStage = "thread5_game_loop";
     thread5_game_loop(NULL);
 
     gCurrSaveFileNum = 1;
@@ -573,9 +583,12 @@ static int bridge_main(int argc, char **argv) {
     level_command = (struct LevelCommand *)level->entry;
 
     /* First execute loads the area and reaches its CALL_LOOP. */
+    gBridgeStage = "initial_select_gfx_pool";
     select_gfx_pool();
+    gBridgeStage = "initial_level_script_execute";
     level_command = level_script_execute(level_command);
     gGlobalTimer++;
+    gBridgeStage = "course_ready";
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
         fprintf(stderr,
@@ -599,6 +612,7 @@ static int bridge_main(int argc, char **argv) {
 
     for (;;) {
         struct Request request;
+        gBridgeStage = "read_request";
         if (!read_request(&request)) {
             break;
         }
@@ -618,6 +632,7 @@ static int bridge_main(int argc, char **argv) {
                 fflush(stderr);
             }
 
+            gBridgeStage = "apply_proxy";
             apply_proxy(&request);
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
@@ -625,7 +640,9 @@ static int bridge_main(int argc, char **argv) {
                 fflush(stderr);
             }
 
+            gBridgeStage = "select_gfx_pool";
             select_gfx_pool();
+            gBridgeStage = "level_script_execute";
             level_command = level_script_execute(level_command);
             gGlobalTimer++;
 
@@ -637,15 +654,18 @@ static int bridge_main(int argc, char **argv) {
             /* Serialize the decomp's resulting Mario state before the next
                external-player write. This is how cannon launches, moving
                platforms, warps and knockback are handed back to COD. */
+            gBridgeStage = "write_snapshot";
             write_snapshot();
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u snapshot complete\n", bridge_step);
                 fflush(stderr);
             }
+            gBridgeStage = "waiting_request";
         }
     }
 
+    gBridgeStage = "shutdown";
     return 0;
 }
 
