@@ -170,6 +170,9 @@ struct Sm64BillboardObject;
 struct Sm64DebugWorld;
 
 #[derive(Component, Debug, Clone, Copy)]
+struct Sm64SkyboxPresentation;
+
+#[derive(Component, Debug, Clone, Copy)]
 struct Sm64DebugCamera;
 
 #[derive(Resource, Debug, Clone, Copy)]
@@ -222,6 +225,7 @@ fn launch_requested_sm64_map(
             With<Sm64MarioPresentation>,
             With<Sm64ObjectPresentation>,
             With<Sm64DebugCamera>,
+            With<Sm64SkyboxPresentation>,
         )>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -303,6 +307,11 @@ fn launch_requested_sm64_map(
             HashMap::new()
         }
     };
+    let skybox_name=sm64_assets::load_skybox_name(&root,&level)
+        .unwrap_or_else(|error|{
+            warn!("SM64 skybox discovery failed: {error}");
+            None
+        });
     let mario_hierarchy=sm64_assets::resolve_geo_model_parts(&root,"mario_geo")
         .map_err(|error|{
             warn!("SM64 Mario GeoLayout hierarchy failed; using legacy part placement: {error}");
@@ -381,6 +390,18 @@ fn launch_requested_sm64_map(
     let render_batches=render_geometry.as_ref().map_or(0,|g|g.batches.len());
 
     if debug_view.0 || cod_active.is_some() {
+        if let Some(skybox)=skybox_name.as_deref() {
+            let path=root.join("textures").join("skyboxes").join(format!("{skybox}.png"));
+            if let Err(error)=spawn_sm64_skybox(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut images,
+                &path,
+            ) {
+                warn!("SM64 skybox {skybox} failed: {error}");
+            }
+        }
         spawn_debug_scene(
             &mut commands,
             &mut meshes,
@@ -1272,6 +1293,91 @@ fn load_sm64_png(
     sampler.address_mode_w=ImageAddressMode::Repeat;
     image.sampler=ImageSampler::Descriptor(sampler);
     Ok(images.add(image))
+}
+
+fn spawn_sm64_skybox(
+    commands:&mut Commands,
+    meshes:&mut Assets<Mesh>,
+    materials:&mut Assets<StandardMaterial>,
+    images:&mut Assets<Image>,
+    path:&std::path::Path,
+)->Result<(),String>{
+    let decoded=image::open(path)
+        .map_err(|error|format!("{}: {error}",path.display()))?
+        .into_rgba8();
+    let (width,height)=decoded.dimensions();
+    let mut image=Image::new(
+        Extent3d {width,height,depth_or_array_layers:1},
+        TextureDimension::D2,
+        decoded.into_raw(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let mut sampler=ImageSamplerDescriptor::nearest();
+    sampler.address_mode_u=ImageAddressMode::Repeat;
+    sampler.address_mode_v=ImageAddressMode::ClampToEdge;
+    sampler.address_mode_w=ImageAddressMode::ClampToEdge;
+    image.sampler=ImageSampler::Descriptor(sampler);
+    let texture=images.add(image);
+
+    const LON:usize=48;
+    const LAT:usize=24;
+    const R:f32=30000.0;
+    let mut positions=Vec::<[f32;3]>::with_capacity(LON*LAT*6);
+    let mut normals=Vec::<[f32;3]>::with_capacity(LON*LAT*6);
+    let mut uvs=Vec::<[f32;2]>::with_capacity(LON*LAT*6);
+
+    let point=|u:f32,v:f32| {
+        let theta=u*core::f32::consts::TAU;
+        let phi=(v-0.5)*core::f32::consts::PI;
+        let cp=phi.cos();
+        [R*cp*theta.cos(),R*cp*theta.sin(),R*phi.sin()]
+    };
+
+    for y in 0..LAT {
+        let v0=y as f32/LAT as f32;
+        let v1=(y+1) as f32/LAT as f32;
+        for x in 0..LON {
+            let u0=x as f32/LON as f32;
+            let u1=(x+1) as f32/LON as f32;
+            let p00=point(u0,v0);
+            let p10=point(u1,v0);
+            let p11=point(u1,v1);
+            let p01=point(u0,v1);
+            for (p,uv) in [
+                (p00,[u0,1.0-v0]),(p11,[u1,1.0-v1]),(p10,[u1,1.0-v0]),
+                (p00,[u0,1.0-v0]),(p01,[u0,1.0-v1]),(p11,[u1,1.0-v1]),
+            ] {
+                positions.push(p);
+                normals.push([0.0,0.0,1.0]);
+                uvs.push(uv);
+            }
+        }
+    }
+
+    let mesh=Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs);
+
+    commands.spawn((
+        Name::new("SM64 skybox"),
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(materials.add(StandardMaterial{
+            base_color:Color::WHITE,
+            base_color_texture:Some(texture),
+            unlit:true,
+            cull_mode:None,
+            ..default()
+        })),
+        Transform::IDENTITY,
+        Sm64SkyboxPresentation,
+        Sm64DebugWorld,
+    ));
+    Ok(())
 }
 
 fn spawn_collision_fallback(
