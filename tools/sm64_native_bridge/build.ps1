@@ -335,6 +335,31 @@ if (-not $levelUpdateText.Contains($warpResetNeedle)) {
 }
 $levelUpdateText = $levelUpdateText.Replace($warpResetNeedle, $warpResetReplacement)
 
+# A real SM64 cross-level warp reuses an already-initialized MarioState from
+# the source level. A fresh embedded DLL starts with ACT_UNINITIALIZED, and
+# init_mario_after_warp() intentionally skips applying the destination object
+# while that action is zero. After init_mario_from_save_file has populated all
+# MarioState pointers/health/save data, give the host-warp handoff a temporary
+# initialized action. init_mario_after_warp() will immediately replace it with
+# the destination spawn action (door spawn, airborne painting spawn, etc.).
+$initMarioNeedle = @"
+    init_mario_from_save_file();
+    disable_warp_checkpoint();
+"@
+$initMarioReplacement = @"
+    init_mario_from_save_file();
+#ifdef IW4L_SM64_EMBEDDED
+    if (sIw4lHostWarpPrimed) {
+        gMarioState->action = ACT_IDLE;
+    }
+#endif
+    disable_warp_checkpoint();
+"@
+if (-not $levelUpdateText.Contains($initMarioNeedle)) {
+    throw "Could not locate init_mario_from_save_file in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($initMarioNeedle, $initMarioReplacement)
+
 $consumeHostWarpNeedle = @"
         } else {
             warp_level();
