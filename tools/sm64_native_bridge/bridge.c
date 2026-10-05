@@ -179,7 +179,8 @@ struct Iw4lSm64RenderTriangle {
     uint32_t texture_id;
     uint8_t textured;
     uint8_t alpha;
-    uint8_t pad[2];
+    uint8_t wrap_s;
+    uint8_t wrap_t;
 };
 
 struct Iw4lSm64TextureView {
@@ -691,7 +692,9 @@ void iw4l_sm64_capture_triangle(
     const uint8_t *rgba12,
     uint32_t texture_id,
     int textured,
-    int alpha
+    int alpha,
+    uint8_t wrap_s,
+    uint8_t wrap_t
 ) {
     struct Iw4lSm64RenderTriangle *out;
     if (gIw4lRenderTriangleCount >= IW4L_SM64_MAX_RENDER_TRIANGLES) {
@@ -704,7 +707,8 @@ void iw4l_sm64_capture_triangle(
     out->texture_id=texture_id;
     out->textured=textured ? 1 : 0;
     out->alpha=alpha ? 1 : 0;
-    out->pad[0]=out->pad[1]=0;
+    out->wrap_s=wrap_s;
+    out->wrap_t=wrap_t;
 }
 
 void iw4l_sm64_capture_texture(
