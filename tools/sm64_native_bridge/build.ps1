@@ -629,10 +629,32 @@ $captureReplacement = @"
         float native_uv[6];
         uint8_t native_rgba[12];
         uint32_t native_texture_id = 0xFFFFFFFFu;
+        int native_texture_unit = -1;
+        bool native_textured = false;
         bool linear_filter = (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT;
 
-        if (use_texture && rendering_state.textures[0] != NULL) {
-            native_texture_id = rendering_state.textures[0]->texture_id;
+        /*
+         * Do not trust the dummy backend's current texture slot blindly.
+         * Ask the original SM64 color combiner which texture unit this draw
+         * actually consumes, force any dirty texture through the native import
+         * path, then capture the exact texture-cache ID selected by gfx_pc.
+         */
+        if (used_textures[0]) {
+            native_texture_unit = 0;
+        } else if (used_textures[1]) {
+            native_texture_unit = 1;
+        }
+
+        if (native_texture_unit >= 0) {
+            if (rdp.textures_changed[native_texture_unit]) {
+                gfx_flush();
+                import_texture(native_texture_unit);
+                rdp.textures_changed[native_texture_unit] = false;
+            }
+            if (rendering_state.textures[native_texture_unit] != NULL) {
+                native_texture_id = rendering_state.textures[native_texture_unit]->texture_id;
+                native_textured = true;
+            }
         }
 
         for (int native_i = 0; native_i < 3; native_i++) {
@@ -641,7 +663,7 @@ $captureReplacement = @"
             native_pos[native_i * 3 + 0] = v_arr[native_i]->world_x;
             native_pos[native_i * 3 + 1] = v_arr[native_i]->world_y;
             native_pos[native_i * 3 + 2] = v_arr[native_i]->world_z;
-            if (use_texture && tex_width != 0 && tex_height != 0) {
+            if (native_textured && tex_width != 0 && tex_height != 0) {
                 u = (v_arr[native_i]->u - rdp.texture_tile.uls * 8) / 32.0f;
                 v = (v_arr[native_i]->v - rdp.texture_tile.ult * 8) / 32.0f;
                 if (linear_filter) {
@@ -664,7 +686,7 @@ $captureReplacement = @"
             native_uv,
             native_rgba,
             native_texture_id,
-            use_texture,
+            native_textured,
             use_alpha
         );
     }
