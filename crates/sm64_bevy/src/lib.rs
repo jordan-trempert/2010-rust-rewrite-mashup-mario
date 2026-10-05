@@ -2018,8 +2018,8 @@ fn sync_native_render_frame(
                 } else {
                     let sampler_key=(key.0,key.3,key.4);
                     if !cache.textures.contains_key(&sampler_key) {
-                        if let Some(update)=cache.texture_data.get(&key.0) {
-                            let handle=images.add(native_texture_image(update,key.3,key.4));
+                        if let Some(update)=cache.texture_data.get(&key.0).cloned() {
+                            let handle=images.add(native_texture_image(&update,key.3,key.4));
                             cache.textures.insert(sampler_key,handle);
                         }
                     }
