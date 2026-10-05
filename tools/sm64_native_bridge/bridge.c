@@ -12,6 +12,7 @@
 #include "types.h"
 #include "object_fields.h"
 #include "object_constants.h"
+#include "model_ids.h"
 #include "level_commands.h"
 #include "levels/scripts.h"
 #include "game/area.h"
@@ -287,12 +288,57 @@ static uint32_t collect_dynamic_surfaces(
     return seen_count;
 }
 
+static void print_native_census_once(
+    const struct Object **objects,
+    uint32_t count,
+    uint32_t dynamic_count
+) {
+    static int printed = 0;
+    uint32_t trees = 0;
+    uint32_t yellow_coins = 0;
+    uint32_t red_coins = 0;
+    uint32_t cannons = 0;
+    uint32_t stars = 0;
+    uint32_t goombas = 0;
+    uint32_t i;
+
+    if (printed) {
+        return;
+    }
+    printed = 1;
+
+    for (i = 0; i < count; ++i) {
+        int32_t model = model_id_for_object(objects[i]);
+        if (model == MODEL_BOB_BUBBLY_TREE) trees++;
+        if (model == MODEL_YELLOW_COIN || model == MODEL_YELLOW_COIN_NO_SHADOW) yellow_coins++;
+        if (model == MODEL_RED_COIN || model == MODEL_RED_COIN_NO_SHADOW) red_coins++;
+        if (model == MODEL_CANNON_BASE || model == MODEL_DL_CANNON_LID) cannons++;
+        if (model == MODEL_STAR || model == MODEL_TRANSPARENT_STAR) stars++;
+        if (model == MODEL_GOOMBA) goombas++;
+    }
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-bridge: census objects=%u trees=%u yellow_coins=%u red_coins=%u cannons=%u stars=%u goombas=%u dynamic_surfaces=%u\n",
+        count,
+        trees,
+        yellow_coins,
+        red_coins,
+        cannons,
+        stars,
+        goombas,
+        dynamic_count
+    );
+}
+
 static void write_snapshot(void) {
     const struct Object *objects[4096];
     const struct Surface *dynamic_surfaces[8192];
     uint32_t count = collect_objects(objects, 4096);
     uint32_t dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
     uint32_t i;
+
+    print_native_census_once(objects, count, dynamic_count);
 
     write_u32(SNAPSHOT_MAGIC);
     write_u32(gGlobalTimer);
@@ -404,6 +450,12 @@ static int bridge_main(int argc, char **argv) {
     gCurrActNum = (s16)act;
     gCurrLevelNum = level->level;
     gCurrCourseNum = level->course;
+
+    /* The COD mashup has no Mario dialogue UI yet, so Bob-omb Buddy cannot
+       perform the vanilla cannon-unlock conversation. Unlock the course
+       cannon flag before the level initializes; the original bhvCannonClosed,
+       bhvCannon and ACT_IN_CANNON code still own the actual cannon behavior. */
+    save_file_set_cannon_unlocked();
 
     level_command = (struct LevelCommand *)level->entry;
 
