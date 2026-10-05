@@ -815,14 +815,25 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
             {
                 const int32_t model = model_id_for_object(object);
                 const int known_enemy = model == MODEL_GOOMBA;
+                const int authored_harm =
+                    (object->oInteractType & harmful) != 0 ||
+                    object->oDamageOrCoinValue > 0;
                 float mario_radius;
                 float object_radius;
 
+                /*
+                 * Actor interaction fields are populated at different points
+                 * in the native behavior update. Requiring BOTH a harmful
+                 * interact bit and a positive damage value made the external
+                 * player miss actors whose damage metadata was one frame ahead
+                 * of their interact mask. Either authored signal is enough.
+                 * Goombas remain an explicit native-model fallback because
+                 * their first active frame can have neither field seated yet.
+                 */
                 if (object == gMarioObject ||
                     (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
                     (!known_enemy && object->oIntangibleTimer != 0) ||
-                    (!known_enemy && (object->oInteractType & harmful) == 0) ||
-                    (!known_enemy && object->oDamageOrCoinValue <= 0)) {
+                    (!known_enemy && !authored_harm)) {
                     continue;
                 }
 
@@ -889,7 +900,9 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
 
     if (best != NULL) {
         int damage = best->oDamageOrCoinValue;
-        if (damage <= 0 && model_id_for_object(best) == MODEL_GOOMBA) {
+        if (damage <= 0 &&
+            ((best->oInteractType & harmful) != 0 ||
+             model_id_for_object(best) == MODEL_GOOMBA)) {
             damage = 1;
         }
         if (!(gMarioState->flags & MARIO_CAP_ON_HEAD)) {
