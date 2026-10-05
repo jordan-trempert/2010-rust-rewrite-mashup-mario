@@ -1,6 +1,8 @@
 param(
     [string]$Sm64PortRoot = $env:SM64_NATIVE_ROOT,
-    [int]$Jobs = [Math]::Max(1, [Environment]::ProcessorCount)
+    [int]$Jobs = [Math]::Max(1, [Environment]::ProcessorCount),
+    [ValidatePattern('^[A-Za-z0-9._-]+\.dll$')]
+    [string]$OutputName = "iw4l-sm64-native.dll"
 )
 
 $ErrorActionPreference = "Stop"
@@ -127,7 +129,7 @@ if (Test-Path $armipsSource) {
     }
 }
 $backup = Join-Path $root "pc_main.iw4l-backup.txt"
-$builtModule = Join-Path $build "iw4l-sm64-native.dll"
+$builtModule = Join-Path $build $OutputName
 $output = $builtModule
 $legacyBridgeExe = Join-Path $build "iw4l-sm64-bridge.exe"
 $staleBackupSource = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
@@ -384,6 +386,7 @@ void mario_update_hitbox_and_cap_model(struct MarioState *m);
 void bhv_mario_update(void) {
     u32 particleFlags = 0;
     s32 i;
+    struct Object *grabObject;
 
     if (gIw4lRunMarioAction) {
         particleFlags = execute_mario_action(gCurrentObject);
@@ -407,6 +410,24 @@ void bhv_mario_update(void) {
          */
         mario_update_hitbox_and_cap_model(gMarioState);
         mario_process_interactions(gMarioState);
+        /*
+         * Vanilla only marks a grabbable object while Mario is punching or
+         * diving. COD owns those locomotion actions, so Use/B explicitly picks
+         * the nearest collided grabbable and enters SM64's held-object state.
+         * The original carry and throw behaviors take over on following ticks.
+         * The subtype checks preserve objects which grab Mario or deliberately
+         * refuse pickup.
+         */
+        if ((gMarioState->input & INPUT_B_PRESSED) != 0) {
+            grabObject = mario_get_collided_object(gMarioState, INTERACT_GRABBABLE);
+            if (grabObject != NULL &&
+                !(grabObject->oInteractionSubtype &
+                  (INT_SUBTYPE_NOT_GRABBABLE | INT_SUBTYPE_GRABS_MARIO))) {
+                gMarioState->usedObj = grabObject;
+                mario_grab_used_object(gMarioState);
+                set_mario_action(gMarioState, ACT_HOLD_IDLE, 0);
+            }
+        }
         update_mario_health(gMarioState);
         gMarioState->marioObj->oInteractStatus = 0;
         gCurrentObject->oMarioParticleFlags = 0;
@@ -976,7 +997,7 @@ Set-Content -Path $gfxDummySource -Value $gfxDummyText -Encoding UTF8
             throw "sm64-port host tools build failed with exit code $LASTEXITCODE"
         }
 
-        $moduleRel = "$buildRel/iw4l-sm64-native.dll"
+        $moduleRel = "$buildRel/$OutputName"
         $makeArgs = @(
             "BUILD_DIR=$buildRel",
             "EXE=$moduleRel",
@@ -1005,7 +1026,7 @@ Set-Content -Path $gfxDummySource -Value $gfxDummyText -Encoding UTF8
     # Generate a self-contained sorted symbol table while MinGW tools are
     # definitely available. The Rust launcher can use this file later even
     # when addr2line/nm are not on the runtime PATH.
-    $symbolMap = Join-Path $build "iw4l-sm64-native.sym"
+    $symbolMap = Join-Path $build ([System.IO.Path]::ChangeExtension($OutputName, ".sym"))
     $nm = Get-Command "x86_64-w64-mingw32-nm" -ErrorAction SilentlyContinue
     if (-not $nm) {
         $nm = Get-Command "nm" -ErrorAction SilentlyContinue

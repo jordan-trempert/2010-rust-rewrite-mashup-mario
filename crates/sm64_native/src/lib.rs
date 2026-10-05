@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 6;
+const ABI_VERSION: u32 = 7;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -39,9 +39,9 @@ pub struct NativeObject {
 
 #[derive(Clone, Debug, Default)]
 pub struct NativeRenderTriangle {
-    pub pos: [[f32;3];3],
-    pub uv: [[f32;2];3],
-    pub rgba: [[u8;4];3],
+    pub pos: [[f32; 3]; 3],
+    pub uv: [[f32; 2]; 3],
+    pub rgba: [[u8; 4]; 3],
     pub texture_id: Option<u32>,
     pub alpha: bool,
     pub screen_space: bool,
@@ -75,6 +75,9 @@ pub struct NativeSnapshot {
     pub mario_health: i32,
     pub coins: i32,
     pub mario_action: u32,
+    pub mario_flags: u32,
+    pub cap_timer: u16,
+    pub holding_object: bool,
     pub mario_pos: [f32; 3],
     pub mario_vel: [f32; 3],
     pub mario_yaw: i16,
@@ -115,9 +118,9 @@ struct NativeTriangleView {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct NativeRenderTriangleView {
-    pos: [f32;9],
-    uv: [f32;6],
-    rgba: [u8;12],
+    pos: [f32; 9],
+    uv: [f32; 6],
+    rgba: [u8; 12],
     texture_id: u32,
     textured: u8,
     alpha: u8,
@@ -147,6 +150,9 @@ struct NativeSnapshotView {
     mario_health: i32,
     coins: i32,
     mario_action: u32,
+    mario_flags: u32,
+    cap_timer: u16,
+    holding_object: u16,
     mario_pos: [f32; 3],
     mario_vel: [f32; 3],
     mario_yaw: i16,
@@ -197,7 +203,12 @@ pub fn native_root(asset_root: impl AsRef<Path>) -> PathBuf {
     }
 
     let asset_root = asset_root.as_ref();
-    if asset_root.join("src").join("pc").join("pc_main.c").is_file() {
+    if asset_root
+        .join("src")
+        .join("pc")
+        .join("pc_main.c")
+        .is_file()
+    {
         return asset_root.to_path_buf();
     }
 
@@ -221,7 +232,10 @@ pub fn default_module_path(asset_root: impl AsRef<Path>) -> PathBuf {
         // Keep the old environment variable useful during the migration when
         // it is explicitly pointed at the new DLL.
         let path = PathBuf::from(path);
-        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("dll")) {
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
+        {
             return path;
         }
     }
@@ -245,7 +259,7 @@ pub struct NativeClient {
     shutdown_fn: ShutdownFn,
     last_error_fn: LastErrorFn,
     module_path: PathBuf,
-    texture_generations: std::collections::HashMap<u32,u32>,
+    texture_generations: std::collections::HashMap<u32, u32>,
 }
 
 impl NativeClient {
@@ -347,10 +361,7 @@ impl NativeClient {
         &self.module_path
     }
 
-    pub fn step(
-        &mut self,
-        player: NativePlayerProxy,
-    ) -> Result<NativeSnapshot, NativeBridgeError> {
+    pub fn step(&mut self, player: NativePlayerProxy) -> Result<NativeSnapshot, NativeBridgeError> {
         let view = unsafe { (self.step_fn)(&raw const player) };
         if view.is_null() {
             return Err(NativeBridgeError::new(format!(
@@ -403,8 +414,7 @@ impl NativeClient {
 
         if view.audio_frame_count > 2048
             || view.audio_channels > 2
-            || (view.audio_frame_count != 0
-                && !(8_000..=192_000).contains(&view.audio_sample_rate))
+            || (view.audio_frame_count != 0 && !(8_000..=192_000).contains(&view.audio_sample_rate))
         {
             return Err(NativeBridgeError::new(format!(
                 "embedded SM64 returned invalid audio chunk frames={} rate={} channels={}",
@@ -448,10 +458,7 @@ impl NativeClient {
             &[][..]
         } else {
             unsafe {
-                slice::from_raw_parts(
-                    view.dynamic_surfaces,
-                    view.dynamic_surface_count as usize,
-                )
+                slice::from_raw_parts(view.dynamic_surfaces, view.dynamic_surface_count as usize)
             }
         };
         let dynamic_surfaces = triangle_views
@@ -469,68 +476,90 @@ impl NativeClient {
             &[][..]
         } else {
             unsafe {
-                slice::from_raw_parts(
-                    view.render_triangles,
-                    view.render_triangle_count as usize,
-                )
+                slice::from_raw_parts(view.render_triangles, view.render_triangle_count as usize)
             }
         };
-        let render_triangles=render_views.iter().map(|source|{
-            NativeRenderTriangle {
-                pos:[
-                    [source.pos[0],source.pos[1],source.pos[2]],
-                    [source.pos[3],source.pos[4],source.pos[5]],
-                    [source.pos[6],source.pos[7],source.pos[8]],
+        let render_triangles = render_views
+            .iter()
+            .map(|source| NativeRenderTriangle {
+                pos: [
+                    [source.pos[0], source.pos[1], source.pos[2]],
+                    [source.pos[3], source.pos[4], source.pos[5]],
+                    [source.pos[6], source.pos[7], source.pos[8]],
                 ],
-                uv:[
-                    [source.uv[0],source.uv[1]],
-                    [source.uv[2],source.uv[3]],
-                    [source.uv[4],source.uv[5]],
+                uv: [
+                    [source.uv[0], source.uv[1]],
+                    [source.uv[2], source.uv[3]],
+                    [source.uv[4], source.uv[5]],
                 ],
-                rgba:[
-                    [source.rgba[0],source.rgba[1],source.rgba[2],source.rgba[3]],
-                    [source.rgba[4],source.rgba[5],source.rgba[6],source.rgba[7]],
-                    [source.rgba[8],source.rgba[9],source.rgba[10],source.rgba[11]],
+                rgba: [
+                    [
+                        source.rgba[0],
+                        source.rgba[1],
+                        source.rgba[2],
+                        source.rgba[3],
+                    ],
+                    [
+                        source.rgba[4],
+                        source.rgba[5],
+                        source.rgba[6],
+                        source.rgba[7],
+                    ],
+                    [
+                        source.rgba[8],
+                        source.rgba[9],
+                        source.rgba[10],
+                        source.rgba[11],
+                    ],
                 ],
-                texture_id:(source.textured!=0 && source.texture_id!=u32::MAX)
+                texture_id: (source.textured != 0 && source.texture_id != u32::MAX)
                     .then_some(source.texture_id),
-                alpha:source.alpha & 1 != 0,
-                screen_space:source.alpha & 2 != 0,
-                wrap_s:source.wrap_s,
-                wrap_t:source.wrap_t,
-            }
-        }).collect();
+                alpha: source.alpha & 1 != 0,
+                screen_space: source.alpha & 2 != 0,
+                wrap_s: source.wrap_s,
+                wrap_t: source.wrap_t,
+            })
+            .collect();
 
         let texture_views = if view.textures.is_null() || view.texture_count == 0 {
             &[][..]
         } else {
-            unsafe { slice::from_raw_parts(view.textures,view.texture_count as usize) }
+            unsafe { slice::from_raw_parts(view.textures, view.texture_count as usize) }
         };
-        let mut texture_updates=Vec::new();
+        let mut texture_updates = Vec::new();
         for source in texture_views {
-            let known=self.texture_generations.get(&source.id).copied().unwrap_or(0);
-            if source.generation==known || source.rgba.is_null() || source.width==0 || source.height==0 {
+            let known = self
+                .texture_generations
+                .get(&source.id)
+                .copied()
+                .unwrap_or(0);
+            if source.generation == known
+                || source.rgba.is_null()
+                || source.width == 0
+                || source.height == 0
+            {
                 continue;
             }
-            let byte_len=(source.width as usize)
+            let byte_len = (source.width as usize)
                 .saturating_mul(source.height as usize)
                 .saturating_mul(4);
-            if byte_len==0 || byte_len>64*1024*1024 {
+            if byte_len == 0 || byte_len > 64 * 1024 * 1024 {
                 continue;
             }
-            let rgba=unsafe { slice::from_raw_parts(source.rgba,byte_len) }.to_vec();
-            self.texture_generations.insert(source.id,source.generation);
+            let rgba = unsafe { slice::from_raw_parts(source.rgba, byte_len) }.to_vec();
+            self.texture_generations
+                .insert(source.id, source.generation);
             texture_updates.push(NativeTextureUpdate {
-                id:source.id,
-                width:source.width,
-                height:source.height,
-                generation:source.generation,
+                id: source.id,
+                width: source.width,
+                height: source.height,
+                generation: source.generation,
                 rgba,
             });
         }
 
-        let audio_sample_count = (view.audio_frame_count as usize)
-            .saturating_mul(view.audio_channels as usize);
+        let audio_sample_count =
+            (view.audio_frame_count as usize).saturating_mul(view.audio_channels as usize);
         let audio_samples = if audio_sample_count == 0 || view.audio_samples.is_null() {
             Vec::new()
         } else {
@@ -546,10 +575,7 @@ impl NativeClient {
             None
         } else {
             let level_bytes = unsafe {
-                slice::from_raw_parts(
-                    view.transition_level.as_ptr().cast::<u8>(),
-                    transition_len,
-                )
+                slice::from_raw_parts(view.transition_level.as_ptr().cast::<u8>(), transition_len)
             };
             let level = String::from_utf8_lossy(level_bytes).into_owned();
             let area = u8::try_from(view.transition_area).unwrap_or(1).max(1);
@@ -569,6 +595,9 @@ impl NativeClient {
             mario_health: view.mario_health,
             coins: view.coins,
             mario_action: view.mario_action,
+            mario_flags: view.mario_flags,
+            cap_timer: view.cap_timer,
+            holding_object: view.holding_object != 0,
             mario_pos: view.mario_pos,
             mario_vel: view.mario_vel,
             mario_yaw: view.mario_yaw,
@@ -593,11 +622,7 @@ impl Drop for NativeClient {
     }
 }
 
-fn symbol_error(
-    module: &Path,
-    symbol: &str,
-    error: libloading::Error,
-) -> NativeBridgeError {
+fn symbol_error(module: &Path, symbol: &str, error: libloading::Error) -> NativeBridgeError {
     NativeBridgeError::new(format!(
         "embedded SM64 module {} is missing {symbol}: {error}",
         module.display()
@@ -609,5 +634,7 @@ unsafe fn native_error(last_error_fn: LastErrorFn) -> String {
     if ptr.is_null() {
         return "unknown native error".to_owned();
     }
-    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
 }

@@ -10,3 +10,7 @@ workspace = true
 
 [dependencies]
 libloading = "0.8"
+
+[dev-dependencies]
+sm64_assets = { path = "../sm64_assets" }
+sm64_core = { path = "../sm64_core" }

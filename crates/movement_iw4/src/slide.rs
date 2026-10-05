@@ -208,7 +208,7 @@ pub fn step_slide_move<C: CollisionBackend>(
     let mut step_size = if (ps.pm_flags & pm_flags::PRONE) != 0 {
         PRONE_STEP_SIZE
     } else {
-        STEP_SIZE
+        collision.step_size().max(STEP_SIZE)
     };
 
     if ps.ground_entity_num == ENTITYNUM_NONE {

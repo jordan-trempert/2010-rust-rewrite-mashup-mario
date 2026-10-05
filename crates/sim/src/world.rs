@@ -130,6 +130,10 @@ pub struct SimClipMesh {
     pub static_models: Vec<SimStaticModel>,
 
     pub smodel_grid: crate::smodel_grid::SmodelGrid,
+
+    /// Optional movement step height for an imported triangle world. A zero
+    /// value preserves IW4's built-in 18-unit step on ordinary maps.
+    pub movement_step_size: f32,
 }
 
 impl SimClipMesh {
@@ -258,6 +262,9 @@ impl SimClipMesh {
             tables: std::sync::Arc::new(tables),
             static_models: Vec::new(),
             smodel_grid: crate::smodel_grid::SmodelGrid::default(),
+            // Castle stair risers are 51 SM64 units = 20.4 IW4 units after
+            // scaling, just above COD's stock 18-unit step.
+            movement_step_size: 24.0,
         }
     }
 }
@@ -3244,7 +3251,11 @@ impl SimState {
                 match_elapsed_ms: self.match_elapsed_ms,
                 prematch: self.prematch,
                 score_limit: self.bootstrap.score_limit,
-                time_limit_ms: if crate::voxel::active() { 0 } else { self.bootstrap.time_limit_ms },
+                time_limit_ms: if crate::voxel::active() {
+                    0
+                } else {
+                    self.bootstrap.time_limit_ms
+                },
                 kind: self.bootstrap.kind,
                 clients,
                 journal: self.journal.clone(),

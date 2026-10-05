@@ -55,7 +55,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 6u
+#define IW4L_SM64_ABI_VERSION 7u
 static volatile const char *gBridgeStage = "startup";
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -274,6 +274,9 @@ struct Iw4lSm64SnapshotView {
     int32_t mario_health;
     int32_t coins;
     uint32_t mario_action;
+    uint32_t mario_flags;
+    uint16_t cap_timer;
+    uint16_t holding_object;
     float mario_pos[3];
     float mario_vel[3];
     int16_t mario_yaw;
@@ -580,6 +583,16 @@ static int native_runs_mario_action(void) {
     group = action & ACT_GROUP_MASK;
 
     /*
+     * Picking an object up starts in ACT_GROUP_OBJECT, but vanilla then moves
+     * into ACT_HOLD_IDLE/ACT_HOLD_WALKING. Keep that action state machine
+     * alive for as long as Mario owns an object so a later Use press can run
+     * the original throw/place-down behavior. COD still owns the transform.
+     */
+    if (gMarioState->heldObj != NULL) {
+        return 1;
+    }
+
+    /*
      * Dialogs, star dances, warps, automatic object actions and real native
      * mechanics still need Mario's original action state machine to advance.
      * This does NOT mean native SM64 gets to own the COD player's transform.
@@ -734,6 +747,13 @@ static void apply_proxy(const struct Request *request) {
         gMarioObject->header.gfx.pos[0] = request->pos[0];
         gMarioObject->header.gfx.pos[1] = request->pos[1];
         gMarioObject->header.gfx.pos[2] = request->pos[2];
+
+        /*
+         * Native moving platforms and cap switches ask which dynamic floor
+         * Mario is standing on. Rebuild that reference after moving the COD
+         * proxy so their original platform checks continue to work.
+         */
+        update_mario_platform();
 
         /*
          * update_objects() runs detect_object_collisions() before Mario's
@@ -1081,7 +1101,16 @@ static void apply_external_attack(const struct Request *request) {
         const int handled_boss =
             apply_external_boss_damage(damage_target, request->attack_flags);
 
-        if (!handled_boss) {
+        if (!handled_boss &&
+            (hit_model == MODEL_BREAKABLE_BOX ||
+             hit_model == MODEL_BREAKABLE_BOX_SMALL)) {
+            /*
+             * The small cork box only breaks from object/world collision in
+             * vanilla and ignores Mario's attacked status. A bullet is an
+             * external hit, so remove either cork-box model immediately.
+             */
+            damage_target->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        } else if (!handled_boss) {
             best->oInteractStatus |=
                 INT_STATUS_INTERACTED |
                 INT_STATUS_WAS_ATTACKED |
@@ -1433,6 +1462,10 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     gIw4lSnapshot.mario_health = gMarioState != NULL ? gMarioState->health : 0;
     gIw4lSnapshot.coins = gMarioState != NULL ? gMarioState->numCoins : 0;
     gIw4lSnapshot.mario_action = gMarioState != NULL ? gMarioState->action : 0;
+    gIw4lSnapshot.mario_flags = gMarioState != NULL ? gMarioState->flags : 0;
+    gIw4lSnapshot.cap_timer = gMarioState != NULL ? gMarioState->capTimer : 0;
+    gIw4lSnapshot.holding_object =
+        gMarioState != NULL && gMarioState->heldObj != NULL ? 1 : 0;
     if (gMarioState != NULL) {
         for (i = 0; i < 3; ++i) {
             gIw4lSnapshot.mario_pos[i] = gMarioState->pos[i];

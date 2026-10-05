@@ -5975,6 +5975,8 @@ name = "sm64_native"
 version = "0.1.0"
 dependencies = [
  "libloading",
+ "sm64_assets",
+ "sm64_core",
 ]
 
 [[package]]

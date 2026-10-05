@@ -294,7 +294,9 @@ fn run_players_system(ecs: &mut World) {
             // A local external controller publishes the complete player position.
             // Keep command acknowledgement moving without also applying PMove.
             if world.external_motion.contains(id) {
-                if let Some(ps) = world.player_mut(*id) { ps.command_time = cmd.server_time; }
+                if let Some(ps) = world.player_mut(*id) {
+                    ps.command_time = cmd.server_time;
+                }
                 continue;
             }
             let old_buttons = world
@@ -1824,6 +1826,14 @@ struct ClipBackend<'a> {
 }
 
 impl CollisionBackend for ClipBackend<'_> {
+    fn step_size(&self) -> f32 {
+        if self.mesh.movement_step_size.is_finite() && self.mesh.movement_step_size > 0.0 {
+            self.mesh.movement_step_size
+        } else {
+            18.0
+        }
+    }
+
     fn trace(&self, input: GroundTraceInput) -> Trace {
         let world_hit = clip_trace(
             self.brushes,
