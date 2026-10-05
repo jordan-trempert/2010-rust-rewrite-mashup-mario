@@ -222,6 +222,9 @@ struct Sm64HudRoot;
 #[derive(Component, Debug, Clone, Copy)]
 struct Sm64HudText;
 
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64HudCamera;
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
@@ -341,6 +344,7 @@ fn launch_requested_sm64_map(
             With<Sm64SkyboxPresentation>,
             With<Sm64DialogRoot>,
             With<Sm64HudRoot>,
+            With<Sm64HudCamera>,
             With<Sm64NativeRenderPresentation>,
         )>,
     >,
@@ -2118,10 +2122,14 @@ fn sync_sm64_hud_overlay(
     cod_active:Option<Res<Sm64CodActive>>,
     output:Res<Sm64NativePlayerOutput>,
     roots:Query<Entity,With<Sm64HudRoot>>,
+    cameras:Query<Entity,With<Sm64HudCamera>>,
     mut texts:Query<&mut Text,With<Sm64HudText>>,
 ) {
     if cod_active.is_none() || !output.active {
         for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        for entity in &cameras {
             commands.entity(entity).despawn();
         }
         return;
@@ -2142,8 +2150,21 @@ fn sync_sm64_hud_overlay(
         return;
     }
 
+    let hud_camera=cameras.iter().next().unwrap_or_else(||{
+        commands.spawn((
+            Camera2d,
+            Camera {
+                order:5_000,
+                clear_color:ClearColorConfig::None,
+                ..default()
+            },
+            Sm64HudCamera,
+        )).id()
+    });
+
     commands.spawn((
         Sm64HudRoot,
+        UiTargetCamera(hud_camera),
         Node {
             position_type:PositionType::Absolute,
             left:Val::Px(24.0),
