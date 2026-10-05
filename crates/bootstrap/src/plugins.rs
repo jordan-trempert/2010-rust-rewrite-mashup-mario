@@ -659,6 +659,7 @@ fn apply_sm64_cod_movement_post_step(
     local: Option<Res<net::LocalPresentClient>>,
     mut state: ResMut<Sm64CodMoveState>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
+    mut pending_step: ResMut<net::PendingStepResult>,
 ) {
     const GROUND_POUND_VELOCITY: f32 = -900.0;
 
@@ -690,6 +691,12 @@ fn apply_sm64_cod_movement_post_step(
         let mut velocity = player.velocity;
         velocity[2] = state.pending_jump_velocity;
         authority.0.set_velocity(id, velocity);
+        if let Some(step) = pending_step.0.as_mut()
+            && let Some((_, snapshot_player)) =
+                step.snapshot.players.iter_mut().find(|(client, _)| *client == id)
+        {
+            snapshot_player.velocity = velocity;
+        }
         diag::info!(
             World,
             "SM64 COD jump stage={} vz={:.1}",
@@ -714,6 +721,12 @@ fn apply_sm64_cod_movement_post_step(
             velocity[1] *= 0.45;
             velocity[2] = velocity[2].min(GROUND_POUND_VELOCITY);
             authority.0.set_velocity(id, velocity);
+            if let Some(step) = pending_step.0.as_mut()
+                && let Some((_, snapshot_player)) =
+                    step.snapshot.players.iter_mut().find(|(client, _)| *client == id)
+            {
+                snapshot_player.velocity = velocity;
+            }
         }
     }
 }
