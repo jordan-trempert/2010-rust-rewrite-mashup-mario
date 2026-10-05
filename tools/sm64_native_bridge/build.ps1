@@ -460,41 +460,6 @@ if (-not $levelUpdateText.Contains($warpNeedle)) {
 }
 $levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
 
-# The Bowser-key doors (warpDoorId 1 upstairs, 2 basement) are same-level
-# castle area warps. COD can move independently of hidden Mario, so the stock
-# 20-frame delayed warp leaves enough time to walk through an opened key door
-# into an area that has not been loaded yet. Keep ordinary warp doors untouched,
-# but make the two actual key-door warps fire on the next native tick.
-#
-# sm64-port forks format this switch differently, so do not require an exact
-# multi-line source match. Find only the timer assignment belonging to
-# WARP_OP_WARP_DOOR and replace that single statement while preserving the
-# fork's indentation and all surrounding code.
-$keyWarpDelayPattern = '(?ms)(case\s+WARP_OP_WARP_DOOR\s*:\s*\r?\n)([ \t]*)sDelayedWarpTimer\s*=\s*(?:20|0x14)\s*;'
-$keyWarpDelayMatch = [regex]::Match($levelUpdateText, $keyWarpDelayPattern)
-if (-not $keyWarpDelayMatch.Success) {
-    throw "Could not locate WARP_OP_WARP_DOOR timer assignment in $levelUpdateSource"
-}
-
-$keyWarpCasePrefix = $keyWarpDelayMatch.Groups[1].Value
-$keyWarpIndent = $keyWarpDelayMatch.Groups[2].Value
-$keyWarpDelayReplacement = $keyWarpCasePrefix + @"
-${keyWarpIndent}#ifdef IW4L_SM64_EMBEDDED
-${keyWarpIndent}{
-${keyWarpIndent}    const s16 iw4lWarpDoorId =
-${keyWarpIndent}        m->usedObj != NULL ? (s16)(m->usedObj->oBehParams >> 24) : 0;
-${keyWarpIndent}    sDelayedWarpTimer =
-${keyWarpIndent}        (iw4lWarpDoorId == 1 || iw4lWarpDoorId == 2) ? 1 : 20;
-${keyWarpIndent}}
-${keyWarpIndent}#else
-${keyWarpIndent}sDelayedWarpTimer = 20;
-${keyWarpIndent}#endif
-"@
-
-$levelUpdateText =
-    $levelUpdateText.Substring(0, $keyWarpDelayMatch.Index) +
-    $keyWarpDelayReplacement +
-    $levelUpdateText.Substring($keyWarpDelayMatch.Index + $keyWarpDelayMatch.Length)
 
 Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
 
