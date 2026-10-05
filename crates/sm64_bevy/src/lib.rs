@@ -132,6 +132,18 @@ pub struct Sm64NativePlayerOutput {
     pub coins: i32,
 }
 
+#[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeDialogOutput {
+    pub id: i16,
+    pub text: String,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64DialogRoot;
+
+#[derive(Component, Debug, Clone, Copy)]
+struct Sm64DialogText;
+
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64ExternalPlayer {
     pub sm64_pos: [f32;3],
@@ -208,6 +220,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64NativePlayerOutput>()
+            .init_resource::<Sm64NativeDialogOutput>()
             .init_resource::<Sm64NativeDynamicCollision>()
             .init_resource::<Sm64PresentationCache>()
             .init_resource::<Sm64LoadStatus>()
@@ -219,6 +232,7 @@ impl Plugin for Sm64Plugin {
                 launch_requested_sm64_map,
                 update_debug_input.after(launch_requested_sm64_map),
                 advance_sm64_runtime.after(launch_requested_sm64_map),
+                sync_sm64_dialog_overlay.after(advance_sm64_runtime),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
                 face_sm64_billboard_objects.after(sync_object_presentations),
@@ -241,6 +255,7 @@ fn launch_requested_sm64_map(
             With<Sm64ObjectPresentation>,
             With<Sm64DebugCamera>,
             With<Sm64SkyboxPresentation>,
+            With<Sm64DialogRoot>,
         )>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1487,6 +1502,7 @@ fn advance_sm64_runtime(
     external: Res<Sm64ExternalPlayer>,
     mut native: NonSendMut<Sm64NativeRuntime>,
     mut native_output: ResMut<Sm64NativePlayerOutput>,
+    mut native_dialog: ResMut<Sm64NativeDialogOutput>,
     mut native_collision: ResMut<Sm64NativeDynamicCollision>,
     mut runtime: ResMut<Sm64Runtime>,
 ) {
@@ -1509,6 +1525,8 @@ fn advance_sm64_runtime(
                 attack_flags:external.attack_flags,
             }) {
                 Ok(snapshot)=>{
+                    native_dialog.id=snapshot.dialog_id;
+                    native_dialog.text=snapshot.dialog_text.clone();
                     native_collision.tick=snapshot.tick;
                     native_collision.triangles=snapshot.dynamic_surfaces.clone();
                     native_output.active=true;
@@ -1529,11 +1547,15 @@ fn advance_sm64_runtime(
                     native.client=None;
                     native.active=false;
                     native_output.active=false;
+                    native_dialog.id=-1;
+                    native_dialog.text.clear();
                     native_collision.triangles.clear();
                 }
             }
         } else {
             native_output.active=false;
+            native_dialog.id=-1;
+            native_dialog.text.clear();
             native_collision.triangles.clear();
             runtime.latest=Some(if external.active {
                 runtime.world.step_external_player(
@@ -1547,6 +1569,61 @@ fn advance_sm64_runtime(
         }
         steps += 1;
     }
+}
+
+fn sync_sm64_dialog_overlay(
+    mut commands:Commands,
+    dialog:Res<Sm64NativeDialogOutput>,
+    roots:Query<Entity,With<Sm64DialogRoot>>,
+    mut texts:Query<&mut Text,With<Sm64DialogText>>,
+) {
+    let visible=dialog.id>=0 && !dialog.text.trim().is_empty();
+
+    if !visible {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    if let Some(mut text)=texts.iter_mut().next() {
+        if dialog.is_changed() {
+            *text=Text::new(format!(
+                "{}\n\n[Use] Continue",
+                dialog.text.trim()
+            ));
+        }
+        return;
+    }
+
+    commands.spawn((
+        Sm64DialogRoot,
+        Node {
+            position_type:PositionType::Absolute,
+            left:Val::Percent(18.0),
+            right:Val::Percent(18.0),
+            bottom:Val::Percent(8.0),
+            padding:UiRect::all(Val::Px(20.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.02,0.02,0.03,0.88)),
+        BorderColor::all(Color::srgba(1.0,1.0,1.0,0.8)),
+        GlobalZIndex(50_000),
+    )).with_children(|parent|{
+        parent.spawn((
+            Sm64DialogText,
+            Text::new(format!(
+                "{}\n\n[Use] Continue",
+                dialog.text.trim()
+            )),
+            TextFont {
+                font_size:bevy::text::FontSize::Px(24.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            TextLayout::justify(Justify::Left),
+        ));
+    });
 }
 
 fn face_sm64_billboard_objects(
