@@ -915,17 +915,18 @@ fn apply_sm64_dynamic_collision(
 fn apply_sm64_native_player_output(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    collision_state: Res<Sm64CodCollisionState>,
     mut bridge_state: ResMut<Sm64CodNativeState>,
     mut spawn: Option<ResMut<Sm64CodSpawn>>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
 ) {
-    if active.is_none() {
+    let Some(active) = active else {
         bridge_state.last_sm64_health = None;
         bridge_state.last_action = 0;
         bridge_state.last_area = 0;
         bridge_state.force_native_reposition = false;
         return;
-    }
+    };
     let Some(authority) = authority.as_deref_mut() else {
         return;
     };
@@ -941,11 +942,40 @@ fn apply_sm64_native_player_output(
     };
 
     if !output.active {
-        authority.0.set_external_motion(id, false);
+        // During a cross-level handoff the previous DLL has been dropped but
+        // the destination DLL may not have produced its first 30 Hz snapshot
+        // yet. Keep COD frozen at the source door until that snapshot exists.
+        authority
+            .0
+            .set_external_motion(id, bridge_state.force_native_reposition);
+        if bridge_state.force_native_reposition {
+            authority.0.set_velocity(id, [0.0; 3]);
+        }
         bridge_state.last_sm64_health = None;
         bridge_state.last_action = 0;
         bridge_state.last_area = 0;
         return;
+    }
+
+    if bridge_state.force_native_reposition {
+        let destination_ready = u8::try_from(output.area_index).ok().is_some_and(|area| {
+            collision_state.level == active.level
+                && collision_state.area == area
+                && collision_state.last_native_static_tick != 0
+        });
+
+        if !destination_ready {
+            /*
+             * Critical transition barrier: never teleport from a snapshot
+             * unless the exact native static collision installed for that same
+             * destination level/area is already active. This prevents the last
+             * Castle Grounds ACT_PUSHING_DOOR snapshot from being mistaken for
+             * the first Castle Inside spawn snapshot.
+             */
+            authority.0.set_external_motion(id, true);
+            authority.0.set_velocity(id, [0.0; 3]);
+            return;
+        }
     }
 
     // Preserve ordinary COD damage while layering SM64 damage/healing on top.
@@ -1056,10 +1086,12 @@ fn apply_sm64_native_player_output(
             bridge_state.force_native_reposition = false;
             diag::info!(
                 World,
-                "SM64 COD transition: COD placed exactly at native Mario position area={} action=0x{:08x} origin={:?}",
+                "SM64 COD transition: COD placed exactly at destination native Mario position level={} area={} action=0x{:08x} origin={:?} collision_tick={}",
+                active.level,
                 output.area_index,
                 output.action,
-                native_origin
+                native_origin,
+                collision_state.last_native_static_tick
             );
         }
     }
