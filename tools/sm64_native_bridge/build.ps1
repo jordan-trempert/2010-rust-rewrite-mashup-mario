@@ -99,6 +99,8 @@ $levelScriptSource = Join-Path $root "src\engine\level_script.c"
 $levelScriptBackup = Join-Path $root "level_script.iw4l-backup.txt"
 $levelUpdateSource = Join-Path $root "src\game\level_update.c"
 $levelUpdateBackup = Join-Path $root "level_update.iw4l-backup.txt"
+$gameInitSource = Join-Path $root "src\game\game_init.c"
+$gameInitBackup = Join-Path $root "game_init.iw4l-backup.txt"
 $objectProcessorSource = Join-Path $root "src\game\object_list_processor.c"
 $objectProcessorBackup = Join-Path $root "object_list_processor.iw4l-backup.txt"
 $renderGraphSource = Join-Path $root "src\game\rendering_graph_node.c"
@@ -137,6 +139,7 @@ $pcMainObject = Join-Path $build "src\pc\pc_main.o"
 Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
 Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\game\game_init.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\rendering_graph_node.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_pc.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_dummy.o") -Force -ErrorAction SilentlyContinue
@@ -350,6 +353,32 @@ $objectProcessorText = $objectProcessorText.Replace($marioUpdateNeedle, $marioUp
 Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
 
 # Native rendering integration -------------------------------------------------
+# Keep only the original SM64 3D scene pass. COD owns HUD/text, and native
+# dialog state is surfaced separately through the embedded API.
+Copy-Item $gameInitSource $gameInitBackup -Force
+$gameInitText = Get-Content $gameInitSource -Raw
+$renderGameNeedle = @"
+void render_game(void) {
+    if (gCurrentArea != NULL && !gWarpTransition.pauseRendering) {
+"@
+$renderGameReplacement = @"
+void render_game(void) {
+#ifdef IW4L_SM64_EMBEDDED
+    if (gCurrentArea != NULL && !gWarpTransition.pauseRendering) {
+        geo_process_root(gCurrentArea->unk04, D_8032CE74, D_8032CE78, gFBSetColor);
+    }
+    D_8032CE74 = NULL;
+    D_8032CE78 = NULL;
+    return;
+#endif
+    if (gCurrentArea != NULL && !gWarpTransition.pauseRendering) {
+"@
+if (-not $gameInitText.Contains($renderGameNeedle)) {
+    throw "Could not locate render_game in $gameInitSource"
+}
+$gameInitText = $gameInitText.Replace($renderGameNeedle, $renderGameReplacement)
+Set-Content -Path $gameInitSource -Value $gameInitText -Encoding UTF8
+
 # Preserve SM64's own GeoLayout traversal, animation channels, switch cases,
 # billboard decisions, scaling, lighting and Fast3D display-list execution.
 # The temporary patches below only redirect the final native result into an
@@ -814,6 +843,10 @@ finally {
     if (Test-Path $levelUpdateBackup) {
         Copy-Item $levelUpdateBackup $levelUpdateSource -Force
         Remove-Item $levelUpdateBackup -Force
+    }
+    if (Test-Path $gameInitBackup) {
+        Copy-Item $gameInitBackup $gameInitSource -Force
+        Remove-Item $gameInitBackup -Force
     }
     if (Test-Path $objectProcessorBackup) {
         Copy-Item $objectProcessorBackup $objectProcessorSource -Force
