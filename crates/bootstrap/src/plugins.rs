@@ -556,10 +556,6 @@ fn apply_sm64_cod_movement_abilities(
     let attack_down = (cmd.buttons & BUTTON_ATTACK) != 0;
     let jump_pressed = jump_down && !state.last_jump_down;
     let pound_pressed = pound_down && !state.last_pound_down;
-    let attack_pressed = attack_down && !state.last_attack_down;
-    let weapon_shot = state
-        .last_weapon_shot_count
-        .is_some_and(|previous| player.weapon_shot_count != previous);
     let grounded = sm64_cod_grounded(
         &authority.0,
         player.ground_entity_num,
