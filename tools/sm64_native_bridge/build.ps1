@@ -349,9 +349,16 @@ void bhv_mario_update(void) {
         mario_reset_bodystate(gMarioState);
         update_mario_inputs(gMarioState);
         mario_handle_special_floors(gMarioState);
+
+        /*
+         * The interaction pass tests Mario's current hitbox/hurtbox against
+         * enemy interact objects. Update it BEFORE mario_process_interactions;
+         * doing this afterwards left COD's proxy with stale bounds and made
+         * Goombas/Bob-ombs unable to damage the player reliably.
+         */
+        mario_update_hitbox_and_cap_model(gMarioState);
         mario_process_interactions(gMarioState);
         update_mario_health(gMarioState);
-        mario_update_hitbox_and_cap_model(gMarioState);
         gCurrentObject->oMarioParticleFlags = 0;
     }
 
@@ -529,30 +536,23 @@ $vertexTransformReplacement = @"
 
 #ifdef IW4L_SM64_EMBEDDED
         {
-            extern float gIw4lNativeCameraMatrix[4][4];
             const float (*mv)[4] = rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
-            float vx = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0] + v->ob[2] * mv[2][0] + mv[3][0];
-            float vy = v->ob[0] * mv[0][1] + v->ob[1] * mv[1][1] + v->ob[2] * mv[2][1] + mv[3][1];
-            float vz = v->ob[0] * mv[0][2] + v->ob[1] * mv[1][2] + v->ob[2] * mv[2][2] + mv[3][2];
-            float camX = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[0][0]
-                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[0][1]
-                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[0][2];
-            float camY = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[1][0]
-                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[1][1]
-                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[1][2];
-            float camZ = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[2][0]
-                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[2][1]
-                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[2][2];
 
-            d->world_x = vx * gIw4lNativeCameraMatrix[0][0]
-                       + vy * gIw4lNativeCameraMatrix[0][1]
-                       + vz * gIw4lNativeCameraMatrix[0][2] - camX;
-            d->world_y = vx * gIw4lNativeCameraMatrix[1][0]
-                       + vy * gIw4lNativeCameraMatrix[1][1]
-                       + vz * gIw4lNativeCameraMatrix[1][2] - camY;
-            d->world_z = vx * gIw4lNativeCameraMatrix[2][0]
-                       + vy * gIw4lNativeCameraMatrix[2][1]
-                       + vz * gIw4lNativeCameraMatrix[2][2] - camZ;
+            /*
+             * Export the exact native camera-space position after SM64 has
+             * applied its GeoLayout, animation hierarchy and billboard math.
+             * Rust re-applies the live COD camera transform. This is both
+             * simpler and more accurate than trying to algebraically remove
+             * SM64's view matrix here; the old inverse path distorted
+             * camera-facing trees and animated multipart actors such as
+             * Goombas.
+             */
+            d->world_x = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0]
+                       + v->ob[2] * mv[2][0] + mv[3][0];
+            d->world_y = v->ob[0] * mv[0][1] + v->ob[1] * mv[1][1]
+                       + v->ob[2] * mv[2][1] + mv[3][1];
+            d->world_z = v->ob[0] * mv[0][2] + v->ob[1] * mv[1][2]
+                       + v->ob[2] * mv[2][2] + mv[3][2];
         }
 #endif
         
