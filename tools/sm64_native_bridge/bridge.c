@@ -350,31 +350,61 @@ static int gIw4lInitialized = 0;
 static int gIw4lPreserveNativeSpawn = 0;
 static float gIw4lPlatformDisplacement[3] = { 0.0f, 0.0f, 0.0f };
 static uint32_t gIw4lPlatformActive = 0;
+static struct Object *gIw4lLastPlatformObject = NULL;
+static float gIw4lLastPlatformPos[3] = { 0.0f, 0.0f, 0.0f };
 
 void iw4l_sm64_platform_displacement_begin(void) {
+    float current[3];
+    float dx;
+    float dy;
+    float dz;
+    float distance2;
+
     gIw4lPlatformActive = 0;
     gIw4lPlatformDisplacement[0] = 0.0f;
     gIw4lPlatformDisplacement[1] = 0.0f;
     gIw4lPlatformDisplacement[2] = 0.0f;
 
     if (gMarioState == NULL || gMarioPlatform == NULL) {
+        gIw4lLastPlatformObject = NULL;
         return;
     }
 
+    current[0] = gMarioPlatform->oPosX;
+    current[1] = gMarioPlatform->oPosY;
+    current[2] = gMarioPlatform->oPosZ;
+
     /*
-     * Do NOT mirror apply_platform_displacement()'s rotational orbit into COD.
-     * That rotation is correct for native Mario, but with COD independently
-     * walking on the platform it can move the host player tens/hundreds of
-     * units around the platform axis in one native tick and looks like a
-     * teleport. Only inherit the platform object's linear per-tick motion.
-     *
-     * This is enough to keep elevators/translating platforms under the player;
-     * rotating platforms are handled by their updated collision geometry while
-     * COD remains free to walk on them.
+     * update_terrain_objects() has already advanced the platform by the time
+     * this hook runs. Compare the platform object's center against the previous
+     * native tick. This captures actual translation/elevator motion even for
+     * behaviors that directly assign oPos*, while deliberately ignoring the
+     * rotational orbit vanilla applies to Mario around a platform axis.
      */
-    gIw4lPlatformDisplacement[0] = gMarioPlatform->oVelX;
-    gIw4lPlatformDisplacement[1] = gMarioPlatform->oVelY;
-    gIw4lPlatformDisplacement[2] = gMarioPlatform->oVelZ;
+    if (gIw4lLastPlatformObject != gMarioPlatform) {
+        gIw4lLastPlatformObject = gMarioPlatform;
+        gIw4lLastPlatformPos[0] = current[0];
+        gIw4lLastPlatformPos[1] = current[1];
+        gIw4lLastPlatformPos[2] = current[2];
+        return;
+    }
+
+    dx = current[0] - gIw4lLastPlatformPos[0];
+    dy = current[1] - gIw4lLastPlatformPos[1];
+    dz = current[2] - gIw4lLastPlatformPos[2];
+
+    gIw4lLastPlatformPos[0] = current[0];
+    gIw4lLastPlatformPos[1] = current[1];
+    gIw4lLastPlatformPos[2] = current[2];
+
+    distance2 = dx * dx + dy * dy + dz * dz;
+    if (distance2 > 120.0f * 120.0f) {
+        return;
+    }
+
+    gIw4lPlatformDisplacement[0] = dx;
+    gIw4lPlatformDisplacement[1] = dy;
+    gIw4lPlatformDisplacement[2] = dz;
     gIw4lPlatformActive = 1;
 }
 
@@ -2144,6 +2174,7 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gIw4lPlatformDisplacement[0] = 0.0f;
     gIw4lPlatformDisplacement[1] = 0.0f;
     gIw4lPlatformDisplacement[2] = 0.0f;
+    gIw4lLastPlatformObject = NULL;
 
     memset(&request, 0, sizeof(request));
     request.op = OP_STEP;
