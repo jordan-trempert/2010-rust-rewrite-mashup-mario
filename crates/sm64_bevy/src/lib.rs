@@ -128,10 +128,18 @@ pub struct Sm64NativeRenderFrame {
     pub texture_updates:Vec<sm64_native::NativeTextureUpdate>,
 }
 
+#[derive(Debug,Clone,Copy,PartialEq,Eq,Hash)]
+enum NativeTextureAlphaClass {
+    Opaque,
+    Mask,
+    Blend,
+}
+
 #[derive(Resource, Default)]
 struct Sm64NativeRenderCache {
     textures:HashMap<u32,Handle<Image>>,
-    batches:HashMap<(u32,bool),NativeRenderBatchHandles>,
+    texture_alpha:HashMap<u32,NativeTextureAlphaClass>,
+    batches:HashMap<(u32,NativeTextureAlphaClass),NativeRenderBatchHandles>,
 }
 
 struct NativeRenderBatchHandles {
@@ -310,6 +318,7 @@ fn launch_requested_sm64_map(
     native_render.triangles.clear();
     native_render.texture_updates.clear();
     native_render_cache.textures.clear();
+    native_render_cache.texture_alpha.clear();
     native_render_cache.batches.clear();
 
     let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
@@ -1785,6 +1794,24 @@ fn sync_native_render_frame(
     *last_tick=frame.tick;
 
     for update in &frame.texture_updates {
+        let mut saw_zero=false;
+        let mut saw_partial=false;
+        for pixel in update.rgba.chunks_exact(4) {
+            match pixel[3] {
+                0 => saw_zero=true,
+                255 => {},
+                _ => saw_partial=true,
+            }
+        }
+        let alpha_class=if saw_partial {
+            NativeTextureAlphaClass::Blend
+        } else if saw_zero {
+            NativeTextureAlphaClass::Mask
+        } else {
+            NativeTextureAlphaClass::Opaque
+        };
+        cache.texture_alpha.insert(update.id,alpha_class);
+
         let mut image=Image::new(
             Extent3d {
                 width:update.width,
@@ -1812,10 +1839,22 @@ fn sync_native_render_frame(
         }
     }
 
-    let mut groups=HashMap::<(u32,bool),Vec<&sm64_native::NativeRenderTriangle>>::new();
+    let mut groups=HashMap::<(u32,NativeTextureAlphaClass),Vec<&sm64_native::NativeRenderTriangle>>::new();
     for triangle in &frame.triangles {
         let texture_id=triangle.texture_id.unwrap_or(u32::MAX);
-        groups.entry((texture_id,triangle.alpha)).or_default().push(triangle);
+        let alpha_class=if texture_id==u32::MAX {
+            if triangle.alpha {
+                NativeTextureAlphaClass::Blend
+            } else {
+                NativeTextureAlphaClass::Opaque
+            }
+        } else {
+            cache.texture_alpha
+                .get(&texture_id)
+                .copied()
+                .unwrap_or(NativeTextureAlphaClass::Opaque)
+        };
+        groups.entry((texture_id,alpha_class)).or_default().push(triangle);
     }
 
     let active_keys=groups.keys().copied().collect::<std::collections::HashSet<_>>();
@@ -1898,10 +1937,10 @@ fn sync_native_render_frame(
                     cache.textures.get(&key.0).cloned()
                 };
                 material.unlit=true;
-                material.alpha_mode=if key.1 {
-                    AlphaMode::Blend
-                } else {
-                    AlphaMode::Opaque
+                material.alpha_mode=match key.1 {
+                    NativeTextureAlphaClass::Opaque=>AlphaMode::Opaque,
+                    NativeTextureAlphaClass::Mask=>AlphaMode::Mask(0.5),
+                    NativeTextureAlphaClass::Blend=>AlphaMode::Blend,
                 };
                 material.cull_mode=None;
             }
@@ -1918,13 +1957,17 @@ fn sync_native_render_frame(
             base_color:Color::WHITE,
             base_color_texture:texture,
             unlit:true,
-            alpha_mode:if key.1 {AlphaMode::Blend} else {AlphaMode::Opaque},
+            alpha_mode:match key.1 {
+                NativeTextureAlphaClass::Opaque=>AlphaMode::Opaque,
+                NativeTextureAlphaClass::Mask=>AlphaMode::Mask(0.5),
+                NativeTextureAlphaClass::Blend=>AlphaMode::Blend,
+            },
             cull_mode:None,
             ..default()
         });
         let mesh=meshes.add(mesh_data);
         let entity=commands.spawn((
-            Name::new(format!("SM64 native render batch tex={} alpha={}",key.0,key.1)),
+            Name::new(format!("SM64 native render batch tex={} alpha={:?}",key.0,key.1)),
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
             Transform::IDENTITY,
@@ -1946,14 +1989,23 @@ fn sync_native_render_frame(
             .filter_map(|triangle|triangle.texture_id)
             .collect::<std::collections::HashSet<_>>()
             .len();
+        let opaque_textures=cache.texture_alpha.values()
+            .filter(|&&class|class==NativeTextureAlphaClass::Opaque).count();
+        let mask_textures=cache.texture_alpha.values()
+            .filter(|&&class|class==NativeTextureAlphaClass::Mask).count();
+        let blend_textures=cache.texture_alpha.values()
+            .filter(|&&class|class==NativeTextureAlphaClass::Blend).count();
         info!(
-            "SM64 native renderer frame tick={} triangles={} textured_triangles={} unique_texture_ids={} texture_updates={} textures={} batches={}",
+            "SM64 native renderer frame tick={} triangles={} textured_triangles={} unique_texture_ids={} texture_updates={} textures={} alpha_classes=opaque:{} mask:{} blend:{} batches={}",
             frame.tick,
             frame.triangles.len(),
             textured_triangles,
             unique_texture_ids,
             frame.texture_updates.len(),
             cache.textures.len(),
+            opaque_textures,
+            mask_textures,
+            blend_textures,
             cache.batches.len()
         );
     }
