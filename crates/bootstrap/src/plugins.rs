@@ -460,18 +460,22 @@ fn sm64_cod_native_reposition_action(action: u32) -> bool {
     )
 }
 
-fn sm64_cod_grounded(authority: &sim::SimWorld, player: &playerstate_iw4::PlayerState) -> bool {
+fn sm64_cod_grounded(
+    authority: &sim::SimWorld,
+    ground_entity_num: i32,
+    origin: [f32; 3],
+) -> bool {
     const ENTITYNUM_NONE: i32 = 1023;
 
-    if player.ground_entity_num != ENTITYNUM_NONE {
+    if ground_entity_num != ENTITYNUM_NONE {
         return true;
     }
 
     // Imported SM64 triangles are world-mesh collision and can occasionally
     // miss IW4's ground entity bookkeeping at seams. A short point probe makes
     // the Mario jump chain depend on the actual floor instead of that metadata.
-    let start = [player.origin[0], player.origin[1], player.origin[2] + 3.0];
-    let end = [player.origin[0], player.origin[1], player.origin[2] - 10.0];
+    let start = [origin[0], origin[1], origin[2] + 3.0];
+    let end = [origin[0], origin[1], origin[2] - 10.0];
     let hit = authority.trace_world(start, end, [0.0; 3], [0.0; 3], sim::MASK_PLAYER_SOLID);
     hit.fraction < 1.0 && hit.startsolid == 0 && hit.allsolid == 0 && hit.normal[2] >= 0.45
 }
@@ -495,7 +499,6 @@ fn apply_sm64_cod_movement_abilities(
     const FIRST_JUMP_VELOCITY: f32 = 330.0;
     const DOUBLE_JUMP_VELOCITY: f32 = 440.0;
     const TRIPLE_JUMP_VELOCITY: f32 = 570.0;
-    const GROUND_POUND_VELOCITY: f32 = -900.0;
     const JUMP_CHAIN_GRACE_TICKS: u8 = 18;
     const GROUND_POUND_AIM_DEGREES: f32 = 60.0;
     const WING_ASCENT_VELOCITY: f32 = 220.0;
@@ -534,7 +537,7 @@ fn apply_sm64_cod_movement_abilities(
     let jump_pressed = jump_down && !state.last_jump_down;
     let pound_pressed = pound_down && !state.last_pound_down;
     let attack_pressed = attack_down && !state.last_attack_down;
-    let grounded = sm64_cod_grounded(&authority.0, &player);
+    let grounded = sm64_cod_grounded(&authority.0, player.ground_entity_num, player.origin);
     let just_landed = !state.last_grounded && grounded;
 
     let pitch = {
@@ -636,7 +639,6 @@ fn apply_sm64_cod_movement_abilities(
     state.last_grounded = grounded;
     state.last_weapon_shot_count = Some(player.weapon_shot_count);
 
-    let _ = GROUND_POUND_VELOCITY;
 }
 
 fn apply_sm64_cod_movement_post_step(
@@ -659,7 +661,11 @@ fn apply_sm64_cod_movement_post_step(
 
     let mut first = None;
     authority.0.visit_players(|id, player| {
-        if first.is_none() && local.as_ref().is_none_or(|local| local.0 == id) {
+        let is_target = match local.as_ref() {
+            Some(local) => local.0 == id,
+            None => true,
+        };
+        if first.is_none() && is_target {
             first = Some((id, *player));
         }
     });
@@ -684,7 +690,7 @@ fn apply_sm64_cod_movement_post_step(
 
     if state.ground_pounding {
         let current = authority.0.player(id).copied().unwrap_or(player);
-        if !sm64_cod_grounded(&authority.0, &current) {
+        if !sm64_cod_grounded(&authority.0, current.ground_entity_num, current.origin) {
             let mut velocity = current.velocity;
             velocity[0] *= 0.45;
             velocity[1] *= 0.45;
