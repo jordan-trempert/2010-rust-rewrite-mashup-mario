@@ -49,7 +49,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 1u
+#define IW4L_SM64_ABI_VERSION 2u
 static volatile const char *gBridgeStage = "startup";
 static int gBridgeDialogPendingReset = 0;
 
@@ -172,6 +172,24 @@ struct Iw4lSm64Triangle {
     float vertices[9];
 };
 
+struct Iw4lSm64RenderTriangle {
+    float pos[9];
+    float uv[6];
+    uint8_t rgba[12];
+    uint32_t texture_id;
+    uint8_t textured;
+    uint8_t alpha;
+    uint8_t pad[2];
+};
+
+struct Iw4lSm64TextureView {
+    uint32_t id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t generation;
+    const uint8_t *rgba;
+};
+
 struct Iw4lSm64SnapshotView {
     uint32_t abi_version;
     uint32_t tick;
@@ -188,6 +206,10 @@ struct Iw4lSm64SnapshotView {
     uint32_t object_count;
     const struct Iw4lSm64Triangle *dynamic_surfaces;
     uint32_t dynamic_surface_count;
+    const struct Iw4lSm64RenderTriangle *render_triangles;
+    uint32_t render_triangle_count;
+    const struct Iw4lSm64TextureView *textures;
+    uint32_t texture_count;
 };
 
 static struct LevelCommand *gIw4lLevelCommand = NULL;
@@ -200,6 +222,32 @@ static char gIw4lDialogText[4096];
 static struct Iw4lSm64Object gIw4lObjects[4096];
 static struct Iw4lSm64Triangle gIw4lDynamicSurfaces[8192];
 static struct Iw4lSm64SnapshotView gIw4lSnapshot;
+
+#define IW4L_SM64_MAX_RENDER_TRIANGLES 65536u
+#define IW4L_SM64_MAX_TEXTURES 512u
+
+struct Iw4lSm64TextureStorage {
+    struct Iw4lSm64TextureView view;
+    uint8_t *owned_rgba;
+    size_t capacity;
+};
+
+static struct Iw4lSm64RenderTriangle gIw4lRenderTriangles[IW4L_SM64_MAX_RENDER_TRIANGLES];
+static uint32_t gIw4lRenderTriangleCount = 0;
+static struct Iw4lSm64TextureStorage gIw4lTextureStorage[IW4L_SM64_MAX_TEXTURES];
+static struct Iw4lSm64TextureView gIw4lTextureViews[IW4L_SM64_MAX_TEXTURES];
+static uint32_t gIw4lTextureCount = 0;
+
+/* Shared with temporary embedded-render patches in rendering_graph_node.c and
+ * gfx_pc.c. The native graph traversal uses the COD camera for billboards and
+ * culling, then gfx_pc removes this view transform again before exporting
+ * world-space vertices. */
+int gIw4lUseExternalCamera = 0;
+float gIw4lRenderCameraPos[3] = {0.0f,0.0f,0.0f};
+float gIw4lRenderCameraFocus[3] = {0.0f,0.0f,-1000.0f};
+float gIw4lNativeCameraMatrix[4][4] = {
+    {1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}
+};
 
 static uint32_t object_id(const struct Object *object) {
     /*
@@ -424,6 +472,23 @@ static void apply_proxy(const struct Request *request) {
         gMarioObject->header.gfx.pos[2] = request->pos[2];
     }
 
+    {
+        const float yaw_s=sins(request->yaw);
+        const float yaw_c=coss(request->yaw);
+        const float pitch_s=sins(request->pitch);
+        const float pitch_c=coss(request->pitch);
+        const float eye_height=150.0f;
+        const float look_distance=2000.0f;
+
+        gIw4lRenderCameraPos[0]=gMarioState->pos[0];
+        gIw4lRenderCameraPos[1]=gMarioState->pos[1]+eye_height;
+        gIw4lRenderCameraPos[2]=gMarioState->pos[2];
+        gIw4lRenderCameraFocus[0]=gIw4lRenderCameraPos[0]+yaw_s*pitch_c*look_distance;
+        gIw4lRenderCameraFocus[1]=gIw4lRenderCameraPos[1]+pitch_s*look_distance;
+        gIw4lRenderCameraFocus[2]=gIw4lRenderCameraPos[2]+yaw_c*pitch_c*look_distance;
+        gIw4lUseExternalCamera=1;
+    }
+
     /* COD Use is Mario B: starts native NPC/sign interactions and advances
        dialogs. Fire is Mario A only in a cannon or while a dialog is open. */
     if (request->attack_flags & BRIDGE_INPUT_USE) {
@@ -603,6 +668,77 @@ static void apply_external_attack(const struct Request *request) {
             INT_STATUS_WAS_ATTACKED |
             ATTACK_FAST_ATTACK;
     }
+}
+
+void iw4l_sm64_capture_begin_frame(void) {
+    gIw4lRenderTriangleCount = 0;
+}
+
+void iw4l_sm64_capture_triangle(
+    const float *pos9,
+    const float *uv6,
+    const uint8_t *rgba12,
+    uint32_t texture_id,
+    int textured,
+    int alpha
+) {
+    struct Iw4lSm64RenderTriangle *out;
+    if (gIw4lRenderTriangleCount >= IW4L_SM64_MAX_RENDER_TRIANGLES) {
+        return;
+    }
+    out = &gIw4lRenderTriangles[gIw4lRenderTriangleCount++];
+    memcpy(out->pos,pos9,sizeof(out->pos));
+    memcpy(out->uv,uv6,sizeof(out->uv));
+    memcpy(out->rgba,rgba12,sizeof(out->rgba));
+    out->texture_id=texture_id;
+    out->textured=textured ? 1 : 0;
+    out->alpha=alpha ? 1 : 0;
+    out->pad[0]=out->pad[1]=0;
+}
+
+void iw4l_sm64_capture_texture(
+    uint32_t id,
+    const uint8_t *rgba,
+    uint32_t width,
+    uint32_t height
+) {
+    uint32_t i;
+    struct Iw4lSm64TextureStorage *slot = NULL;
+    size_t bytes;
+
+    if (rgba == NULL || width == 0 || height == 0) {
+        return;
+    }
+
+    for (i=0;i<gIw4lTextureCount;i++) {
+        if (gIw4lTextureStorage[i].view.id == id) {
+            slot=&gIw4lTextureStorage[i];
+            break;
+        }
+    }
+    if (slot == NULL) {
+        if (gIw4lTextureCount >= IW4L_SM64_MAX_TEXTURES) {
+            return;
+        }
+        slot=&gIw4lTextureStorage[gIw4lTextureCount++];
+        memset(slot,0,sizeof(*slot));
+        slot->view.id=id;
+    }
+
+    bytes=(size_t)width*(size_t)height*4u;
+    if (slot->capacity < bytes) {
+        uint8_t *next=(uint8_t *)realloc(slot->owned_rgba,bytes);
+        if (next == NULL) {
+            return;
+        }
+        slot->owned_rgba=next;
+        slot->capacity=bytes;
+    }
+    memcpy(slot->owned_rgba,rgba,bytes);
+    slot->view.width=width;
+    slot->view.height=height;
+    slot->view.generation++;
+    slot->view.rgba=slot->owned_rgba;
 }
 
 static uint32_t collect_objects(const struct Object **objects, uint32_t capacity) {
@@ -897,6 +1033,14 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     }
     gIw4lSnapshot.dynamic_surfaces = gIw4lDynamicSurfaces;
     gIw4lSnapshot.dynamic_surface_count = dynamic_count;
+    gIw4lSnapshot.render_triangles = gIw4lRenderTriangles;
+    gIw4lSnapshot.render_triangle_count = gIw4lRenderTriangleCount;
+
+    for (i=0;i<gIw4lTextureCount;i++) {
+        gIw4lTextureViews[i]=gIw4lTextureStorage[i].view;
+    }
+    gIw4lSnapshot.textures=gIw4lTextureViews;
+    gIw4lSnapshot.texture_count=gIw4lTextureCount;
     return &gIw4lSnapshot;
 }
 
@@ -1133,8 +1277,18 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
 }
 
 IW4L_SM64_API void iw4l_sm64_shutdown(void) {
+    {
+        uint32_t i;
+        for (i=0;i<gIw4lTextureCount;i++) {
+            free(gIw4lTextureStorage[i].owned_rgba);
+            memset(&gIw4lTextureStorage[i],0,sizeof(gIw4lTextureStorage[i]));
+        }
+        gIw4lTextureCount=0;
+        gIw4lRenderTriangleCount=0;
+    }
     gIw4lInitialized = 0;
     gIw4lRunMarioAction = 0;
+    gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
     gBridgeDialogPendingReset = 0;
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
