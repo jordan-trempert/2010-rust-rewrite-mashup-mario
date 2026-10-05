@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 8;
+const ABI_VERSION: u32 = 9;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -80,6 +80,8 @@ pub struct NativeSnapshot {
     pub holding_object: bool,
     pub mario_pos: [f32; 3],
     pub mario_vel: [f32; 3],
+    pub platform_displacement: [f32; 3],
+    pub platform_active: bool,
     pub mario_yaw: i16,
     pub dialog_id: i16,
     pub dialog_text: String,
@@ -156,6 +158,8 @@ struct NativeSnapshotView {
     holding_object: u16,
     mario_pos: [f32; 3],
     mario_vel: [f32; 3],
+    platform_displacement: [f32; 3],
+    platform_active: u32,
     mario_yaw: i16,
     dialog_id: i16,
     dialog_text: *const c_char,
@@ -628,6 +632,8 @@ impl NativeClient {
             holding_object: view.holding_object != 0,
             mario_pos: view.mario_pos,
             mario_vel: view.mario_vel,
+            platform_displacement: view.platform_displacement,
+            platform_active: view.platform_active != 0,
             mario_yaw: view.mario_yaw,
             dialog_id: view.dialog_id,
             dialog_text,
