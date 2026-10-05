@@ -1881,7 +1881,7 @@ fn sync_native_render_frame(
             })
             .collect::<Vec<_>>();
         for (wrap_s,wrap_t,handle) in variants {
-            if let Some(existing)=images.get_mut(handle.id()) {
+            if let Some(mut existing)=images.get_mut(handle.id()) {
                 *existing=native_texture_image(update,wrap_s,wrap_t);
             }
         }
