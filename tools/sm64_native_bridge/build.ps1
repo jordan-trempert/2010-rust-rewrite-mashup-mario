@@ -251,10 +251,10 @@ $updateReplacement = @"
                  */
                 if (sWarpDest.type == WARP_TYPE_CHANGE_LEVEL) {
                     extern void iw4l_sm64_capture_level_warp(
-                        int32_t level_num,
-                        uint32_t area,
-                        uint32_t node,
-                        uint32_t arg
+                        s32 level_num,
+                        u32 area,
+                        u32 node,
+                        u32 arg
                     );
                     iw4l_sm64_capture_level_warp(
                         result,
