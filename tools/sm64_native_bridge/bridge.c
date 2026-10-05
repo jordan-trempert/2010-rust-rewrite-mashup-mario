@@ -590,6 +590,17 @@ void iw4l_sm64_capture_level_warp(
     fflush(stderr);
 }
 
+static int bridge_is_key_warp_door(const struct Object *object) {
+    s16 warp_door_id;
+
+    if (object == NULL || object->behavior != segmented_to_virtual(bhvDoorWarp)) {
+        return 0;
+    }
+
+    warp_door_id = (s16)(((uint32_t)object->oBehParams >> 24) & 0xFFu);
+    return warp_door_id == 1 || warp_door_id == 2;
+}
+
 static int bridge_door_is_unlocked(const struct Object *object) {
     const BehaviorScript *behavior;
     s16 required_stars;
@@ -666,12 +677,11 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
             }
 
             /*
-             * Warp doors must not be opened merely because COD is nearby.
-             * Their normal Mario push/pull action is what schedules
-             * WARP_OP_WARP_DOOR. If we remove their collision early, COD can
-             * walk into an unloaded castle area before warp_area() runs.
+             * Only the two Bowser-key doors need the special native traversal.
+             * Do NOT suppress ordinary castle warp doors here; doing so broke
+             * doors leading to/from the key-door hall.
              */
-            if (behavior == segmented_to_virtual(bhvDoorWarp)) {
+            if (bridge_is_key_warp_door(object)) {
                 continue;
             }
 
@@ -821,6 +831,7 @@ static int native_owns_mario_motion(void) {
         case ACT_RIDING_HOOT:
         case ACT_PULLING_DOOR:
         case ACT_PUSHING_DOOR:
+            return bridge_is_key_warp_door(gMarioState->usedObj);
         case ACT_WARP_DOOR_SPAWN:
         /*
          * Course success/death warp nodes intentionally put Mario at the
