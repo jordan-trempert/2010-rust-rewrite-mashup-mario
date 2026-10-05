@@ -1,19 +1,16 @@
 use std::{
-    collections::VecDeque,
     env,
+    ffi::{CStr, CString, c_char},
     fmt,
-    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
-    thread,
+    slice,
 };
 
-const REQUEST_MAGIC: u32 = 0x3151_4D53; // "SMQ1"
-const SNAPSHOT_MAGIC: u32 = 0x3153_4D53; // "SMS1"
-const OP_STEP: u32 = 1;
-const OP_SHUTDOWN: u32 = 2;
+use libloading::Library;
 
+const ABI_VERSION: u32 = 1;
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativePlayerProxy {
     pub pos: [f32; 3],
@@ -55,6 +52,54 @@ pub struct NativeSnapshot {
     pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NativeObjectView {
+    id: u32,
+    model_id: i32,
+    pos: [f32; 3],
+    face_angle: [i16; 3],
+    scale: [f32; 3],
+    active_flags: u16,
+    render_flags: u16,
+    anim_id: i16,
+    anim_frame: i16,
+    anim_state: i32,
+    interact_status: u32,
+    damage_or_coin_value: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NativeTriangleView {
+    vertices: [f32; 9],
+}
+
+#[repr(C)]
+struct NativeSnapshotView {
+    abi_version: u32,
+    tick: u32,
+    mario_health: i32,
+    coins: i32,
+    mario_action: u32,
+    mario_pos: [f32; 3],
+    mario_vel: [f32; 3],
+    mario_yaw: i16,
+    dialog_id: i16,
+    dialog_text: *const c_char,
+    dialog_text_len: u32,
+    objects: *const NativeObjectView,
+    object_count: u32,
+    dynamic_surfaces: *const NativeTriangleView,
+    dynamic_surface_count: u32,
+}
+
+type AbiVersionFn = unsafe extern "C" fn() -> u32;
+type InitFn = unsafe extern "C" fn(*const c_char, i32, i32) -> i32;
+type StepFn = unsafe extern "C" fn(*const NativePlayerProxy) -> *const NativeSnapshotView;
+type ShutdownFn = unsafe extern "C" fn();
+type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
+
 #[derive(Debug)]
 pub struct NativeBridgeError(String);
 
@@ -73,18 +118,18 @@ impl fmt::Display for NativeBridgeError {
 impl std::error::Error for NativeBridgeError {}
 
 pub fn native_root(asset_root: impl AsRef<Path>) -> PathBuf {
-    if let Some(path)=env::var_os("SM64_NATIVE_ROOT") {
+    if let Some(path) = env::var_os("SM64_NATIVE_ROOT") {
         return PathBuf::from(path);
     }
 
-    let asset_root=asset_root.as_ref();
+    let asset_root = asset_root.as_ref();
     if asset_root.join("src").join("pc").join("pc_main.c").is_file() {
         return asset_root.to_path_buf();
     }
 
-    if let Some(parent)=asset_root.parent() {
-        for name in ["sm64-port","sm64_port","sm64-port-master"] {
-            let candidate=parent.join(name);
+    if let Some(parent) = asset_root.parent() {
+        for name in ["sm64-port", "sm64_port", "sm64-port-master"] {
+            let candidate = parent.join(name);
             if candidate.join("src").join("pc").join("pc_main.c").is_file() {
                 return candidate;
             }
@@ -94,34 +139,43 @@ pub fn native_root(asset_root: impl AsRef<Path>) -> PathBuf {
     asset_root.to_path_buf()
 }
 
-pub fn default_bridge_path(asset_root: impl AsRef<Path>) -> PathBuf {
-    if let Some(path) = env::var_os("SM64_NATIVE_BRIDGE") {
+pub fn default_module_path(asset_root: impl AsRef<Path>) -> PathBuf {
+    if let Some(path) = env::var_os("SM64_NATIVE_MODULE") {
         return PathBuf::from(path);
     }
-    let root = native_root(asset_root);
-    #[cfg(windows)]
-    {
-        root.join("build")
-            .join("us_bridge")
-            .join("iw4l-sm64-bridge.exe")
+    if let Some(path) = env::var_os("SM64_NATIVE_BRIDGE") {
+        // Keep the old environment variable useful during the migration when
+        // it is explicitly pointed at the new DLL.
+        let path = PathBuf::from(path);
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("dll")) {
+            return path;
+        }
     }
-    #[cfg(not(windows))]
-    {
-        root.join("build").join("us_bridge").join("iw4l-sm64-bridge")
-    }
+
+    native_root(asset_root)
+        .join("build")
+        .join("us_bridge")
+        .join("iw4l-sm64-native.dll")
+}
+
+/// Compatibility alias for callers that still use the previous helper name.
+pub fn default_bridge_path(asset_root: impl AsRef<Path>) -> PathBuf {
+    default_module_path(asset_root)
 }
 
 pub struct NativeClient {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: ChildStdout,
-    stderr_tail: Arc<Mutex<VecDeque<String>>>,
-    bridge_path: PathBuf,
+    // Keep the module loaded for at least as long as every copied function
+    // pointer below.
+    _library: Library,
+    step_fn: StepFn,
+    shutdown_fn: ShutdownFn,
+    last_error_fn: LastErrorFn,
+    module_path: PathBuf,
 }
 
 impl NativeClient {
     pub fn available(decomp_root: impl AsRef<Path>) -> bool {
-        default_bridge_path(decomp_root).is_file()
+        default_module_path(decomp_root).is_file()
     }
 
     pub fn launch(
@@ -131,66 +185,66 @@ impl NativeClient {
         act: u8,
     ) -> Result<Self, NativeBridgeError> {
         let asset_root = decomp_root.as_ref();
-        let root = native_root(asset_root);
-        let bridge = default_bridge_path(asset_root);
-        if !bridge.is_file() {
+        let module_path = default_module_path(asset_root);
+        if !module_path.is_file() {
             return Err(NativeBridgeError::new(format!(
-                "native SM64 bridge not found at {}",
-                bridge.display()
+                "embedded SM64 native module not found at {}. Rebuild it with tools/sm64_native_bridge/build.ps1",
+                module_path.display()
             )));
         }
-        let mut child = Command::new(&bridge)
-            .arg("--level")
-            .arg(level)
-            .arg("--area")
-            .arg(area.to_string())
-            .arg("--act")
-            .arg(act.to_string())
-            .current_dir(root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                NativeBridgeError::new(format!("failed to launch {}: {error}", bridge.display()))
-            })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| NativeBridgeError::new("native bridge stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| NativeBridgeError::new("native bridge stdout unavailable"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| NativeBridgeError::new("native bridge stderr unavailable"))?;
-        let stderr_tail=Arc::new(Mutex::new(VecDeque::with_capacity(64)));
-        let stderr_tail_writer=Arc::clone(&stderr_tail);
-        thread::Builder::new()
-            .name("sm64-native-stderr".to_owned())
-            .spawn(move || {
-                let reader=BufReader::new(stderr);
-                for line in reader.lines().map_while(Result::ok) {
-                    eprintln!("{line}");
-                    if let Ok(mut tail)=stderr_tail_writer.lock() {
-                        if tail.len()>=64 {
-                            tail.pop_front();
-                        }
-                        tail.push_back(line);
-                    }
-                }
-            })
-            .map_err(|error| NativeBridgeError::new(format!(
-                "failed to start native bridge stderr reader: {error}"
-            )))?;
+
+        let level = CString::new(level)
+            .map_err(|_| NativeBridgeError::new("SM64 level name contains an interior NUL"))?;
+
+        // SAFETY: the module is produced by this repository's build script and
+        // all symbols are checked before any call is made.
+        let library = unsafe { Library::new(&module_path) }.map_err(|error| {
+            NativeBridgeError::new(format!(
+                "failed to load embedded SM64 module {}: {error}",
+                module_path.display()
+            ))
+        })?;
+
+        let (abi_version_fn, init_fn, step_fn, shutdown_fn, last_error_fn) = unsafe {
+            let abi = *library
+                .get::<AbiVersionFn>(b"iw4l_sm64_abi_version\0")
+                .map_err(|error| symbol_error(&module_path, "iw4l_sm64_abi_version", error))?;
+            let init = *library
+                .get::<InitFn>(b"iw4l_sm64_init\0")
+                .map_err(|error| symbol_error(&module_path, "iw4l_sm64_init", error))?;
+            let step = *library
+                .get::<StepFn>(b"iw4l_sm64_step\0")
+                .map_err(|error| symbol_error(&module_path, "iw4l_sm64_step", error))?;
+            let shutdown = *library
+                .get::<ShutdownFn>(b"iw4l_sm64_shutdown\0")
+                .map_err(|error| symbol_error(&module_path, "iw4l_sm64_shutdown", error))?;
+            let last_error = *library
+                .get::<LastErrorFn>(b"iw4l_sm64_last_error\0")
+                .map_err(|error| symbol_error(&module_path, "iw4l_sm64_last_error", error))?;
+            (abi, init, step, shutdown, last_error)
+        };
+
+        let abi = unsafe { abi_version_fn() };
+        if abi != ABI_VERSION {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 ABI mismatch: Rust expects {ABI_VERSION}, module reports {abi}"
+            )));
+        }
+
+        let initialized = unsafe { init_fn(level.as_ptr(), i32::from(area), i32::from(act)) };
+        if initialized == 0 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 initialization failed: {}",
+                unsafe { native_error(last_error_fn) }
+            )));
+        }
+
         Ok(Self {
-            child,
-            stdin,
-            stdout,
-            stderr_tail,
-            bridge_path: bridge,
+            _library: library,
+            step_fn,
+            shutdown_fn,
+            last_error_fn,
+            module_path,
         })
     }
 
@@ -198,163 +252,106 @@ impl NativeClient {
         &mut self,
         player: NativePlayerProxy,
     ) -> Result<NativeSnapshot, NativeBridgeError> {
-        match self.step_inner(player) {
-            Ok(snapshot) => Ok(snapshot),
-            Err(error) => {
-                let child_state = match self.child.try_wait() {
-                    Ok(Some(status)) => format!("; native bridge exited with {status}"),
-                    Ok(None) => "; native bridge is still running".to_owned(),
-                    Err(status_error) => format!(
-                        "; failed to query native bridge process status: {status_error}"
-                    ),
-                };
-                let tail_lines=self.stderr_tail
-                    .lock()
-                    .ok()
-                    .map(|tail|tail.iter().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default();
-                let native_tail=if tail_lines.is_empty() {
-                    String::new()
-                } else {
-                    format!("; native stderr tail: {}",tail_lines.join(" | "))
-                };
-                let symbolized=symbolize_native_fault(&self.bridge_path,&tail_lines)
-                    .map(|value|format!("; native symbol: {value}"))
-                    .unwrap_or_default();
-                Err(NativeBridgeError::new(format!(
-                    "{error}{child_state}{native_tail}{symbolized}"
-                )))
-            }
-        }
-    }
-
-    fn step_inner(
-        &mut self,
-        player: NativePlayerProxy,
-    ) -> Result<NativeSnapshot, NativeBridgeError> {
-        write_u32(&mut self.stdin, REQUEST_MAGIC)?;
-        write_u32(&mut self.stdin, OP_STEP)?;
-        for value in player.pos {
-            write_f32(&mut self.stdin, value)?;
-        }
-        for value in player.vel {
-            write_f32(&mut self.stdin, value)?;
-        }
-        write_i16(&mut self.stdin, player.yaw)?;
-        write_i16(&mut self.stdin, player.pitch)?;
-        write_i32(&mut self.stdin, player.health)?;
-        write_u32(&mut self.stdin, player.attack_flags)?;
-        self.stdin
-            .flush()
-            .map_err(|error| NativeBridgeError::new(format!("native bridge flush failed: {error}")))?;
-
-        let magic = read_u32(&mut self.stdout)?;
-        if magic != SNAPSHOT_MAGIC {
+        let view = unsafe { (self.step_fn)(&raw const player) };
+        if view.is_null() {
             return Err(NativeBridgeError::new(format!(
-                "native bridge protocol mismatch: expected 0x{SNAPSHOT_MAGIC:08x}, got 0x{magic:08x}"
-            )));
-        }
-        let tick = read_u32(&mut self.stdout)?;
-        let object_count = read_u32(&mut self.stdout)? as usize;
-        let dynamic_surface_count = read_u32(&mut self.stdout)? as usize;
-        let mario_health = read_i32(&mut self.stdout)?;
-        let coins = read_i32(&mut self.stdout)?;
-        let mario_action = read_u32(&mut self.stdout)?;
-        let mut mario_pos=[0.0;3];
-        for value in &mut mario_pos {
-            *value=read_f32(&mut self.stdout)?;
-        }
-        let mut mario_vel=[0.0;3];
-        for value in &mut mario_vel {
-            *value=read_f32(&mut self.stdout)?;
-        }
-        let mario_yaw=read_i16(&mut self.stdout)?;
-        let dialog_id=read_i16(&mut self.stdout)?;
-        let dialog_text_len=read_u16(&mut self.stdout)? as usize;
-        if dialog_text_len > 4096 {
-            return Err(NativeBridgeError::new(format!(
-                "native bridge returned impossible dialog length {dialog_text_len}"
-            )));
-        }
-        let mut dialog_bytes=vec![0u8;dialog_text_len];
-        if dialog_text_len>0 {
-            self.stdout.read_exact(&mut dialog_bytes)
-                .map_err(|error|NativeBridgeError::new(format!(
-                    "native bridge dialog read failed: {error}"
-                )))?;
-        }
-        let dialog_text=String::from_utf8_lossy(&dialog_bytes).into_owned();
-
-        if object_count > 4096 {
-            return Err(NativeBridgeError::new(format!(
-                "native bridge returned impossible object count {object_count}"
-            )));
-        }
-        if dynamic_surface_count > 8192 {
-            return Err(NativeBridgeError::new(format!(
-                "native bridge returned impossible dynamic surface count {dynamic_surface_count}"
+                "embedded SM64 step failed in {}: {}",
+                self.module_path.display(),
+                unsafe { native_error(self.last_error_fn) }
             )));
         }
 
-        let mut objects = Vec::with_capacity(object_count);
-        for _ in 0..object_count {
-            let id = read_u32(&mut self.stdout)?;
-            let model_id = read_i32(&mut self.stdout)?;
-            let mut pos = [0.0; 3];
-            for value in &mut pos {
-                *value = read_f32(&mut self.stdout)?;
-            }
-            let mut face_angle = [0; 3];
-            for value in &mut face_angle {
-                *value = read_i16(&mut self.stdout)?;
-            }
-            let mut scale = [0.0; 3];
-            for value in &mut scale {
-                *value = read_f32(&mut self.stdout)?;
-            }
-            let active_flags = read_u16(&mut self.stdout)?;
-            let render_flags = read_u16(&mut self.stdout)?;
-            let anim_id = read_i16(&mut self.stdout)?;
-            let anim_frame = read_i16(&mut self.stdout)?;
-            let anim_state = read_i32(&mut self.stdout)?;
-            let interact_status = read_u32(&mut self.stdout)?;
-            let damage_or_coin_value = read_i32(&mut self.stdout)?;
-            objects.push(NativeObject {
-                id,
-                model_id,
-                pos,
-                face_angle,
-                scale,
-                active_flags,
-                render_flags,
-                anim_id,
-                anim_frame,
-                anim_state,
-                interact_status,
-                damage_or_coin_value,
-            });
+        // SAFETY: the native module owns this stable snapshot view and its
+        // backing arrays until the next step. We copy everything before
+        // returning to Bevy.
+        let view = unsafe { &*view };
+        if view.abi_version != ABI_VERSION {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 snapshot ABI mismatch: expected {ABI_VERSION}, got {}",
+                view.abi_version
+            )));
+        }
+        if view.object_count > 4096 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible object count {}",
+                view.object_count
+            )));
+        }
+        if view.dynamic_surface_count > 8192 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible dynamic surface count {}",
+                view.dynamic_surface_count
+            )));
+        }
+        if view.dialog_text_len > 4095 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible dialog length {}",
+                view.dialog_text_len
+            )));
         }
 
-        let mut dynamic_surfaces=Vec::with_capacity(dynamic_surface_count);
-        for _ in 0..dynamic_surface_count {
-            let mut tri=[[0.0;3];3];
-            for vertex in &mut tri {
-                for axis in vertex {
-                    *axis=read_f32(&mut self.stdout)?;
-                }
+        let dialog_text = if view.dialog_text.is_null() || view.dialog_text_len == 0 {
+            String::new()
+        } else {
+            let bytes = unsafe {
+                slice::from_raw_parts(view.dialog_text.cast::<u8>(), view.dialog_text_len as usize)
+            };
+            String::from_utf8_lossy(bytes).into_owned()
+        };
+
+        let object_views = if view.objects.is_null() || view.object_count == 0 {
+            &[][..]
+        } else {
+            unsafe { slice::from_raw_parts(view.objects, view.object_count as usize) }
+        };
+        let objects = object_views
+            .iter()
+            .map(|source| NativeObject {
+                id: source.id,
+                model_id: source.model_id,
+                pos: source.pos,
+                face_angle: source.face_angle,
+                scale: source.scale,
+                active_flags: source.active_flags,
+                render_flags: source.render_flags,
+                anim_id: source.anim_id,
+                anim_frame: source.anim_frame,
+                anim_state: source.anim_state,
+                interact_status: source.interact_status,
+                damage_or_coin_value: source.damage_or_coin_value,
+            })
+            .collect();
+
+        let triangle_views = if view.dynamic_surfaces.is_null() || view.dynamic_surface_count == 0 {
+            &[][..]
+        } else {
+            unsafe {
+                slice::from_raw_parts(
+                    view.dynamic_surfaces,
+                    view.dynamic_surface_count as usize,
+                )
             }
-            dynamic_surfaces.push(tri);
-        }
+        };
+        let dynamic_surfaces = triangle_views
+            .iter()
+            .map(|source| {
+                [
+                    [source.vertices[0], source.vertices[1], source.vertices[2]],
+                    [source.vertices[3], source.vertices[4], source.vertices[5]],
+                    [source.vertices[6], source.vertices[7], source.vertices[8]],
+                ]
+            })
+            .collect();
 
         Ok(NativeSnapshot {
-            tick,
-            mario_health,
-            coins,
-            mario_action,
-            mario_pos,
-            mario_vel,
-            mario_yaw,
-            dialog_id,
+            tick: view.tick,
+            mario_health: view.mario_health,
+            coins: view.coins,
+            mario_action: view.mario_action,
+            mario_pos: view.mario_pos,
+            mario_vel: view.mario_vel,
+            mario_yaw: view.mario_yaw,
+            dialog_id: view.dialog_id,
             dialog_text,
             objects,
             dynamic_surfaces,
@@ -364,175 +361,27 @@ impl NativeClient {
 
 impl Drop for NativeClient {
     fn drop(&mut self) {
-        let _ = write_u32(&mut self.stdin, REQUEST_MAGIC);
-        let _ = write_u32(&mut self.stdin, OP_SHUTDOWN);
-        for _ in 0..3 {
-            let _ = write_f32(&mut self.stdin, 0.0);
-        }
-        for _ in 0..3 {
-            let _ = write_f32(&mut self.stdin, 0.0);
-        }
-        let _ = write_i16(&mut self.stdin, 0);
-        let _ = write_u16(&mut self.stdin, 0);
-        let _ = write_i32(&mut self.stdin, 0);
-        let _ = write_u32(&mut self.stdin, 0);
-        let _ = self.stdin.flush();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-
-
-fn symbolize_from_map(bridge:&Path,address:u64)->Option<String>{
-    let map=bridge.with_extension("sym");
-    let text=std::fs::read_to_string(map).ok()?;
-    let image_base=0x1_4000_0000u64;
-    let rva=address.checked_sub(image_base).unwrap_or(address);
-    let mut best:Option<(u64,String)>=None;
-
-    for line in text.lines() {
-        let mut parts=line.split_whitespace();
-        let Some(addr_text)=parts.next() else {continue;};
-        let Some(kind)=parts.next() else {continue;};
-        let Some(name)=parts.next() else {continue;};
-        if !matches!(kind,"t"|"T"|"w"|"W") {
-            continue;
-        }
-        let Ok(symbol_addr)=u64::from_str_radix(addr_text,16) else {continue;};
-        let symbol_rva=symbol_addr.checked_sub(image_base).unwrap_or(symbol_addr);
-        if symbol_rva<=rva && best.as_ref().map_or(true,|(best_addr,_)|symbol_rva>*best_addr) {
-            best=Some((symbol_rva,name.to_owned()));
+        unsafe {
+            (self.shutdown_fn)();
         }
     }
-
-    best.map(|(symbol_rva,name)|{
-        format!("{name}+0x{:x}",rva.saturating_sub(symbol_rva))
-    })
 }
 
-fn symbolize_native_fault(
-    bridge:&Path,
-    stderr_lines:&[String],
-)->Option<String>{
-    let address=stderr_lines.iter().rev().find_map(|line|{
-        let marker="address=";
-        let start=line.find(marker)?+marker.len();
-        let tail=&line[start..];
-        let end=tail.find(char::is_whitespace).unwrap_or(tail.len());
-        let value=&tail[..end];
-        if value.starts_with("0x") || value.starts_with("0X") {
-            Some(value.to_owned())
-        } else if value.chars().all(|ch|ch.is_ascii_hexdigit()) {
-            Some(format!("0x{value}"))
-        } else {
-            None
-        }
-    })?;
+fn symbol_error(
+    module: &Path,
+    symbol: &str,
+    error: libloading::Error,
+) -> NativeBridgeError {
+    NativeBridgeError::new(format!(
+        "embedded SM64 module {} is missing {symbol}: {error}",
+        module.display()
+    ))
+}
 
-    if let Some(hex)=address.strip_prefix("0x").or_else(||address.strip_prefix("0X")) {
-        if let Ok(value)=u64::from_str_radix(hex,16) {
-            if let Some(symbol)=symbolize_from_map(bridge,value) {
-                return Some(format!("{address} => {symbol}"));
-            }
-        }
+unsafe fn native_error(last_error_fn: LastErrorFn) -> String {
+    let ptr = unsafe { last_error_fn() };
+    if ptr.is_null() {
+        return "unknown native error".to_owned();
     }
-
-    let mut candidates=vec![address.clone()];
-    // MinGW PE executables normally load at 0x140000000. Some addr2line
-    // builds expect the RVA rather than the process virtual address.
-    if let Some(hex)=address.strip_prefix("0x").or_else(||address.strip_prefix("0X")) {
-        if let Ok(value)=u64::from_str_radix(hex,16) {
-            const PE_IMAGE_BASE:u64=0x1_4000_0000;
-            if value>=PE_IMAGE_BASE {
-                candidates.push(format!("0x{:x}",value-PE_IMAGE_BASE));
-            }
-        }
-    }
-
-    for tool in ["addr2line","x86_64-w64-mingw32-addr2line"] {
-        for candidate in &candidates {
-            let output=Command::new(tool)
-                .arg("-f")
-                .arg("-C")
-                .arg("-e")
-                .arg(bridge)
-                .arg(candidate)
-                .output();
-            let Ok(output)=output else {continue;};
-            if !output.status.success() {continue;}
-            let text=String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line|!line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" @ ");
-            if !text.is_empty() && !text.contains("??") {
-                return Some(format!("{address} ({candidate}) => {text}"));
-            }
-        }
-    }
-    None
-}
-
-fn write_u32(writer: &mut impl Write, value: u32) -> Result<(), NativeBridgeError> {
-    writer
-        .write_all(&value.to_le_bytes())
-        .map_err(io_error)
-}
-
-fn write_i32(writer: &mut impl Write, value: i32) -> Result<(), NativeBridgeError> {
-    writer
-        .write_all(&value.to_le_bytes())
-        .map_err(io_error)
-}
-
-fn write_u16(writer: &mut impl Write, value: u16) -> Result<(), NativeBridgeError> {
-    writer
-        .write_all(&value.to_le_bytes())
-        .map_err(io_error)
-}
-
-fn write_i16(writer: &mut impl Write, value: i16) -> Result<(), NativeBridgeError> {
-    writer
-        .write_all(&value.to_le_bytes())
-        .map_err(io_error)
-}
-
-fn write_f32(writer: &mut impl Write, value: f32) -> Result<(), NativeBridgeError> {
-    writer
-        .write_all(&value.to_bits().to_le_bytes())
-        .map_err(io_error)
-}
-
-fn read_u32(reader: &mut impl Read) -> Result<u32, NativeBridgeError> {
-    let mut bytes = [0; 4];
-    reader.read_exact(&mut bytes).map_err(io_error)?;
-    Ok(u32::from_le_bytes(bytes))
-}
-
-fn read_i32(reader: &mut impl Read) -> Result<i32, NativeBridgeError> {
-    let mut bytes = [0; 4];
-    reader.read_exact(&mut bytes).map_err(io_error)?;
-    Ok(i32::from_le_bytes(bytes))
-}
-
-fn read_u16(reader: &mut impl Read) -> Result<u16, NativeBridgeError> {
-    let mut bytes = [0; 2];
-    reader.read_exact(&mut bytes).map_err(io_error)?;
-    Ok(u16::from_le_bytes(bytes))
-}
-
-fn read_i16(reader: &mut impl Read) -> Result<i16, NativeBridgeError> {
-    let mut bytes = [0; 2];
-    reader.read_exact(&mut bytes).map_err(io_error)?;
-    Ok(i16::from_le_bytes(bytes))
-}
-
-fn read_f32(reader: &mut impl Read) -> Result<f32, NativeBridgeError> {
-    Ok(f32::from_bits(read_u32(reader)?))
-}
-
-fn io_error(error: std::io::Error) -> NativeBridgeError {
-    NativeBridgeError::new(format!("native bridge I/O failed: {error}"))
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
 }
