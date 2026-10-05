@@ -68,6 +68,15 @@ s8 gShowDebugText;
 
 extern void thread5_game_loop(void *arg);
 
+/*
+ * sm64-port keeps these level-transition helpers private to level_update.c's
+ * implementation surface; level_update.h does not declare them. The embedded
+ * bridge intentionally uses them to materialize an exact destination warp
+ * after the host reloads a native SM64 level.
+ */
+extern void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3);
+extern void warp_area(void);
+
 extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 
 #ifdef VERSION_EU
