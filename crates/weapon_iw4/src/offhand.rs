@@ -108,8 +108,10 @@ fn offhand_hold_cancel_requested(cmd: &WeaponCmd) -> bool {
     let weapon = cmd.offhand.off_hand_index.max(0) as u32;
     weapon != 0
         && offhand_row(&cmd.offhand, weapon).is_some_and(|r| {
-            r.offhand_hold_is_cancelable
-                .unwrap_or_else(|| panic!("offhand hold cancel flag missing in source format"))
+            // Some imported/donor weapon rows do not carry this optional
+            // source-format flag. Missing metadata means "not cancelable";
+            // a user input must never turn that content gap into a process panic.
+            r.offhand_hold_is_cancelable.unwrap_or(false)
         })
 }
 
