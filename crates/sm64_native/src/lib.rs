@@ -49,6 +49,8 @@ pub struct NativeSnapshot {
     pub mario_pos: [f32; 3],
     pub mario_vel: [f32; 3],
     pub mario_yaw: i16,
+    pub dialog_id: i16,
+    pub dialog_text: String,
     pub objects: Vec<NativeObject>,
     pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
 }
@@ -267,7 +269,21 @@ impl NativeClient {
             *value=read_f32(&mut self.stdout)?;
         }
         let mario_yaw=read_i16(&mut self.stdout)?;
-        let _reserved=read_u16(&mut self.stdout)?;
+        let dialog_id=read_i16(&mut self.stdout)?;
+        let dialog_text_len=read_u16(&mut self.stdout)? as usize;
+        if dialog_text_len > 4096 {
+            return Err(NativeBridgeError::new(format!(
+                "native bridge returned impossible dialog length {dialog_text_len}"
+            )));
+        }
+        let mut dialog_bytes=vec![0u8;dialog_text_len];
+        if dialog_text_len>0 {
+            self.stdout.read_exact(&mut dialog_bytes)
+                .map_err(|error|NativeBridgeError::new(format!(
+                    "native bridge dialog read failed: {error}"
+                )))?;
+        }
+        let dialog_text=String::from_utf8_lossy(&dialog_bytes).into_owned();
 
         if object_count > 4096 {
             return Err(NativeBridgeError::new(format!(
@@ -338,6 +354,8 @@ impl NativeClient {
             mario_pos,
             mario_vel,
             mario_yaw,
+            dialog_id,
+            dialog_text,
             objects,
             dynamic_surfaces,
         })
