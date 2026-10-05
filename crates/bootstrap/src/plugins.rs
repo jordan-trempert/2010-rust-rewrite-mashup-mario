@@ -43,6 +43,12 @@ struct Sm64CodNativeState {
 }
 
 
+#[derive(Resource, Debug, Default, Clone, Copy)]
+struct Sm64CodAudioState {
+    last_tick: u32,
+}
+
+
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -58,6 +64,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }
     app.init_resource::<Sm64CodNativeState>();
+    app.init_resource::<Sm64CodAudioState>();
     app.init_resource::<Sm64CodCollisionState>();
     app.add_plugins(AssetPlugin)
         .add_plugins(UiPlugin)
@@ -75,6 +82,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64,
             apply_sm64_native_player_output,
+            publish_sm64_native_audio,
             publish_sm64_cod_hud,
             apply_sm64_dynamic_collision,
             suppress_sm64_player_view,
@@ -551,6 +559,30 @@ fn apply_sm64_native_player_output(
     }
 }
 
+fn publish_sm64_native_audio(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    frame: Res<sm64_bevy::Sm64NativeAudioFrame>,
+    mut state: ResMut<Sm64CodAudioState>,
+    mut chunks: MessageWriter<audio::ExternalPcmChunk>,
+) {
+    if active.is_none() {
+        state.last_tick = 0;
+        return;
+    }
+    if frame.tick == 0 || frame.tick == state.last_tick || frame.samples.is_empty() {
+        return;
+    }
+    state.last_tick = frame.tick;
+    chunks.write(audio::ExternalPcmChunk {
+        // Stable stream identity for the currently installed SM64 runtime.
+        // Match teardown resets the audio-side queue before another map starts.
+        stream_id: 0x534D_3634,
+        sample_rate: frame.sample_rate,
+        channels: frame.channels,
+        samples: std::sync::Arc::from(frame.samples.clone()),
+    });
+}
+
 fn publish_sm64_cod_hud(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
@@ -595,6 +627,7 @@ fn clear_sm64_cod_on_return(
     commands.remove_resource::<sm64_bevy::Sm64CodActive>();
     commands.remove_resource::<Sm64CodSpawn>();
     commands.insert_resource(Sm64CodCollisionState::default());
+    commands.insert_resource(Sm64CodAudioState::default());
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
     commands.insert_resource(frame::Sm64HudView::default());
