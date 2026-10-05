@@ -24,6 +24,7 @@ use ui::UiPlugin;
 struct Sm64CodCollisionState {
     static_vertices: Vec<[f32;3]>,
     last_dynamic_tick: u32,
+    last_dynamic_triangles: Vec<[[f32;3];3]>,
 }
 
 #[derive(Resource, Debug, Clone, Copy)]
@@ -166,6 +167,7 @@ fn launch_installed_sm64_cod_map(
         }
         collision_state.static_vertices=verts.clone();
         collision_state.last_dynamic_tick=0;
+        collision_state.last_dynamic_triangles.clear();
         let mesh=sim::SimClipMesh::from_linear_triangles(verts);
         let content=authority.0.content().with_clip_mesh(mesh);
         authority.0.install_content(content);
@@ -349,6 +351,17 @@ fn apply_sm64_dynamic_collision(
     if dynamic.tick==0 || dynamic.tick==collision_state.last_dynamic_tick {
         return;
     }
+    collision_state.last_dynamic_tick=dynamic.tick;
+
+    // Rebuilding/installing the entire clip mesh every 30 Hz native snapshot
+    // is expensive. Most frames have identical moving-platform collision, so
+    // only touch the authority collision backend when the triangles actually
+    // changed.
+    if dynamic.triangles==collision_state.last_dynamic_triangles {
+        return;
+    }
+    collision_state.last_dynamic_triangles=dynamic.triangles.clone();
+
     let Some(authority)=authority.as_deref_mut() else {return;};
 
     let s=sm64_core::SM64_TO_IW4_SCALE;
@@ -369,7 +382,6 @@ fn apply_sm64_dynamic_collision(
     let mesh=sim::SimClipMesh::from_linear_triangles(verts);
     let content=authority.0.content().with_clip_mesh(mesh);
     authority.0.install_content(content);
-    collision_state.last_dynamic_tick=dynamic.tick;
 }
 
 fn apply_sm64_native_player_output(
