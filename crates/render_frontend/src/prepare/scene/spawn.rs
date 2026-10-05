@@ -212,7 +212,7 @@ pub(crate) fn spawn_world(
     ),
 ) {
     let (fpv, model_materials, fx_models) = prepared;
-    let _external_world = external_world.is_some_and(|external| external.0);
+    let external_world = external_world.is_some_and(|external| external.0);
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
     // the same way this one does.
@@ -222,6 +222,21 @@ pub(crate) fn spawn_world(
         .map(|process| process.progress.clone());
     let paced = progress.is_some();
     if job.phase == WorldSpawnPhase::Gpu {
+        /*
+         * An external world (SM64 COD, Minecraft, etc.) owns presentation.
+         * The donor IW4 scene is only a gameplay/content source, so its five
+         * permanently non-resident distortion textures and two-frame GPU quiet
+         * gate must never keep the loading screen alive.
+         */
+        if external_world {
+            finish_world_spawn(&mut scene, &mut job, &mut commands);
+            diag::info!(
+                World,
+                "world spawn: external presentation owns the frame; donor GPU quiet/residency gate bypassed"
+            );
+            return;
+        }
+
         let fpv_done = fpv.settled_for(&tess.catalog)
             && model_materials.settled_for(&tess.catalog);
 
