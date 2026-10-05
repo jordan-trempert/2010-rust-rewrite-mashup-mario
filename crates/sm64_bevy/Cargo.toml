@@ -11,6 +11,7 @@ sm64_core.workspace = true
 sm64_assets.workspace = true
 sm64_native.workspace = true
 sm64_sim.workspace = true
+render_scene.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [lints]
