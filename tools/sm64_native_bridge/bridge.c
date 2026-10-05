@@ -904,11 +904,11 @@ static int bridge_main(int argc, char **argv) {
      */
     save_file_set_flags(SAVE_FLAG_FILE_EXISTS);
 
-    /* The COD mashup has no Mario dialogue UI yet, so Bob-omb Buddy cannot
-       perform the vanilla cannon-unlock conversation. Unlock the course
-       cannon flag before the level initializes; the original bhvCannonClosed,
-       bhvCannon and ACT_IN_CANNON code still own the actual cannon behavior. */
-    save_file_set_cannon_unlocked();
+    /*
+     * Do not pre-unlock course cannons. Native SM64 dialogue is now bridged to
+     * the COD UI, so Bob-omb Buddy and the original save/progression behavior
+     * own cannon unlocking again.
+     */
 
     level_command = (struct LevelCommand *)level->entry;
 
