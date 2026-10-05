@@ -222,10 +222,26 @@ pub(crate) fn spawn_world(
      * frame rate.
      */
     if external_world && job.phase != WorldSpawnPhase::Done {
+        /*
+         * Keep the normal IW4 first-person camera host/lens, because player
+         * view/weapon presentation and all external Bevy meshes render through
+         * that Camera3d. Skip every donor-world geometry/model/material entity.
+         */
+        let pose=scene.intermission_view.unwrap_or_else(||{
+            crate::prepare::scene::camera::WorldCameraPose {
+                origin:scene.center.to_array(),
+                angles:[0.0,0.0,0.0],
+            }
+        });
+        super::world_occupancy::place_external_camera(
+            &mut commands,
+            pose.origin,
+            pose.angles,
+        );
         finish_world_spawn(&mut scene, &mut job, &mut commands);
         diag::info!(
             World,
-            "world spawn: external presentation active; donor IW4 render scene skipped entirely"
+            "world spawn: external presentation active; camera only, donor IW4 render scene skipped"
         );
         return;
     }
