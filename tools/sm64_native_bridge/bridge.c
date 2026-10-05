@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #endif
 
 #include "sm64.h"
@@ -477,7 +478,31 @@ static void write_snapshot(void) {
     fflush(stdout);
 }
 
+#ifdef _WIN32
+static LONG WINAPI bridge_exception_filter(EXCEPTION_POINTERS *info) {
+    DWORD code = info != NULL && info->ExceptionRecord != NULL
+        ? info->ExceptionRecord->ExceptionCode
+        : 0;
+    void *address = info != NULL && info->ExceptionRecord != NULL
+        ? info->ExceptionRecord->ExceptionAddress
+        : NULL;
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-bridge: FATAL native exception code=0x%08lX address=%p globalTimer=%u\n",
+        (unsigned long)code,
+        address,
+        (unsigned)gGlobalTimer
+    );
+    fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
 static int bridge_main(int argc, char **argv) {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(bridge_exception_filter);
+#endif
     const char *level_name = "bob";
     int area = 1;
     int act = 1;
@@ -625,7 +650,6 @@ static int bridge_main(int argc, char **argv) {
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-#include <windows.h>
 extern int __argc;
 extern char **__argv;
 int WINAPI WinMain(
