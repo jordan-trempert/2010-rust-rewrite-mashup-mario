@@ -213,6 +213,23 @@ pub(crate) fn spawn_world(
 ) {
     let (fpv, model_materials, fx_models) = prepared;
     let external_world = external_world.is_some_and(|external| external.0);
+
+    /*
+     * SM64 COD uses the IW4 donor only for gameplay/session/weapon content.
+     * Never materialize the donor GfxWorld when an external presentation owns
+     * the frame. Besides briefly showing Rust before BOB, thousands of donor
+     * draw entities/pipelines continued rendering underneath SM64 and crushed
+     * frame rate.
+     */
+    if external_world && job.phase != WorldSpawnPhase::Done {
+        finish_world_spawn(&mut scene, &mut job, &mut commands);
+        diag::info!(
+            World,
+            "world spawn: external presentation active; donor IW4 render scene skipped entirely"
+        );
+        return;
+    }
+
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
     // the same way this one does.
