@@ -1259,6 +1259,7 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     const struct Iw4lSm64PlayerProxy *player
 ) {
     struct Request request;
+    int32_t health_before = gMarioState != NULL ? gMarioState->health : 0;
 
     if (!gIw4lInitialized || gIw4lLevelCommand == NULL || player == NULL) {
         snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime is not initialized");
@@ -1283,6 +1284,16 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gBridgeStage = "level_script_execute";
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gGlobalTimer++;
+    if (gMarioState != NULL && gMarioState->health != health_before) {
+        fprintf(
+            stderr,
+            "iw4l-sm64-native: Mario health %d -> %d (delta=%d)\n",
+            (int)health_before,
+            (int)gMarioState->health,
+            (int)(gMarioState->health - health_before)
+        );
+        fflush(stderr);
+    }
     gBridgeStage = "snapshot";
     return fill_snapshot_view();
 }
