@@ -39,6 +39,7 @@ struct Sm64CodNativeState {
     last_sm64_health: Option<i32>,
     last_action: u32,
     last_area: u32,
+    force_native_reposition: bool,
     last_weapon_shot_count: Option<i32>,
     last_attack_down: bool,
     last_use_down: bool,
@@ -94,6 +95,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
             apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
+            handle_sm64_cod_level_transition,
             sync_sm64_cod_area_collision,
             publish_sm64_native_audio,
             publish_sm64_cod_hud,
@@ -571,6 +573,123 @@ fn sync_cod_player_into_sm64(
     external.active=true;
 }
 
+fn handle_sm64_cod_level_transition(
+    mut transition: ResMut<sm64_bevy::Sm64NativeTransitionOutput>,
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    mut bridge_state: ResMut<Sm64CodNativeState>,
+    mut move_state: ResMut<Sm64CodMoveState>,
+    mut collision_state: ResMut<Sm64CodCollisionState>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+    mut commands: Commands,
+) {
+    let Some(target)=transition.pending.take() else {return;};
+    let Some(current)=active else {return;};
+    if target.level.is_empty() {
+        return;
+    }
+
+    let area=target.area.max(1);
+    let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
+        diag::warn!(
+            World,
+            "SM64 COD level transition {} -> {} refused: SM64_DECOMP_ROOT is not configured",
+            current.level,
+            target.level
+        );
+        return;
+    };
+
+    let parsed=match sm64_assets::load_level_collision(&root,&target.level,area) {
+        Ok(parsed)=>parsed,
+        Err(error)=>{
+            diag::warn!(
+                World,
+                "SM64 COD level transition {} -> {} area {} collision failed: {}",
+                current.level,
+                target.level,
+                area,
+                error
+            );
+            return;
+        }
+    };
+    let spawn=sm64_assets::load_mario_spawn(&root,&target.level,area).ok();
+
+    if let Some(authority)=authority.as_deref_mut() {
+        let s=sm64_core::SM64_TO_IW4_SCALE;
+        let mut verts=Vec::with_capacity(parsed.world.surfaces.len()*3);
+        for surface in &parsed.world.surfaces {
+            for vertex in [surface.vertex1,surface.vertex3,surface.vertex2] {
+                verts.push([
+                    vertex[0] as f32*s,
+                    -(vertex[2] as f32)*s,
+                    vertex[1] as f32*s,
+                ]);
+            }
+        }
+        collision_state.static_vertices=verts.clone();
+        collision_state.area=area;
+        collision_state.last_dynamic_tick=0;
+        collision_state.last_dynamic_triangles.clear();
+
+        let mesh=sim::SimClipMesh::from_linear_triangles(verts);
+        let content=authority.0.content().with_clip_mesh(mesh);
+        authority.0.install_content(content);
+
+        if let Some(spawn)=spawn.as_ref() {
+            let floor_y=parsed.world
+                .find_floor(spawn.pos[0] as f32,30_000.0,spawn.pos[2] as f32)
+                .map(|hit|hit.height)
+                .unwrap_or(spawn.pos[1] as f32);
+            let spawn_cod=[
+                spawn.pos[0] as f32*s,
+                -(spawn.pos[2] as f32)*s,
+                floor_y*s+128.0,
+            ];
+            let sm64_yaw=spawn.yaw_sm64() as u16 as f32*360.0/65536.0;
+            commands.insert_resource(Sm64CodSpawn {
+                origin:spawn_cod,
+                view:[0.0,sm64_yaw-90.0,0.0],
+            });
+        }
+
+        let mut first=None;
+        authority.0.visit_players(|id,_|{
+            if first.is_none() {first=Some(id);}
+        });
+        if let Some(id)=first {
+            authority.0.set_external_motion(id,false);
+        }
+    }
+
+    bridge_state.last_sm64_health=None;
+    bridge_state.last_action=0;
+    bridge_state.last_area=0;
+    bridge_state.force_native_reposition=true;
+    *move_state=Sm64CodMoveState::default();
+
+    commands.insert_resource(sm64_bevy::Sm64CodActive {
+        level:target.level.clone(),
+        area,
+    });
+    commands.insert_resource(sm64_bevy::Sm64LaunchRequest::with_warp(
+        target.level.clone(),
+        area,
+        target.node,
+        target.arg,
+    ));
+
+    diag::info!(
+        World,
+        "SM64 COD host transition: {} -> {} area={} node={} arg={}",
+        current.level,
+        target.level,
+        area,
+        target.node,
+        target.arg
+    );
+}
+
 fn sync_sm64_cod_area_collision(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
@@ -687,6 +806,7 @@ fn apply_sm64_native_player_output(
         bridge_state.last_sm64_health=None;
         bridge_state.last_action=0;
         bridge_state.last_area=0;
+        bridge_state.force_native_reposition=false;
         return;
     }
     let Some(authority)=authority.as_deref_mut() else {return;};
@@ -779,13 +899,17 @@ fn apply_sm64_native_player_output(
         let mut view=player.viewangles;
         view[1]=sm64_yaw_degrees-90.0;
         authority.0.set_viewangles(id,view);
-    } else if area_changed || sm64_cod_native_reposition_action(output.action) {
+    } else if bridge_state.force_native_reposition
+        || area_changed
+        || sm64_cod_native_reposition_action(output.action)
+    {
         let dx=native_origin[0]-player.origin[0];
         let dy=native_origin[1]-player.origin[1];
         let dz=native_origin[2]-player.origin[2];
         let distance2=dx*dx+dy*dy+dz*dz;
-        if area_changed || distance2>48.0*48.0 {
+        if bridge_state.force_native_reposition || area_changed || distance2>48.0*48.0 {
             authority.0.teleport(id,native_origin);
+            bridge_state.force_native_reposition=false;
             diag::info!(
                 World,
                 "SM64 COD transition reposition area {} -> {} action=0x{:08x} origin={:?}",
