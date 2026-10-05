@@ -1,0 +1,40 @@
+   Compiling sm64_native v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_native)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.01s
+     Running `target\debug\examples\smoke.exe D:/Projects/sm64-port`
+iw4l-sm64-native: embedded decomp ready: level=bob area=1 act=1 action=0x0C400201
+iw4l-sm64-native: census objects=136 trees=17 yellow_coins=5 red_coins=8 cannons=7 stars=2 goombas=2 dynamic_surfaces=0
+native HUD: 22 triangles; textured world present
+dialog opened: 1
+dialog advanced and closed
+iw4l-sm64-native: Mario health 2176 -> 2112 (delta=-64)
+iw4l-sm64-native: Mario health 2112 -> 2048 (delta=-64)
+iw4l-sm64-native: Mario health 2048 -> 1984 (delta=-64)
+iw4l-sm64-native: Mario health 1984 -> 1920 (delta=-64)
+iw4l-sm64-native: Mario health 1920 -> 1856 (delta=-64)
+iw4l-sm64-native: Mario health 1856 -> 1792 (delta=-64)
+iw4l-sm64-native: Mario health 1792 -> 1728 (delta=-64)
+iw4l-sm64-native: Mario health 1728 -> 1664 (delta=-64)
+iw4l-sm64-native: Mario health 1664 -> 1600 (delta=-64)
+iw4l-sm64-native: Mario health 1600 -> 1536 (delta=-64)
+iw4l-sm64-native: Mario health 1536 -> 1472 (delta=-64)
+iw4l-sm64-native: Mario health 1472 -> 1408 (delta=-64)
+iw4l-sm64-native: Mario health 1408 -> 1344 (delta=-64)
+iw4l-sm64-native: Mario health 1344 -> 1280 (delta=-64)
+iw4l-sm64-native: Mario health 1280 -> 1216 (delta=-64)
+iw4l-sm64-native: Mario health 1216 -> 1152 (delta=-64)
+iw4l-sm64-native: Mario health 1152 -> 1088 (delta=-64)
+iw4l-sm64-native: Mario health 1088 -> 1024 (delta=-64)
+iw4l-sm64-native: Mario health 1024 -> 960 (delta=-64)
+iw4l-sm64-native: Mario health 960 -> 896 (delta=-64)
+iw4l-sm64-native: Mario health 896 -> 832 (delta=-64)
+iw4l-sm64-native: Mario health 832 -> 768 (delta=-64)
+iw4l-sm64-native: Mario health 768 -> 704 (delta=-64)
+iw4l-sm64-native: Mario health 704 -> 640 (delta=-64)
+iw4l-sm64-native: Mario health 640 -> 576 (delta=-64)
+iw4l-sm64-native: Mario health 576 -> 512 (delta=-64)
+iw4l-sm64-native: Mario health 512 -> 448 (delta=-64)
+iw4l-sm64-native: Mario health 448 -> 384 (delta=-64)
+iw4l-sm64-native: Mario health 384 -> 320 (delta=-64)
+iw4l-sm64-native: Mario health 320 -> 256 (delta=-64)
+iw4l-sm64-native: Mario health 256 -> 255 (delta=-1)
+Goomba contact: health 2176 -> 255

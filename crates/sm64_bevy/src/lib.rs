@@ -308,9 +308,13 @@ impl Default for Sm64DebugView {
     }
 }
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Sm64RuntimeStep;
+
 impl Plugin for Sm64Plugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Sm64Enabled>()
+            .init_resource::<frame::Sm64HudGeometry>()
             .init_resource::<Sm64Runtime>()
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
@@ -329,7 +333,7 @@ impl Plugin for Sm64Plugin {
             (
                 launch_requested_sm64_map,
                 update_debug_input.after(launch_requested_sm64_map),
-                advance_sm64_runtime.after(launch_requested_sm64_map),
+                advance_sm64_runtime.after(launch_requested_sm64_map).in_set(Sm64RuntimeStep),
                 sync_sm64_dialog_overlay.after(advance_sm64_runtime),
                 sync_native_render_frame.after(advance_sm64_runtime),
                 sync_mario_presentation.after(advance_sm64_runtime),
@@ -1789,7 +1793,7 @@ fn advance_sm64_runtime(
 
             let step_flags = external.attack_flags
                 | if external.pending_use { 2 } else { 0 }
-                | if external.pending_fire { 1 } else { 0 };
+                | if external.pending_fire { 1 | 4 } else { 0 };
             match client.step(sm64_native::NativePlayerProxy {
                 pos:external.sm64_pos,
                 vel:external.sm64_vel,
@@ -1799,6 +1803,14 @@ fn advance_sm64_runtime(
                 attack_flags:step_flags,
             }) {
                 Ok(mut snapshot)=>{
+                    if native_dialog.id!=snapshot.dialog_id || (step_flags & 2)!=0 {
+                        info!(
+                            "SM64 COD input: flags={step_flags:#x} dialog_id {} -> {} action={:#010x}",
+                            native_dialog.id,
+                            snapshot.dialog_id,
+                            snapshot.mario_action
+                        );
+                    }
                     external.pending_use=false;
                     external.pending_fire=false;
                     let native_object_count=snapshot.objects.len();
@@ -1812,7 +1824,9 @@ fn advance_sm64_runtime(
                     native_collision.triangles=snapshot.dynamic_surfaces.clone();
                     native_render.tick=snapshot.tick;
                     native_render.triangles=snapshot.render_triangles.clone();
-                    native_render.texture_updates=snapshot.texture_updates.clone();
+                    // Several native ticks can run before presentation. Keep every
+                    // upload until the renderer consumes it, including first-load assets.
+                    native_render.texture_updates.extend(snapshot.texture_updates.iter().cloned());
                     native_output.active=true;
                     native_output.sm64_pos=snapshot.mario_pos;
                     native_output.sm64_vel=snapshot.mario_vel;
@@ -1865,19 +1879,24 @@ fn advance_sm64_runtime(
 fn sync_native_render_frame(
     mut commands:Commands,
     cod_active:Option<Res<Sm64CodActive>>,
-    frame:Res<Sm64NativeRenderFrame>,
+    mut frame:ResMut<Sm64NativeRenderFrame>,
     mut cache:ResMut<Sm64NativeRenderCache>,
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
     mut images:ResMut<Assets<Image>>,
     mut last_tick:Local<u32>,
+    mut hud:ResMut<frame::Sm64HudGeometry>,
 ) {
+    if cod_active.is_none() {
+        hud.0.clear();
+        return;
+    }
     if cod_active.is_none() || frame.tick==0 || frame.tick==*last_tick {
         return;
     }
     *last_tick=frame.tick;
 
-    for update in &frame.texture_updates {
+    for update in std::mem::take(&mut frame.texture_updates) {
         let mut saw_zero=false;
         let mut saw_partial=false;
         for pixel in update.rgba.chunks_exact(4) {
@@ -1908,7 +1927,7 @@ fn sync_native_render_frame(
             .collect::<Vec<_>>();
         for (wrap_s,wrap_t,handle) in variants {
             if let Some(mut existing)=images.get_mut(handle.id()) {
-                *existing=native_texture_image(update,wrap_s,wrap_t);
+                *existing=native_texture_image(&update,wrap_s,wrap_t);
             }
         }
     }
@@ -1917,7 +1936,29 @@ fn sync_native_render_frame(
         (u32,NativeTextureAlphaClass,NativePrimitiveClass,u8,u8),
         Vec<&sm64_native::NativeRenderTriangle>
     >::new();
+    hud.0.clear();
     for triangle in &frame.triangles {
+        if triangle.screen_space {
+            let image = triangle.texture_id.and_then(|id| {
+                let key = (id, triangle.wrap_s, triangle.wrap_t);
+                if !cache.textures.contains_key(&key) {
+                    if let Some(update) = cache.texture_data.get(&id) {
+                        let handle = images.add(native_texture_image(update, key.1, key.2));
+                        cache.textures.insert(key, handle);
+                    }
+                }
+                cache.textures.get(&key).cloned()
+            });
+            if triangle.texture_id.is_none() || image.is_some() {
+                hud.0.push(frame::Sm64HudTriangle {
+                    xy: triangle.pos.map(|p| [(p[0] + 1.0) * 0.5, (1.0 - p[1]) * 0.5]),
+                    uv: triangle.uv,
+                    rgba: triangle.rgba,
+                    image,
+                });
+            }
+            continue;
+        }
         let texture_id=triangle.texture_id.unwrap_or(u32::MAX);
         let alpha_class=if texture_id==u32::MAX {
             if triangle.alpha {

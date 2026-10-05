@@ -5958,6 +5958,7 @@ name = "sm64_bevy"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "frame",
  "image",
  "sm64_assets",
  "sm64_core",

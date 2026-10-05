@@ -290,6 +290,15 @@ impl SimWorld {
         self.frame().set_health(id, health)
     }
 
+    /// Route damage from an external gameplay runtime through the same script
+    /// callbacks, damage feedback and death lifecycle as ordinary world damage.
+    pub fn damage_from_environment(&mut self, id: ClientId, amount: i32) {
+        if amount <= 0 { return; }
+        let mut world = self.frame();
+        let tick = Tick(world.entity_kernel().level_time_ms().max(0) as u32 / crate::MATCH_TICK_MS);
+        crate::script_player::debug_damage(&mut world, tick, id, amount);
+    }
+
 
     pub fn set_e_flags(&mut self, id: ClientId, e_flags: u32) -> bool {
         self.frame().set_e_flags(id, e_flags)

@@ -359,6 +359,7 @@ void bhv_mario_update(void) {
         mario_update_hitbox_and_cap_model(gMarioState);
         mario_process_interactions(gMarioState);
         update_mario_health(gMarioState);
+        gMarioState->marioObj->oInteractStatus = 0;
         gCurrentObject->oMarioParticleFlags = 0;
     }
 
@@ -384,8 +385,7 @@ $objectProcessorText = $objectProcessorText.Replace($marioUpdateNeedle, $marioUp
 Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
 
 # Native rendering integration -------------------------------------------------
-# Keep only the original SM64 3D scene pass. COD owns HUD/text, and native
-# dialog state is surfaced separately through the embedded API.
+# Keep the original HUD and dialog state machine as well as the 3D scene.
 Copy-Item $areaSource $areaBackup -Force
 $areaText = Get-Content $areaSource -Raw
 $renderGameNeedle = @"
@@ -397,6 +397,16 @@ void render_game(void) {
 #ifdef IW4L_SM64_EMBEDDED
     if (gCurrentArea != NULL && !gWarpTransition.pauseRendering) {
         geo_process_root(gCurrentArea->unk04, D_8032CE74, D_8032CE78, gFBSetColor);
+        gSPViewport(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(&D_8032CF00));
+        gDPSetScissor(gDisplayListHead++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        render_hud();
+        render_text_labels();
+        do_cutscene_handler();
+        print_displaying_credits_entry();
+        gMenuOptSelectIndex = render_menus_and_dialogs();
+        if (gMenuOptSelectIndex != MENU_OPT_NONE) {
+            gSaveOptSelectIndex = gMenuOptSelectIndex;
+        }
     }
     D_8032CE74 = NULL;
     D_8032CE78 = NULL;
@@ -533,6 +543,7 @@ struct LoadedVertex {
     /* World-space result after native animation/model transforms, with the
        native camera view transform removed again for COD's Camera3d. */
     float world_x, world_y, world_z;
+    bool screen_space;
 #endif
     float u, v;
     struct RGBA color;
@@ -563,6 +574,7 @@ $vertexTransformReplacement = @"
             extern float gIw4lNativeCameraMatrix[4][4];
             extern float gIw4lRenderCameraPos[3];
             const float (*mv)[4] = rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
+            d->screen_space = rsp.P_matrix[3][3] != 0.0f;
 
             float cx = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0]
                      + v->ob[2] * mv[2][0] + mv[3][0];
@@ -669,6 +681,7 @@ $captureReplacement = @"
         uint32_t native_texture_id = 0xFFFFFFFFu;
         int native_texture_unit = -1;
         bool native_textured = false;
+        bool screen_space = v1->screen_space;
         bool linear_filter = (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT;
 
         /*
@@ -701,6 +714,11 @@ $captureReplacement = @"
             native_pos[native_i * 3 + 0] = v_arr[native_i]->world_x;
             native_pos[native_i * 3 + 1] = v_arr[native_i]->world_y;
             native_pos[native_i * 3 + 2] = v_arr[native_i]->world_z;
+            if (screen_space) {
+                native_pos[native_i * 3 + 0] = v_arr[native_i]->x / v_arr[native_i]->w;
+                native_pos[native_i * 3 + 1] = v_arr[native_i]->y / v_arr[native_i]->w;
+                native_pos[native_i * 3 + 2] = 0.0f;
+            }
             if (native_textured && tex_width != 0 && tex_height != 0) {
                 u = (v_arr[native_i]->u - rdp.texture_tile.uls * 8) / 32.0f;
                 v = (v_arr[native_i]->v - rdp.texture_tile.ult * 8) / 32.0f;
@@ -727,6 +745,27 @@ $captureReplacement = @"
              */
             native_rgba[native_i * 4 + 3] =
                 (!native_textured && use_alpha) ? v_arr[native_i]->color.a : 255;
+            if (screen_space) {
+                // Use the native combiner's color inputs: HUD icons use pure
+                // texture, fonts modulate environment, boxes use shade/env.
+                struct RGBA color = {255, 255, 255, 255};
+                if (num_inputs != 0) {
+                    switch (comb->shader_input_mapping[0][0]) {
+                        case CC_PRIM: color = rdp.prim_color; break;
+                        case CC_SHADE: color = v_arr[native_i]->color; break;
+                        case CC_ENV: color = rdp.env_color; break;
+                    }
+                    if (use_alpha) {
+                        switch (comb->shader_input_mapping[1][0]) {
+                            case CC_PRIM: color.a = rdp.prim_color.a; break;
+                            case CC_SHADE: color.a = v_arr[native_i]->color.a; break;
+                            case CC_ENV: color.a = rdp.env_color.a; break;
+                            default: color.a = 255; break;
+                        }
+                    } else { color.a = 255; }
+                }
+                memcpy(&native_rgba[native_i * 4], &color, 4);
+            }
         }
 
         iw4l_sm64_capture_triangle(
@@ -735,7 +774,7 @@ $captureReplacement = @"
             native_rgba,
             native_texture_id,
             native_textured,
-            use_alpha,
+            (use_alpha ? 1 : 0) | (screen_space ? 2 : 0),
             (uint8_t)rdp.texture_tile.cms,
             (uint8_t)rdp.texture_tile.cmt
         );
@@ -748,6 +787,16 @@ if (-not $gfxPcText.Contains($captureNeedle)) {
     throw "Could not locate native triangle capture point in $gfxPcSource"
 }
 $gfxPcText = $gfxPcText.Replace($captureNeedle, $captureReplacement)
+$rectangleNeedle = '    ul->x = ulxf;'
+if (-not $gfxPcText.Contains($rectangleNeedle)) {
+    throw "Could not locate rectangle vertices in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($rectangleNeedle, @"
+#ifdef IW4L_SM64_EMBEDDED
+    ul->screen_space = ll->screen_space = lr->screen_space = ur->screen_space = true;
+#endif
+    ul->x = ulxf;
+"@)
 Set-Content -Path $gfxPcSource -Value $gfxPcText -Encoding UTF8
 
 Copy-Item $gfxDummySource $gfxDummyBackup -Force

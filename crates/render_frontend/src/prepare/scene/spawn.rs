@@ -213,6 +213,7 @@ pub(crate) fn spawn_world(
 ) {
     let (fpv, model_materials, fx_models) = prepared;
     let external_world = external_world.is_some_and(|external| external.0);
+    super::model_lighting_cache::set_external_neutral_lighting(external_world);
 
     /*
      * External presentation modes still need the donor material/program
@@ -770,6 +771,10 @@ pub(crate) fn spawn_world(
             probes,
             lightmaps,
         );
+        let fx_geometry =
+            super::world_plan::prepare_fx_model_geometry(&scene, fx_models.as_deref());
+        commands.insert_resource(fx_geometry.0.clone());
+        commands.insert_resource(fx_geometry);
 
         finish_world_spawn(&mut scene, &mut job, &mut commands);
         diag::info!(

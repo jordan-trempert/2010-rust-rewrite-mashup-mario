@@ -56,6 +56,7 @@ impl Plugin for HudPlugin {
             .init_resource::<crate::surface::Hud2dSurface>()
             .init_resource::<HudPresentStamp>()
             .init_resource::<frame::Sm64HudView>()
+            .init_resource::<frame::Sm64HudGeometry>()
             .init_resource::<HudStageStamp>()
             .init_resource::<crate::expr_cache::MenuExprCache>()
             .init_resource::<crate::hudelem::HudElemSoundLatch>()

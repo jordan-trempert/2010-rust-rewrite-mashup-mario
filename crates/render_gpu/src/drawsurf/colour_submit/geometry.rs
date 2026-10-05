@@ -31,11 +31,8 @@ pub(super) fn upload_exact_geometry(
                 .clone_from(source.world.static_geometry.world_surface_ranges.as_ref());
         }
     }
-    let empty_source = source.world.static_geometry.world_vertices.is_empty()
-        && source.world.static_geometry.smodel_vertices.is_empty();
-    if empty_source && geometry.world_products.0.is_some() {
-        return;
-    }
+    // External worlds have no IW4 terrain, but still submit changing missile,
+    // weapon and explosion streams. Never skip those uploads for empty terrain.
     let static_matches = colour_world_smodel_static(
         (geometry.world_generation, geometry.world_products),
         geometry.world_vertex_count,

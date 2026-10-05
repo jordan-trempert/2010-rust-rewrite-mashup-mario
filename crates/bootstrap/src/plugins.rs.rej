@@ -1,0 +1,48 @@
+diff a/crates/bootstrap/src/plugins.rs b/crates/bootstrap/src/plugins.rs	(rejected hunks)
+@@ -314,6 +314,8 @@ fn sync_cod_player_into_sm64(
+     if active.is_none() {
+         external.active=false;
+         external.attack_flags=0;
++        external.pending_use=false;
++        external.pending_fire=false;
+         bridge_state.last_weapon_shot_count=None;
+         bridge_state.last_attack_down=false;
+         bridge_state.last_use_down=false;
+@@ -322,6 +324,8 @@ fn sync_cod_player_into_sm64(
+     let Some(authority)=authority else {
+         external.active=false;
+         external.attack_flags=0;
++        external.pending_use=false;
++        external.pending_fire=false;
+         bridge_state.last_weapon_shot_count=None;
+         bridge_state.last_attack_down=false;
+         bridge_state.last_use_down=false;
+@@ -343,6 +347,8 @@ fn sync_cod_player_into_sm64(
+     let Some((id,origin,velocity,viewangles,health,weapon_shot_count))=first else {
+         external.active=false;
+         external.attack_flags=0;
++        external.pending_use=false;
++        external.pending_fire=false;
+         bridge_state.last_weapon_shot_count=None;
+         bridge_state.last_attack_down=false;
+         bridge_state.last_use_down=false;
+@@ -375,12 +381,15 @@ fn sync_cod_player_into_sm64(
+     // Bit 0: external weapon/ground-pound attack. Keep it asserted while fire
+     // is held so the 30 Hz native bridge cannot miss a short COD input pulse.
+     // Bit 1: one-shot native B/use press for NPCs, signs and dialog advance.
+-    external.attack_flags=0;
+-    if attack_down || weapon_fired {
+-        external.attack_flags|=1;
++    // Held fire is level-triggered; one-shot presses are latched until a 30 Hz
++    // native step consumes them (the render frame rate is usually higher, so
++    // a same-frame flag was cleared before any step could see it).
++    external.attack_flags=if attack_down {1} else {0};
++    if weapon_fired {
++        external.pending_fire=true;
+     }
+     if use_pressed {
+-        external.attack_flags|=2;
++        external.pending_use=true;
+     }
+ 
+     bridge_state.last_attack_down=attack_down;

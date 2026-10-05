@@ -45,6 +45,7 @@
 #define OP_SHUTDOWN 2u
 #define BRIDGE_INPUT_ATTACK 0x00000001u
 #define BRIDGE_INPUT_USE    0x00000002u
+#define BRIDGE_INPUT_ATTACK_PRESS 0x00000004u
 
 #if defined(_WIN32) || defined(_WIN64)
 #define IW4L_SM64_API __declspec(dllexport)
@@ -52,18 +53,8 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 3u
+#define IW4L_SM64_ABI_VERSION 4u
 static volatile const char *gBridgeStage = "startup";
-static int gBridgeDialogPendingReset = 0;
-
-/* ingame_menu.c owns these. The normal renderer advances them, but the bridge
-   intentionally removes render_game(), so the headless host must complete the
-   close/response edge itself. */
-extern s16 gDialogID;
-extern s32 gDialogResponse;
-extern s8 gLastDialogResponse;
-
-
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
 
@@ -392,36 +383,6 @@ static int read_request(struct Request *request) {
     return 1;
 }
 
-static void bridge_update_headless_dialog(const struct Request *request) {
-    if (gBridgeDialogPendingReset && get_dialog_id() == DIALOG_NONE) {
-        /*
-         * The previous native update had one full tick to consume
-         * gDialogResponse / the DIALOG_NONE edge. Reset the visual state now
-         * so another dialog can be opened normally.
-         */
-        reset_dialog_render_state();
-        gBridgeDialogPendingReset = 0;
-    }
-
-    if ((request->attack_flags & (BRIDGE_INPUT_USE | BRIDGE_INPUT_ATTACK)) != 0 &&
-        get_dialog_id() != DIALOG_NONE) {
-        /*
-         * render_dialog_entries() normally consumes A/B, performs the close
-         * animation and publishes the response. render_game() is disabled in
-         * this headless bridge, so either COD Use or Fire must emit the same
-         * gameplay-visible result directly.
-         *
-         * create_dialog_box_with_response() seeds gLastDialogResponse to 1;
-         * ordinary dialogs leave it at zero and use NOT_DEFINED.
-         */
-        gDialogResponse = gLastDialogResponse != 0
-            ? gLastDialogResponse
-            : DIALOG_RESPONSE_NOT_DEFINED;
-        gDialogID = DIALOG_NONE;
-        gBridgeDialogPendingReset = 1;
-    }
-}
-
 static int native_owns_mario_motion(void) {
     u32 action;
     u32 group;
@@ -497,7 +458,6 @@ static void apply_proxy(const struct Request *request) {
         return;
     }
 
-    bridge_update_headless_dialog(request);
     native_owns = native_owns_mario_motion();
     gIw4lRunMarioAction = native_owns;
 
@@ -582,7 +542,7 @@ static void apply_proxy(const struct Request *request) {
     if (request->attack_flags & BRIDGE_INPUT_USE) {
         buttons |= B_BUTTON;
     }
-    if ((request->attack_flags & BRIDGE_INPUT_ATTACK) &&
+    if ((request->attack_flags & BRIDGE_INPUT_ATTACK_PRESS) &&
         (gMarioState->action == ACT_IN_CANNON || get_dialog_id() != DIALOG_NONE)) {
         buttons |= A_BUTTON;
     }
@@ -759,180 +719,6 @@ static void apply_external_attack(const struct Request *request) {
 }
 
 
-/*
- * COD locomotion is mirrored into gMarioObject immediately before native
- * update_objects(). The original collision/interaction path normally owns
- * enemy contact damage. Keep a conservative fallback for the external-player
- * mode because some actor hitboxes are initialized during their behavior
- * update, after SM64's collision pass has already run for that frame.
- *
- * Only apply this when the vanilla interaction pass did not change health.
- * This preserves native damage whenever it works and prevents a missed first
- * collision frame from making enemies harmless forever.
- */
-static void bridge_contact_damage_fallback(int32_t health_before) {
-    const uint32_t harmful =
-        INTERACT_DAMAGE |
-        INTERACT_BOUNCE_TOP |
-        INTERACT_BOUNCE_TOP2 |
-        INTERACT_BULLY |
-        INTERACT_FLAME |
-        INTERACT_MR_BLIZZARD |
-        INTERACT_HIT_FROM_BELOW |
-        INTERACT_CLAM_OR_BUBBA |
-        INTERACT_SNUFIT_BULLET |
-        INTERACT_SHOCK;
-    struct Object *best = NULL;
-    float best_distance2 = 1.0e30f;
-    int list_index;
-
-    if (gMarioState == NULL || gMarioObject == NULL || gObjectLists == NULL) {
-        return;
-    }
-    if (gMarioState->health != health_before || gMarioState->invincTimer != 0) {
-        return;
-    }
-
-    for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
-        struct ObjectNode *head = &gObjectLists[list_index];
-        struct ObjectNode *node = head->next;
-        while (node != head) {
-            struct Object *object = (struct Object *)node;
-            float mario_bottom;
-            float mario_top;
-            float object_bottom;
-            float object_top;
-            float dx;
-            float dz;
-            float gfx_dx;
-            float gfx_dz;
-            float radius;
-            float distance2;
-            float gfx_distance2;
-            float object_y;
-
-            node = node->next;
-            {
-                const int32_t model = model_id_for_object(object);
-                const int known_enemy = model == MODEL_GOOMBA;
-                const int authored_harm =
-                    (object->oInteractType & harmful) != 0 ||
-                    object->oDamageOrCoinValue > 0;
-                float mario_radius;
-                float object_radius;
-
-                /*
-                 * Actor interaction fields are populated at different points
-                 * in the native behavior update. Requiring BOTH a harmful
-                 * interact bit and a positive damage value made the external
-                 * player miss actors whose damage metadata was one frame ahead
-                 * of their interact mask. Either authored signal is enough.
-                 * Goombas remain an explicit native-model fallback because
-                 * their first active frame can have neither field seated yet.
-                 */
-                if (object == gMarioObject ||
-                    (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-                    (!known_enemy && object->oIntangibleTimer != 0) ||
-                    (!known_enemy && !authored_harm)) {
-                    continue;
-                }
-
-                /*
-                 * External COD motion can meet an actor on the same native tick
-                 * that actor initializes its interaction hitbox. Vanilla's
-                 * collision pass then sees a zero/stale radius for one frame.
-                 * Known enemies get conservative SM64-sized fallback bounds so
-                 * walking into a Goomba cannot become harmless.
-                 */
-                mario_radius = gMarioObject->hitboxRadius;
-                if (mario_radius < 60.0f) mario_radius = 60.0f;
-                object_radius = object->hitboxRadius;
-                if (object->hurtboxRadius > object_radius) {
-                    object_radius = object->hurtboxRadius;
-                }
-                if (known_enemy && object_radius < 120.0f) {
-                    object_radius = 120.0f;
-                }
-                radius = mario_radius + object_radius;
-                if (radius <= 0.0f) {
-                    continue;
-                }
-            }
-            /*
-             * Behaviors are allowed to offset header.gfx.pos from oPos. The
-             * player sees and walks into the graphics node, so use whichever
-             * native position is closer to the externally controlled Mario.
-             * This also covers the first update where one of the two positions
-             * is still stale.
-             */
-            dx = gMarioObject->oPosX - object->oPosX;
-            dz = gMarioObject->oPosZ - object->oPosZ;
-            distance2 = dx * dx + dz * dz;
-            gfx_dx = gMarioObject->oPosX - object->header.gfx.pos[0];
-            gfx_dz = gMarioObject->oPosZ - object->header.gfx.pos[2];
-            gfx_distance2 = gfx_dx * gfx_dx + gfx_dz * gfx_dz;
-            object_y = object->oPosY;
-            if (gfx_distance2 < distance2) {
-                distance2 = gfx_distance2;
-                object_y = object->header.gfx.pos[1];
-            }
-            if (distance2 >= radius * radius) {
-                continue;
-            }
-
-            mario_bottom = gMarioObject->oPosY - gMarioObject->hitboxDownOffset;
-            mario_top = mario_bottom +
-                (gMarioObject->hitboxHeight > 1.0f ? gMarioObject->hitboxHeight : 160.0f);
-            object_bottom = object_y - object->hitboxDownOffset;
-            object_top = object_bottom +
-                (object->hitboxHeight > 1.0f ? object->hitboxHeight :
-                    (model_id_for_object(object) == MODEL_GOOMBA ? 160.0f : 0.0f));
-            if (mario_bottom > object_top || mario_top < object_bottom) {
-                continue;
-            }
-
-            if (distance2 < best_distance2) {
-                best_distance2 = distance2;
-                best = object;
-            }
-        }
-    }
-
-    if (best != NULL) {
-        int damage = best->oDamageOrCoinValue;
-        if (damage <= 0 &&
-            ((best->oInteractType & harmful) != 0 ||
-             model_id_for_object(best) == MODEL_GOOMBA)) {
-            damage = 1;
-        }
-        if (!(gMarioState->flags & MARIO_CAP_ON_HEAD)) {
-            damage += (damage + 1) / 2;
-        }
-        if (gMarioState->flags & MARIO_METAL_CAP) {
-            damage = 0;
-        }
-
-        if (damage > 0) {
-            const int32_t amount = damage * 0x100;
-            gMarioState->health -= amount;
-            if (gMarioState->health < 0) {
-                gMarioState->health = 0;
-            }
-            gMarioState->invincTimer = 30;
-            best->oInteractStatus |= INT_STATUS_INTERACTED | INT_STATUS_ATTACKED_MARIO;
-            play_sound(SOUND_MARIO_ATTACKED, gMarioObject->header.gfx.cameraToObject);
-            fprintf(
-                stderr,
-                "iw4l-sm64-native: contact damage fallback model=%d damage=%d health=%d\n",
-                (int)model_id_for_object(best),
-                damage,
-                (int)gMarioState->health
-            );
-            fflush(stderr);
-        }
-    }
-}
-
 void iw4l_sm64_capture_begin_frame(void) {
     gIw4lRenderTriangleCount = 0;
 }
@@ -957,7 +743,7 @@ void iw4l_sm64_capture_triangle(
     memcpy(out->rgba,rgba12,sizeof(out->rgba));
     out->texture_id=texture_id;
     out->textured=textured ? 1 : 0;
-    out->alpha=alpha ? 1 : 0;
+    out->alpha=(uint8_t)(alpha & 3);
     out->wrap_s=wrap_s;
     out->wrap_t=wrap_t;
 }
@@ -1546,8 +1332,6 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gBridgeStage = "level_script_execute";
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gGlobalTimer++;
-    gBridgeStage = "contact_damage_fallback";
-    bridge_contact_damage_fallback(health_before);
     gBridgeStage = "audio_tick";
     bridge_audio_tick();
     if (gMarioState != NULL && gMarioState->health != health_before) {
@@ -1580,7 +1364,6 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
     gIw4lRunMarioAction = 0;
     gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
-    gBridgeDialogPendingReset = 0;
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
     gBridgeStage = "shutdown";
 }

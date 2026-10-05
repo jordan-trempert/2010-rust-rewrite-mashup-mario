@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 3;
+const ABI_VERSION: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -44,6 +44,7 @@ pub struct NativeRenderTriangle {
     pub rgba: [[u8;4];3],
     pub texture_id: Option<u32>,
     pub alpha: bool,
+    pub screen_space: bool,
     /// Native N64 tile wrap bits (G_TX_MIRROR=1, G_TX_CLAMP=2).
     pub wrap_s: u8,
     pub wrap_t: u8,
@@ -459,7 +460,8 @@ impl NativeClient {
                 ],
                 texture_id:(source.textured!=0 && source.texture_id!=u32::MAX)
                     .then_some(source.texture_id),
-                alpha:source.alpha!=0,
+                alpha:source.alpha & 1 != 0,
+                screen_space:source.alpha & 2 != 0,
                 wrap_s:source.wrap_s,
                 wrap_t:source.wrap_t,
             }

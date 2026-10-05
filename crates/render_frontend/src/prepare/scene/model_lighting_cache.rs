@@ -20,6 +20,17 @@ pub use render_scene::{
     ResolvedModelLighting, ResolvedModelLightingTable,
 };
 
+/// Set while an external world (SM64 COD, ...) owns presentation. The IW4 donor
+/// map's light grid says nothing about that world, and the viewmodel is first
+/// sampled at the donor spawn point (far outside the donor map for these
+/// modes), so sample a neutral grid instead — as the Minecraft world does.
+static EXTERNAL_NEUTRAL_LIGHTING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_external_neutral_lighting(enabled: bool) {
+    EXTERNAL_NEUTRAL_LIGHTING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 #[derive(Resource)]
 pub struct WorldModelLightingCache {
     pub handle: u16,
@@ -195,7 +206,9 @@ impl WorldModelLightingCache {
             };
             // The Minecraft world is lit by its own lightmap, applied on top;
             // the grid of the map it stands in for says nothing about it.
-            let sampled = if sim::voxel::active() {
+            let sampled = if sim::voxel::active()
+                || EXTERNAL_NEUTRAL_LIGHTING.load(std::sync::atomic::Ordering::Relaxed)
+            {
                 asset_model::neutral_light_grid_sample(&grid.view())
             } else {
                 asset_model::sample_light_grid_with_lookup_fallback(&grid.view(), origin, lookup_fallback)

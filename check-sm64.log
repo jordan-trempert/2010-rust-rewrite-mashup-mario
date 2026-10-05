@@ -1,0 +1,189 @@
+    Checking bitflags v2.13.1
+    Checking twox-hash v2.1.4
+    Checking bevy_mikktspace v1.0.0
+    Checking wgpu-types v29.0.4
+    Checking ron v0.12.2
+    Checking png v0.18.1
+    Checking ktx2 v0.5.0
+    Checking spirv v0.4.0+sdk-1.4.341.0
+    Checking ruzstd v0.8.3
+    Checking gpu-descriptor-types v0.2.0
+    Checking gpu-descriptor v0.3.2
+    Checking windows-sys v0.59.0
+    Checking harfrust v0.6.2
+    Checking winit v0.30.13
+    Checking image v0.25.10
+    Checking naga v29.0.4
+    Checking lnk v0.6.4
+    Checking weapon_iw4 v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\weapon_iw4)
+warning: `#[must_use]` attribute cannot be used on statics
+   --> crates\render_frame\src\retained.rs:156:1
+    |
+156 | #[must_use]
+    | ^^^^^^^^^^^
+    |
+    = help: `#[must_use]` can be applied to data types, functions, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: `render_frame` (lib) generated 1 warning (run `cargo fix --lib -p render_frame` to apply 1 suggestion)
+    Checking sm64_core v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_core)
+    Checking arboard v3.6.1
+    Checking sm64_native v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_native)
+    Checking sm64_assets v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_assets)
+    Checking minecraft_terrain v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\minecraft_terrain)
+    Checking sm64_sim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_sim)
+   Compiling bootstrap v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\bootstrap)
+    Checking accesskit_winit v0.32.2
+    Checking parley v0.9.0
+    Checking asset_transport v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_transport)
+    Checking bevy_reflect v0.19.0
+    Checking wgpu-naga-bridge v29.0.4
+    Checking naga_oil v0.22.0
+    Checking wgpu-hal v29.0.4
+    Checking bevy_ecs v0.19.0
+    Checking bevy_math v0.19.0
+    Checking wgpu-core-deps-windows-linux-android v29.0.4
+    Checking wgpu-core v29.0.4
+    Checking bevy_color v0.19.0
+    Checking wgpu v29.0.4
+    Checking bevy_app v0.19.0
+    Checking sim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sim)
+    Checking bevy_time v0.19.0
+    Checking bevy_transform v0.19.0
+    Checking bevy_input v0.19.0
+    Checking bevy_log v0.19.0
+    Checking bevy_a11y v0.19.0
+    Checking bevy_clipboard v0.19.0
+    Checking bevy_diagnostic v0.19.0
+    Checking bevy_asset v0.19.0
+    Checking bevy_window v0.19.0
+    Checking bevy_gilrs v0.19.0
+    Checking bevy_image v0.19.0
+    Checking bevy_mesh v0.19.0
+    Checking bevy_shader v0.19.0
+    Checking bevy_audio v0.19.0
+    Checking bevy_text v0.19.0
+    Checking bevy_camera v0.19.0
+    Checking bevy_material v0.19.0
+    Checking bevy_picking v0.19.0
+    Checking bevy_sprite v0.19.0
+    Checking bevy_render v0.19.0
+    Checking bevy_light v0.19.0
+    Checking bevy_input_focus v0.19.0
+    Checking bevy_ui v0.19.0
+    Checking bevy_winit v0.19.0
+    Checking bevy_ui_widgets v0.19.0
+    Checking bevy_core_pipeline v0.19.0
+    Checking bevy_sprite_render v0.19.0
+    Checking bevy_pbr v0.19.0
+    Checking bevy_ui_render v0.19.0
+    Checking bevy_internal v0.19.0
+    Checking bevy v0.19.0
+    Checking frame v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\frame)
+    Checking asset_material v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_material)
+    Checking asset_audio v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_audio)
+    Checking asset_anim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_anim)
+    Checking skate-host v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\skate\crates\skate-host)
+    Checking net v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\net)
+    Checking sm64_bevy v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sm64_bevy)
+warning: use of deprecated method `bevy::bevy_app::App::insert_non_send_resource`: use App::insert_non_send
+   --> crates\sm64_bevy\src\lib.rs:326:13
+    |
+326 |         app.insert_non_send_resource(Sm64NativeRuntime::default());
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: struct `Sm64HudText` is never constructed
+   --> crates\sm64_bevy\src\lib.rs:231:8
+    |
+231 | struct Sm64HudText;
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `sync_sm64_hud_overlay` is never used
+    --> crates\sm64_bevy\src\lib.rs:2183:4
+     |
+2183 | fn sync_sm64_hud_overlay(
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sm64_bevy` (lib) generated 3 warnings
+    Checking asset_model v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_model)
+    Checking asset_world v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_world)
+warning: type `footplant::settings::Settings` is more private than the item `Footplant::settings`
+  --> skate\crates\skate-host\src\physics\footplant.rs:16:5
+   |
+16 |     pub(super) settings: Settings,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `Footplant::settings` is reachable at visibility `pub(in crate::physics)`
+   |
+note: but type `footplant::settings::Settings` is only usable at visibility `pub(in crate::physics::footplant)`
+  --> skate\crates\skate-host\src\physics\footplant\settings.rs:4:1
+   |
+ 4 | pub(super) struct Settings {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `physics::respawn::Runtime` is more private than the item `skater::SkaterRuntime::respawn`
+  --> skate\crates\skate-host\src\physics\skater.rs:59:5
+   |
+59 |     pub respawn: super::respawn::Runtime,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `skater::SkaterRuntime::respawn` is reachable at visibility `pub(crate)`
+   |
+note: but type `physics::respawn::Runtime` is only usable at visibility `pub(in crate::physics)`
+  --> skate\crates\skate-host\src\physics\respawn.rs:16:1
+   |
+16 | pub(super) struct Runtime {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `skate-host` (lib) generated 2 warnings
+    Checking asset_game v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\asset_game)
+    Checking replay v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\replay)
+    Checking assets v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\assets)
+    Checking render_scene v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_scene)
+    Checking audio v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\audio)
+    Checking hud v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\hud)
+    Checking bots v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\bots)
+    Checking render_anim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_anim)
+    Checking render_gpu v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_gpu)
+    Checking render_fx v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_fx)
+    Checking render_frontend v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_frontend)
+    Checking session v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\session)
+    Checking render v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render)
+    Checking ui v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\ui)
+    Checking console v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\console)
+warning: variable does not need to be mutable
+   --> crates\console\src\frontend.rs:105:5
+    |
+105 |     mut app_screen: ResMut<AppScreen>,
+    |     ----^^^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates\console\src\frontend.rs:106:5
+    |
+106 |     mut ui_draw: ResMut<UiDraw>,
+    |     ----^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `app_screen`
+   --> crates\console\src\frontend.rs:105:5
+    |
+105 |     mut app_screen: ResMut<AppScreen>,
+    |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_screen`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ui_draw`
+   --> crates\console\src\frontend.rs:106:5
+    |
+106 |     mut ui_draw: ResMut<UiDraw>,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ui_draw`
+
+warning: `console` (lib) generated 4 warnings (run `cargo fix --lib -p console` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 58s

@@ -1,0 +1,257 @@
+make: Entering directory '/d/Projects/sm64-port/tools'
+make: Nothing to be done for 'all-except-recomp'.
+make: Leaving directory '/d/Projects/sm64-port/tools'
+==== Build Options ====
+Version:        us
+Microcode:      f3dex2e
+Target:         sm64.us
+Compare ROM:    no
+Build Matching: no
+=======================
+Building tools...
+Building ROM...
+[0;32mCompiling: [0;33msrc/engine/level_script.c[0;32m -> [0;34mbuild/us_bridge/src/engine/level_script.o[0m
+[0;32mCompiling: [0;33msrc/game/level_update.c[0;32m -> [0;34mbuild/us_bridge/src/game/level_update.o[0m
+[0;32mCompiling: [0;33msrc/game/object_list_processor.c[0;32m -> [0;34mbuild/us_bridge/src/game/object_list_processor.o[0m
+[0;32mCompiling: [0;33msrc/game/area.c[0;32m -> [0;34mbuild/us_bridge/src/game/area.o[0m
+[0;32mCompiling: [0;33msrc/game/rendering_graph_node.c[0;32m -> [0;34mbuild/us_bridge/src/game/rendering_graph_node.o[0m
+[0;32mCompiling: [0;33msrc/pc/pc_main.c[0;32m -> [0;34mbuild/us_bridge/src/pc/pc_main.o[0m
+[0;32mCompiling: [0;33msrc/pc/gfx/gfx_dummy.c[0;32m -> [0;34mbuild/us_bridge/src/pc/gfx/gfx_dummy.o[0m
+[0;32mCompiling: [0;33msrc/pc/gfx/gfx_pc.c[0;32m -> [0;34mbuild/us_bridge/src/pc/gfx/gfx_pc.o[0m
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_wm_init':
+src/pc/gfx/gfx_dummy.c:26:43: warning: unused parameter 'game_name' [-Wunused-parameter]
+   26 | static void gfx_dummy_wm_init(const char *game_name, bool start_in_fullscreen) {
+      |                               ~~~~~~~~~~~~^~~~~~~~~
+src/pc/gfx/gfx_dummy.c:26:59: warning: unused parameter 'start_in_fullscreen' [-Wunused-parameter]
+   26 | static void gfx_dummy_wm_init(const char *game_name, bool start_in_fullscreen) {
+      |                                                      ~~~~~^~~~~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_wm_set_keyboard_callbacks':
+src/pc/gfx/gfx_dummy.c:29:56: warning: unused parameter 'on_key_down' [-Wunused-parameter]
+   29 | static void gfx_dummy_wm_set_keyboard_callbacks(bool (*on_key_down)(int scancode), bool (*on_key_up)(int scancode), void (*on_all_keys_up)(void)) {
+      |                                                 ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c:29:91: warning: unused parameter 'on_key_up' [-Wunused-parameter]
+   29 | static void gfx_dummy_wm_set_keyboard_callbacks(bool (*on_key_down)(int scancode), bool (*on_key_up)(int scancode), void (*on_all_keys_up)(void)) {
+      |                                                                                    ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c:29:124: warning: unused parameter 'on_all_keys_up' [-Wunused-parameter]
+   29 | static void gfx_dummy_wm_set_keyboard_callbacks(bool (*on_key_down)(int scancode), bool (*on_key_up)(int scancode), void (*on_all_keys_up)(void)) {
+      |                                                                                                                     ~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_wm_set_fullscreen_changed_callback':
+src/pc/gfx/gfx_dummy.c:32:65: warning: unused parameter 'on_fullscreen_changed' [-Wunused-parameter]
+   32 | static void gfx_dummy_wm_set_fullscreen_changed_callback(void (*on_fullscreen_changed)(bool is_now_fullscreen)) {
+      |                                                          ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_wm_set_fullscreen':
+src/pc/gfx/gfx_dummy.c:35:46: warning: unused parameter 'enable' [-Wunused-parameter]
+   35 | static void gfx_dummy_wm_set_fullscreen(bool enable) {
+      |                                         ~~~~~^~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_unload_shader':
+src/pc/gfx/gfx_dummy.c:103:68: warning: unused parameter 'old_prg' [-Wunused-parameter]
+  103 | static void gfx_dummy_renderer_unload_shader(struct ShaderProgram *old_prg) {
+      |                                              ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_load_shader':
+src/pc/gfx/gfx_dummy.c:106:66: warning: unused parameter 'new_prg' [-Wunused-parameter]
+  106 | static void gfx_dummy_renderer_load_shader(struct ShaderProgram *new_prg) {
+      |                                            ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_sampler_parameters':
+src/pc/gfx/gfx_dummy.c:165:59: warning: unused parameter 'tile' [-Wunused-parameter]
+  165 | static void gfx_dummy_renderer_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+      |                                                       ~~~~^~~~
+src/pc/gfx/gfx_dummy.c:165:70: warning: unused parameter 'linear_filter' [-Wunused-parameter]
+  165 | static void gfx_dummy_renderer_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+      |                                                                 ~~~~~^~~~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c:165:94: warning: unused parameter 'cms' [-Wunused-parameter]
+  165 | static void gfx_dummy_renderer_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+      |                                                                                     ~~~~~~~~~^~~
+src/pc/gfx/gfx_dummy.c:165:108: warning: unused parameter 'cmt' [-Wunused-parameter]
+  165 | static void gfx_dummy_renderer_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+      |                                                                                                   ~~~~~~~~~^~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_depth_test':
+src/pc/gfx/gfx_dummy.c:168:52: warning: unused parameter 'depth_test' [-Wunused-parameter]
+  168 | static void gfx_dummy_renderer_set_depth_test(bool depth_test) {
+      |                                               ~~~~~^~~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_depth_mask':
+src/pc/gfx/gfx_dummy.c:171:52: warning: unused parameter 'z_upd' [-Wunused-parameter]
+  171 | static void gfx_dummy_renderer_set_depth_mask(bool z_upd) {
+      |                                               ~~~~~^~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_zmode_decal':
+src/pc/gfx/gfx_dummy.c:174:53: warning: unused parameter 'zmode_decal' [-Wunused-parameter]
+  174 | static void gfx_dummy_renderer_set_zmode_decal(bool zmode_decal) {
+      |                                                ~~~~~^~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_viewport':
+src/pc/gfx/gfx_dummy.c:177:49: warning: unused parameter 'x' [-Wunused-parameter]
+  177 | static void gfx_dummy_renderer_set_viewport(int x, int y, int width, int height) {
+      |                                             ~~~~^
+src/pc/gfx/gfx_dummy.c:177:56: warning: unused parameter 'y' [-Wunused-parameter]
+  177 | static void gfx_dummy_renderer_set_viewport(int x, int y, int width, int height) {
+      |                                                    ~~~~^
+src/pc/gfx/gfx_dummy.c:177:63: warning: unused parameter 'width' [-Wunused-parameter]
+  177 | static void gfx_dummy_renderer_set_viewport(int x, int y, int width, int height) {
+      |                                                           ~~~~^~~~~
+src/pc/gfx/gfx_dummy.c:177:74: warning: unused parameter 'height' [-Wunused-parameter]
+  177 | static void gfx_dummy_renderer_set_viewport(int x, int y, int width, int height) {
+      |                                                                      ~~~~^~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_scissor':
+src/pc/gfx/gfx_dummy.c:180:48: warning: unused parameter 'x' [-Wunused-parameter]
+  180 | static void gfx_dummy_renderer_set_scissor(int x, int y, int width, int height) {
+      |                                            ~~~~^
+src/pc/gfx/gfx_dummy.c:180:55: warning: unused parameter 'y' [-Wunused-parameter]
+  180 | static void gfx_dummy_renderer_set_scissor(int x, int y, int width, int height) {
+      |                                                   ~~~~^
+src/pc/gfx/gfx_dummy.c:180:62: warning: unused parameter 'width' [-Wunused-parameter]
+  180 | static void gfx_dummy_renderer_set_scissor(int x, int y, int width, int height) {
+      |                                                          ~~~~^~~~~
+src/pc/gfx/gfx_dummy.c:180:73: warning: unused parameter 'height' [-Wunused-parameter]
+  180 | static void gfx_dummy_renderer_set_scissor(int x, int y, int width, int height) {
+      |                                                                     ~~~~^~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_set_use_alpha':
+src/pc/gfx/gfx_dummy.c:183:51: warning: unused parameter 'use_alpha' [-Wunused-parameter]
+  183 | static void gfx_dummy_renderer_set_use_alpha(bool use_alpha) {
+      |                                              ~~~~~^~~~~~~~~
+src/pc/gfx/gfx_dummy.c: In function 'gfx_dummy_renderer_draw_triangles':
+src/pc/gfx/gfx_dummy.c:186:53: warning: unused parameter 'buf_vbo' [-Wunused-parameter]
+  186 | static void gfx_dummy_renderer_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+      |                                               ~~~~~~^~~~~~~~~
+src/pc/gfx/gfx_dummy.c:186:71: warning: unused parameter 'buf_vbo_len' [-Wunused-parameter]
+  186 | static void gfx_dummy_renderer_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+      |                                                                ~~~~~~~^~~~~~~~~~~
+src/pc/gfx/gfx_dummy.c:186:91: warning: unused parameter 'buf_vbo_num_tris' [-Wunused-parameter]
+  186 | static void gfx_dummy_renderer_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+      |                                                                                    ~~~~~~~^~~~~~~~~~~~~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_flush':
+src/pc/gfx/gfx_pc.c:181:23: warning: unused variable 't1' [-Wunused-variable]
+  181 |         unsigned long t1 = get_time();
+      |                       ^~
+src/pc/gfx/gfx_pc.c:177:23: warning: unused variable 't0' [-Wunused-variable]
+  177 |         unsigned long t0 = get_time();
+      |                       ^~
+src/pc/gfx/gfx_pc.c:176:13: warning: unused variable 'num' [-Wunused-variable]
+  176 |         int num = buf_vbo_num_tris;
+      |             ^~~
+src/pc/gfx/gfx_pc.c: In function 'import_texture':
+src/pc/gfx/gfx_pc.c:523:9: warning: unused variable 't1' [-Wunused-variable]
+  523 |     int t1 = get_time();
+      |         ^~
+src/pc/gfx/gfx_pc.c:485:9: warning: unused variable 't0' [-Wunused-variable]
+  485 |     int t0 = get_time();
+      |         ^~
+src/pc/gfx/gfx_pc.c: In function 'gfx_sp_moveword':
+src/pc/gfx/gfx_pc.c:1160:53: warning: unused parameter 'offset' [-Wunused-parameter]
+ 1160 | static void gfx_sp_moveword(uint8_t index, uint16_t offset, uint32_t data) {
+      |                                            ~~~~~~~~~^~~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_sp_texture':
+src/pc/gfx/gfx_pc.c:1179:62: warning: unused parameter 'level' [-Wunused-parameter]
+ 1179 | static void gfx_sp_texture(uint16_t sc, uint16_t tc, uint8_t level, uint8_t tile, uint8_t on) {
+      |                                                      ~~~~~~~~^~~~~
+src/pc/gfx/gfx_pc.c:1179:77: warning: unused parameter 'tile' [-Wunused-parameter]
+ 1179 | static void gfx_sp_texture(uint16_t sc, uint16_t tc, uint8_t level, uint8_t tile, uint8_t on) {
+      |                                                                     ~~~~~~~~^~~~
+src/pc/gfx/gfx_pc.c:1179:91: warning: unused parameter 'on' [-Wunused-parameter]
+ 1179 | static void gfx_sp_texture(uint16_t sc, uint16_t tc, uint8_t level, uint8_t tile, uint8_t on) {
+      |                                                                                   ~~~~~~~~^~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_set_scissor':
+src/pc/gfx/gfx_pc.c:1184:41: warning: unused parameter 'mode' [-Wunused-parameter]
+ 1184 | static void gfx_dp_set_scissor(uint32_t mode, uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t lry) {
+      |                                ~~~~~~~~~^~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_set_texture_image':
+src/pc/gfx/gfx_pc.c:1198:47: warning: unused parameter 'format' [-Wunused-parameter]
+ 1198 | static void gfx_dp_set_texture_image(uint32_t format, uint32_t size, uint32_t width, const void* addr) {
+      |                                      ~~~~~~~~~^~~~~~
+src/pc/gfx/gfx_pc.c:1198:79: warning: unused parameter 'width' [-Wunused-parameter]
+ 1198 | static void gfx_dp_set_texture_image(uint32_t format, uint32_t size, uint32_t width, const void* addr) {
+      |                                                                      ~~~~~~~~~^~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_set_tile':
+src/pc/gfx/gfx_pc.c:1203:141: warning: unused parameter 'maskt' [-Wunused-parameter]
+ 1203 | static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+      |                                                                                                                                    ~~~~~~~~~^~~~~
+src/pc/gfx/gfx_pc.c:1203:157: warning: unused parameter 'shiftt' [-Wunused-parameter]
+ 1203 | static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+      |                                                                                                                                                    ~~~~~~~~~^~~~~~
+src/pc/gfx/gfx_pc.c:1203:188: warning: unused parameter 'masks' [-Wunused-parameter]
+ 1203 | static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+      |                                                                                                                                                                                   ~~~~~~~~~^~~~~
+src/pc/gfx/gfx_pc.c:1203:204: warning: unused parameter 'shifts' [-Wunused-parameter]
+ 1203 | static void gfx_dp_set_tile(uint8_t fmt, uint32_t siz, uint32_t line, uint32_t tmem, uint8_t tile, uint32_t palette, uint32_t cmt, uint32_t maskt, uint32_t shiftt, uint32_t cms, uint32_t masks, uint32_t shifts) {
+      |                                                                                                                                                                                                   ~~~~~~~~~^~~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_load_tlut':
+src/pc/gfx/gfx_pc.c:1231:53: warning: unused parameter 'high_index' [-Wunused-parameter]
+ 1231 | static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
+      |                                            ~~~~~~~~~^~~~~~~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_load_block':
+src/pc/gfx/gfx_pc.c:1237:96: warning: unused parameter 'dxt' [-Wunused-parameter]
+ 1237 | static void gfx_dp_load_block(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t lrs, uint32_t dxt) {
+      |                                                                                       ~~~~~~~~~^~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_texture_rectangle':
+src/pc/gfx/gfx_pc.c:1439:98: warning: unused parameter 'tile' [-Wunused-parameter]
+ 1439 | static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, uint8_t tile, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip) {
+      |                                                                                          ~~~~~~~~^~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_dp_set_color_image':
+src/pc/gfx/gfx_pc.c:1519:45: warning: unused parameter 'format' [-Wunused-parameter]
+ 1519 | static void gfx_dp_set_color_image(uint32_t format, uint32_t size, uint32_t width, void* address) {
+      |                                    ~~~~~~~~~^~~~~~
+src/pc/gfx/gfx_pc.c:1519:62: warning: unused parameter 'size' [-Wunused-parameter]
+ 1519 | static void gfx_dp_set_color_image(uint32_t format, uint32_t size, uint32_t width, void* address) {
+      |                                                     ~~~~~~~~~^~~~
+src/pc/gfx/gfx_pc.c:1519:77: warning: unused parameter 'width' [-Wunused-parameter]
+ 1519 | static void gfx_dp_set_color_image(uint32_t format, uint32_t size, uint32_t width, void* address) {
+      |                                                                    ~~~~~~~~~^~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_run_dl':
+src/pc/gfx/gfx_pc.c:1539:9: warning: unused variable 'dummy' [-Wunused-variable]
+ 1539 |     int dummy = 0;
+      |         ^~~~~
+src/pc/gfx/gfx_pc.c: In function 'gfx_run':
+src/pc/gfx/gfx_pc.c:1854:12: warning: unused variable 't1' [-Wunused-variable]
+ 1854 |     double t1 = gfx_wapi->get_time();
+      |            ^~
+src/pc/gfx/gfx_pc.c:1850:12: warning: unused variable 't0' [-Wunused-variable]
+ 1850 |     double t0 = gfx_wapi->get_time();
+      |            ^~
+In file included from src/game/camera.h:9,
+                 from src/game/area.h:7,
+                 from src/pc/pc_main.c:20:
+src/engine/graph_node.h:110:22: warning: declaration does not declare anything
+  110 |     /*0x20*/ s16 near;  // near clipping plane
+      |                      ^
+src/engine/graph_node.h:111:21: warning: declaration does not declare anything
+  111 |     /*0x22*/ s16 far;   // far clipping plane
+      |                     ^
+In file included from src/pc/pc_main.c:38:
+src/engine/math_util.h:30:9: warning: 'min' redefined
+   30 | #define min(a, b) ((a) <= (b) ? (a) : (b))
+      |         ^~~
+In file included from C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/windef.h:9,
+                 from C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/windows.h:69,
+                 from src/pc/pc_main.c:9:
+C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/minwindef.h:177:9: note: this is the location of the previous definition
+  177 | #define min(a, b) (((a) < (b)) ? (a) : (b))
+      |         ^~~
+src/engine/math_util.h:31:9: warning: 'max' redefined
+   31 | #define max(a, b) ((a) > (b) ? (a) : (b))
+      |         ^~~
+C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/minwindef.h:173:9: note: this is the location of the previous definition
+  173 | #define max(a, b) (((a) > (b)) ? (a) : (b))
+      |         ^~~
+In file included from src/game/camera.h:9,
+                 from src/game/area.h:7,
+                 from src/pc/pc_main.c:20:
+src/engine/graph_node.h:110:22: warning: declaration does not declare anything
+  110 |     /*0x20*/ s16 near;  // near clipping plane
+      |                      ^
+src/engine/graph_node.h:111:21: warning: declaration does not declare anything
+  111 |     /*0x22*/ s16 far;   // far clipping plane
+      |                     ^
+In file included from src/pc/pc_main.c:38:
+src/engine/math_util.h:30:9: warning: 'min' redefined
+   30 | #define min(a, b) ((a) <= (b) ? (a) : (b))
+      |         ^~~
+In file included from C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/windef.h:9,
+                 from C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/windows.h:69,
+                 from src/pc/pc_main.c:9:
+C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/minwindef.h:177:9: note: this is the location of the previous definition
+  177 | #define min(a, b) (((a) < (b)) ? (a) : (b))
+      |         ^~~
+src/engine/math_util.h:31:9: warning: 'max' redefined
+   31 | #define max(a, b) ((a) > (b) ? (a) : (b))
+      |         ^~~
+C:/Users/ferio/AppData/Local/Microsoft/WinGet/Packages/BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/mingw64/x86_64-w64-mingw32/include/minwindef.h:173:9: note: this is the location of the previous definition
+  173 | #define max(a, b) (((a) > (b)) ? (a) : (b))
+      |         ^~~
+g++ -L build/us_bridge -o build/us_bridge/iw4l-sm64-native.dll build/us_bridge/src/engine/behavior_script.o build/us_bridge/src/engine/geo_layout.o build/us_bridge/src/engine/graph_node.o build/us_bridge/src/engine/graph_node_manager.o build/us_bridge/src/engine/level_script.o build/us_bridge/src/engine/math_util.o build/us_bridge/src/engine/surface_collision.o build/us_bridge/src/engine/surface_load.o build/us_bridge/src/game/area.o build/us_bridge/src/game/behavior_actions.o build/us_bridge/src/game/camera.o build/us_bridge/src/game/crash_screen.o build/us_bridge/src/game/debug.o build/us_bridge/src/game/debug_course.o build/us_bridge/src/game/envfx_bubbles.o build/us_bridge/src/game/envfx_snow.o build/us_bridge/src/game/game_init.o build/us_bridge/src/game/geo_misc.o build/us_bridge/src/game/hud.o build/us_bridge/src/game/ingame_menu.o build/us_bridge/src/game/interaction.o build/us_bridge/src/game/level_geo.o build/us_bridge/src/game/level_update.o build/us_bridge/src/game/macro_special_objects.o build/us_bridge/src/game/mario.o build/us_bridge/src/game/mario_actions_airborne.o build/us_bridge/src/game/mario_actions_automatic.o build/us_bridge/src/game/mario_actions_cutscene.o build/us_bridge/src/game/mario_actions_moving.o build/us_bridge/src/game/mario_actions_object.o build/us_bridge/src/game/mario_actions_stationary.o build/us_bridge/src/game/mario_actions_submerged.o build/us_bridge/src/game/mario_misc.o build/us_bridge/src/game/mario_step.o build/us_bridge/src/game/memory.o build/us_bridge/src/game/moving_texture.o build/us_bridge/src/game/obj_behaviors.o build/us_bridge/src/game/obj_behaviors_2.o build/us_bridge/src/game/object_collision.o build/us_bridge/src/game/object_helpers.o build/us_bridge/src/game/object_list_processor.o build/us_bridge/src/game/paintings.o build/us_bridge/src/game/platform_displacement.o build/us_bridge/src/game/print.o build/us_bridge/src/game/profiler.o build/us_bridge/src/game/rendering_graph_node.o build/us_bridge/src/game/rumble_init.o build/us_bridge/src/game/save_file.o build/us_bridge/src/game/screen_transition.o build/us_bridge/src/game/shadow.o build/us_bridge/src/game/skybox.o build/us_bridge/src/game/sound_init.o build/us_bridge/src/game/spawn_object.o build/us_bridge/src/game/spawn_sound.o build/us_bridge/src/audio/audio_session_presets_sh.o build/us_bridge/src/audio/data.o build/us_bridge/src/audio/effects.o build/us_bridge/src/audio/external.o build/us_bridge/src/audio/globals_start.o build/us_bridge/src/audio/heap.o build/us_bridge/src/audio/load.o build/us_bridge/src/audio/load_sh.o build/us_bridge/src/audio/playback.o build/us_bridge/src/audio/port_eu.o build/us_bridge/src/audio/port_sh.o build/us_bridge/src/audio/seqplayer.o build/us_bridge/src/audio/shindou_debug_prints.o build/us_bridge/src/audio/synthesis.o build/us_bridge/src/audio/synthesis_sh.o build/us_bridge/src/menu/file_select.o build/us_bridge/src/menu/intro_geo.o build/us_bridge/src/menu/star_select.o build/us_bridge/src/menu/title_screen.o build/us_bridge/src/buffers/buffers.o build/us_bridge/src/buffers/framebuffers.o build/us_bridge/src/buffers/gfx_output_buffer.o build/us_bridge/src/buffers/zbuffer.o build/us_bridge/actors/common0.o build/us_bridge/actors/common0_geo.o build/us_bridge/actors/common1.o build/us_bridge/actors/common1_geo.o build/us_bridge/actors/group0.o build/us_bridge/actors/group0_geo.o build/us_bridge/actors/group1.o build/us_bridge/actors/group10.o build/us_bridge/actors/group10_geo.o build/us_bridge/actors/group11.o build/us_bridge/actors/group11_geo.o build/us_bridge/actors/group12.o build/us_bridge/actors/group12_geo.o build/us_bridge/actors/group13.o build/us_bridge/actors/group13_geo.o build/us_bridge/actors/group14.o build/us_bridge/actors/group14_geo.o build/us_bridge/actors/group15.o build/us_bridge/actors/group15_geo.o build/us_bridge/actors/group16.o build/us_bridge/actors/group16_geo.o build/us_bridge/actors/group17.o build/us_bridge/actors/group17_geo.o build/us_bridge/actors/group1_geo.o build/us_bridge/actors/group2.o build/us_bridge/actors/group2_geo.o build/us_bridge/actors/group3.o build/us_bridge/actors/group3_geo.o build/us_bridge/actors/group4.o build/us_bridge/actors/group4_geo.o build/us_bridge/actors/group5.o build/us_bridge/actors/group5_geo.o build/us_bridge/actors/group6.o build/us_bridge/actors/group6_geo.o build/us_bridge/actors/group7.o build/us_bridge/actors/group7_geo.o build/us_bridge/actors/group8.o build/us_bridge/actors/group8_geo.o build/us_bridge/actors/group9.o build/us_bridge/actors/group9_geo.o build/us_bridge/levels/entry.o build/us_bridge/levels/scripts.o build/us_bridge/bin/cave.o build/us_bridge/bin/debug_level_select.o build/us_bridge/bin/effect.o build/us_bridge/bin/fire.o build/us_bridge/bin/generic.o build/us_bridge/bin/grass.o build/us_bridge/bin/inside.o build/us_bridge/bin/machine.o build/us_bridge/bin/mountain.o build/us_bridge/bin/outside.o build/us_bridge/bin/segment2.o build/us_bridge/bin/sky.o build/us_bridge/bin/snow.o build/us_bridge/bin/spooky.o build/us_bridge/bin/title_screen_bg.o build/us_bridge/bin/water.o build/us_bridge/data/behavior_data.o build/us_bridge/sound/sound_data.o build/us_bridge/src/pc/configfile.o build/us_bridge/src/pc/dlmalloc.o build/us_bridge/src/pc/mixer.o build/us_bridge/src/pc/pc_main.o build/us_bridge/src/pc/ultra_reimplementation.o build/us_bridge/src/pc/gfx/gfx_cc.o build/us_bridge/src/pc/gfx/gfx_dummy.o build/us_bridge/src/pc/gfx/gfx_glx.o build/us_bridge/src/pc/gfx/gfx_opengl.o build/us_bridge/src/pc/gfx/gfx_pc.o build/us_bridge/src/pc/gfx/gfx_sdl2.o build/us_bridge/src/pc/audio/audio_alsa.o build/us_bridge/src/pc/audio/audio_null.o build/us_bridge/src/pc/audio/audio_pulse.o build/us_bridge/src/pc/audio/audio_sdl.o build/us_bridge/src/pc/controller/controller_emscripten_keyboard.o build/us_bridge/src/pc/controller/controller_entry_point.o build/us_bridge/src/pc/controller/controller_keyboard.o build/us_bridge/src/pc/controller/controller_recorded_tas.o build/us_bridge/src/pc/controller/controller_sdl.o build/us_bridge/src/pc/controller/controller_wup.o build/us_bridge/src/pc/controller/controller_xinput.o build/us_bridge/src/pc/controller/wup.o build/us_bridge/levels/bbh/leveldata.o build/us_bridge/levels/bitdw/leveldata.o build/us_bridge/levels/bitfs/leveldata.o build/us_bridge/levels/bits/leveldata.o build/us_bridge/levels/bob/leveldata.o build/us_bridge/levels/bowser_1/leveldata.o build/us_bridge/levels/bowser_2/leveldata.o build/us_bridge/levels/bowser_3/leveldata.o build/us_bridge/levels/castle_courtyard/leveldata.o build/us_bridge/levels/castle_grounds/leveldata.o build/us_bridge/levels/castle_inside/leveldata.o build/us_bridge/levels/ccm/leveldata.o build/us_bridge/levels/cotmc/leveldata.o build/us_bridge/levels/ddd/leveldata.o build/us_bridge/levels/ending/leveldata.o build/us_bridge/levels/hmc/leveldata.o build/us_bridge/levels/intro/leveldata.o build/us_bridge/levels/jrb/leveldata.o build/us_bridge/levels/lll/leveldata.o build/us_bridge/levels/menu/leveldata.o build/us_bridge/levels/pss/leveldata.o build/us_bridge/levels/rr/leveldata.o build/us_bridge/levels/sa/leveldata.o build/us_bridge/levels/sl/leveldata.o build/us_bridge/levels/ssl/leveldata.o build/us_bridge/levels/thi/leveldata.o build/us_bridge/levels/totwc/leveldata.o build/us_bridge/levels/ttc/leveldata.o build/us_bridge/levels/ttm/leveldata.o build/us_bridge/levels/vcutm/leveldata.o build/us_bridge/levels/wdw/leveldata.o build/us_bridge/levels/wf/leveldata.o build/us_bridge/levels/wmotr/leveldata.o build/us_bridge/levels/bbh/script.o build/us_bridge/levels/bitdw/script.o build/us_bridge/levels/bitfs/script.o build/us_bridge/levels/bits/script.o build/us_bridge/levels/bob/script.o build/us_bridge/levels/bowser_1/script.o build/us_bridge/levels/bowser_2/script.o build/us_bridge/levels/bowser_3/script.o build/us_bridge/levels/castle_courtyard/script.o build/us_bridge/levels/castle_grounds/script.o build/us_bridge/levels/castle_inside/script.o build/us_bridge/levels/ccm/script.o build/us_bridge/levels/cotmc/script.o build/us_bridge/levels/ddd/script.o build/us_bridge/levels/ending/script.o build/us_bridge/levels/hmc/script.o build/us_bridge/levels/intro/script.o build/us_bridge/levels/jrb/script.o build/us_bridge/levels/lll/script.o build/us_bridge/levels/menu/script.o build/us_bridge/levels/pss/script.o build/us_bridge/levels/rr/script.o build/us_bridge/levels/sa/script.o build/us_bridge/levels/sl/script.o build/us_bridge/levels/ssl/script.o build/us_bridge/levels/thi/script.o build/us_bridge/levels/totwc/script.o build/us_bridge/levels/ttc/script.o build/us_bridge/levels/ttm/script.o build/us_bridge/levels/vcutm/script.o build/us_bridge/levels/wdw/script.o build/us_bridge/levels/wf/script.o build/us_bridge/levels/wmotr/script.o build/us_bridge/levels/bbh/geo.o build/us_bridge/levels/bitdw/geo.o build/us_bridge/levels/bitfs/geo.o build/us_bridge/levels/bits/geo.o build/us_bridge/levels/bob/geo.o build/us_bridge/levels/bowser_1/geo.o build/us_bridge/levels/bowser_2/geo.o build/us_bridge/levels/bowser_3/geo.o build/us_bridge/levels/castle_courtyard/geo.o build/us_bridge/levels/castle_grounds/geo.o build/us_bridge/levels/castle_inside/geo.o build/us_bridge/levels/ccm/geo.o build/us_bridge/levels/cotmc/geo.o build/us_bridge/levels/ddd/geo.o build/us_bridge/levels/ending/geo.o build/us_bridge/levels/hmc/geo.o build/us_bridge/levels/intro/geo.o build/us_bridge/levels/jrb/geo.o build/us_bridge/levels/lll/geo.o build/us_bridge/levels/menu/geo.o build/us_bridge/levels/pss/geo.o build/us_bridge/levels/rr/geo.o build/us_bridge/levels/sa/geo.o build/us_bridge/levels/sl/geo.o build/us_bridge/levels/ssl/geo.o build/us_bridge/levels/thi/geo.o build/us_bridge/levels/totwc/geo.o build/us_bridge/levels/ttc/geo.o build/us_bridge/levels/ttm/geo.o build/us_bridge/levels/vcutm/geo.o build/us_bridge/levels/wdw/geo.o build/us_bridge/levels/wf/geo.o build/us_bridge/levels/wmotr/geo.o build/us_bridge/src/pc/gfx/gfx_direct3d11.o build/us_bridge/src/pc/gfx/gfx_direct3d12.o build/us_bridge/src/pc/gfx/gfx_direct3d_common.o build/us_bridge/src/pc/gfx/gfx_dxgi.o build/us_bridge/src/pc/audio/audio_wasapi.o  build/us_bridge/assets/mario_anim_data.o build/us_bridge/assets/demo_data.o build/us_bridge/bin/bbh_skybox.o build/us_bridge/bin/bidw_skybox.o build/us_bridge/bin/bitfs_skybox.o build/us_bridge/bin/bits_skybox.o build/us_bridge/bin/ccm_skybox.o build/us_bridge/bin/cloud_floor_skybox.o build/us_bridge/bin/clouds_skybox.o build/us_bridge/bin/ssl_skybox.o build/us_bridge/bin/water_skybox.o build/us_bridge/bin/wdw_skybox.o  build/us_bridge/lib/src/alBnkfNew.o build/us_bridge/lib/src/guLookAtRef.o build/us_bridge/lib/src/guMtxF2L.o build/us_bridge/lib/src/guNormalize.o build/us_bridge/lib/src/guOrthoF.o build/us_bridge/lib/src/guPerspectiveF.o build/us_bridge/lib/src/guRotateF.o build/us_bridge/lib/src/guScaleF.o build/us_bridge/lib/src/guTranslateF.o build/us_bridge/src/goddard/debug_utils.o build/us_bridge/src/goddard/draw_objects.o build/us_bridge/src/goddard/dynlist_proc.o build/us_bridge/src/goddard/gd_main.o build/us_bridge/src/goddard/gd_math.o build/us_bridge/src/goddard/gd_memory.o build/us_bridge/src/goddard/joints.o build/us_bridge/src/goddard/objects.o build/us_bridge/src/goddard/old_menu.o build/us_bridge/src/goddard/particles.o build/us_bridge/src/goddard/renderer.o build/us_bridge/src/goddard/sfx.o build/us_bridge/src/goddard/shape_helper.o build/us_bridge/src/goddard/skin.o build/us_bridge/src/goddard/skin_movement.o build/us_bridge/src/goddard/dynlists/anim_group_1.o build/us_bridge/src/goddard/dynlists/anim_group_2.o build/us_bridge/src/goddard/dynlists/anim_mario_eyebrows_1.o build/us_bridge/src/goddard/dynlists/anim_mario_lips_1.o build/us_bridge/src/goddard/dynlists/anim_mario_lips_2.o build/us_bridge/src/goddard/dynlists/anim_mario_mustache_left.o build/us_bridge/src/goddard/dynlists/anim_mario_mustache_right.o build/us_bridge/src/goddard/dynlists/dynlist_mario_face.o build/us_bridge/src/goddard/dynlists/dynlist_mario_master.o build/us_bridge/src/goddard/dynlists/dynlist_test_cube.o build/us_bridge/src/goddard/dynlists/dynlist_unused.o build/us_bridge/src/goddard/dynlists/dynlists_mario_eyebrows_mustache.o build/us_bridge/src/goddard/dynlists/dynlists_mario_eyes.o -lm -lxinput9_1_0 -lole32 -lgdi32 -mwindows -shared

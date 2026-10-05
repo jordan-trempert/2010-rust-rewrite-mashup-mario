@@ -1,0 +1,128 @@
+   Compiling sim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\sim)
+warning: `#[must_use]` attribute cannot be used on statics
+   --> crates\render_frame\src\retained.rs:156:1
+    |
+156 | #[must_use]
+    | ^^^^^^^^^^^
+    |
+    = help: `#[must_use]` can be applied to data types, functions, and traits
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: `render_frame` (lib) generated 1 warning (run `cargo fix --lib -p render_frame` to apply 1 suggestion)
+warning: type `footplant::settings::Settings` is more private than the item `Footplant::settings`
+  --> skate\crates\skate-host\src\physics\footplant.rs:16:5
+   |
+16 |     pub(super) settings: Settings,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `Footplant::settings` is reachable at visibility `pub(in crate::physics)`
+   |
+note: but type `footplant::settings::Settings` is only usable at visibility `pub(in crate::physics::footplant)`
+  --> skate\crates\skate-host\src\physics\footplant\settings.rs:4:1
+   |
+ 4 | pub(super) struct Settings {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `physics::respawn::Runtime` is more private than the item `skater::SkaterRuntime::respawn`
+  --> skate\crates\skate-host\src\physics\skater.rs:59:5
+   |
+59 |     pub respawn: super::respawn::Runtime,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `skater::SkaterRuntime::respawn` is reachable at visibility `pub(crate)`
+   |
+note: but type `physics::respawn::Runtime` is only usable at visibility `pub(in crate::physics)`
+  --> skate\crates\skate-host\src\physics\respawn.rs:16:1
+   |
+16 | pub(super) struct Runtime {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `skate-host` (lib) generated 2 warnings
+warning: use of deprecated method `bevy::bevy_app::App::insert_non_send_resource`: use App::insert_non_send
+   --> crates\sm64_bevy\src\lib.rs:327:13
+    |
+327 |         app.insert_non_send_resource(Sm64NativeRuntime::default());
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: struct `Sm64HudText` is never constructed
+   --> crates\sm64_bevy\src\lib.rs:231:8
+    |
+231 | struct Sm64HudText;
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `sync_sm64_hud_overlay` is never used
+    --> crates\sm64_bevy\src\lib.rs:2184:4
+     |
+2184 | fn sync_sm64_hud_overlay(
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sm64_bevy` (lib) generated 3 warnings
+   Compiling net v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\net)
+   Compiling render_scene v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_scene)
+   Compiling audio v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\audio)
+   Compiling hud v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\hud)
+   Compiling bots v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\bots)
+   Compiling replay v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\replay)
+   Compiling render_anim v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_anim)
+   Compiling render_gpu v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_gpu)
+   Compiling render_fx v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_fx)
+   Compiling render_frontend v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render_frontend)
+   Compiling session v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\session)
+   Compiling render v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\render)
+   Compiling ui v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\ui)
+   Compiling console v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\console)
+warning: variable does not need to be mutable
+   --> crates\console\src\frontend.rs:105:5
+    |
+105 |     mut app_screen: ResMut<AppScreen>,
+    |     ----^^^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates\console\src\frontend.rs:106:5
+    |
+106 |     mut ui_draw: ResMut<UiDraw>,
+    |     ----^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `app_screen`
+   --> crates\console\src\frontend.rs:105:5
+    |
+105 |     mut app_screen: ResMut<AppScreen>,
+    |     ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_screen`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ui_draw`
+   --> crates\console\src\frontend.rs:106:5
+    |
+106 |     mut ui_draw: ResMut<UiDraw>,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ui_draw`
+
+   Compiling bootstrap v0.1.0 (D:\Projects\2010-rust-rewrite-mashup-mario\crates\bootstrap)
+error[E0433]: cannot find module or crate `playerstate_iw4` in this scope
+   --> crates\bootstrap\src\plugins.rs:378:38
+    |
+378 |     let use_down=(command_buttons & (playerstate_iw4::buttons::USE | playerstate_iw4::buttons::USE_RELOAD))!=0;
+    |                                      ^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `playerstate_iw4`
+    |
+    = help: if you wanted to use a crate named `playerstate_iw4`, use `cargo add playerstate_iw4` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `playerstate_iw4` in this scope
+   --> crates\bootstrap\src\plugins.rs:378:70
+    |
+378 |     let use_down=(command_buttons & (playerstate_iw4::buttons::USE | playerstate_iw4::buttons::USE_RELOAD))!=0;
+    |                                                                      ^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `playerstate_iw4`
+    |
+    = help: if you wanted to use a crate named `playerstate_iw4`, use `cargo add playerstate_iw4` to add it to your `Cargo.toml`
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `bootstrap` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+warning: `console` (lib) generated 4 warnings (run `cargo fix --lib -p console` to apply 4 suggestions)

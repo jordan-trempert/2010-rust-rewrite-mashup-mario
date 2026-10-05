@@ -80,8 +80,8 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             arm_sm64_cod_external_presentation,
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_on_life_started,
-            sync_cod_player_into_sm64,
-            apply_sm64_native_player_output,
+            sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
+            apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
             publish_sm64_native_audio,
             publish_sm64_cod_hud,
             apply_sm64_dynamic_collision,
@@ -375,7 +375,8 @@ fn sync_cod_player_into_sm64(
     let weapon_fired=bridge_state
         .last_weapon_shot_count
         .is_some_and(|previous|weapon_shot_count!=previous);
-    let use_down=(command_buttons & 0x8)!=0;
+    // IW4 USE and controller/contextual USE_RELOAD both advance native dialogs.
+    let use_down=(command_buttons & (0x8 | 0x20))!=0;
     let use_pressed=use_down && !bridge_state.last_use_down;
 
     // Bit 0: external weapon/ground-pound attack. Keep it asserted while fire
@@ -385,7 +386,7 @@ fn sync_cod_player_into_sm64(
     // native step consumes them (the render frame rate is usually higher, so
     // a same-frame flag was cleared before any step could see it).
     external.attack_flags=if attack_down {1} else {0};
-    if weapon_fired {
+    if weapon_fired || (attack_down && !bridge_state.last_attack_down) {
         external.pending_fire=true;
     }
     if use_pressed {
@@ -480,6 +481,9 @@ fn apply_sm64_native_player_output(
     // first native frame we see, initializing the baseline to that already-
     // damaged value would silently discard the first enemy hit.
     let previous=bridge_state.last_sm64_health.unwrap_or(0x880);
+    if output.health < 0x100 && player.health > 0 {
+        authority.0.damage_from_environment(id, player.health);
+    }
     {
         let sm64_delta=output.health-previous;
         if sm64_delta!=0 {
@@ -495,10 +499,14 @@ fn apply_sm64_native_player_output(
                 scaled=1;
             }
 
-            if scaled!=0 {
+            if scaled!=0 && player.health > 0 && output.health >= 0x100 {
                 let next=player.health.saturating_add(scaled)
                     .clamp(0,player.max_health.max(1));
-                authority.0.set_health(id,next);
+                if scaled < 0 {
+                    authority.0.damage_from_environment(id, scaled.saturating_neg());
+                } else {
+                    authority.0.set_health(id,next);
+                }
                 diag::info!(
                     World,
                     "SM64 native health delta {} -> COD {} ({} -> {})",

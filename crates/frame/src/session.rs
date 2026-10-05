@@ -358,6 +358,18 @@ pub struct Sm64HudView {
     pub dialog_text: String,
 }
 
+/// Native SM64 display-list output, in normalized screen coordinates.
+#[derive(Resource, Clone, Default)]
+pub struct Sm64HudGeometry(pub Vec<Sm64HudTriangle>);
+
+#[derive(Clone)]
+pub struct Sm64HudTriangle {
+    pub xy: [[f32; 2]; 3],
+    pub uv: [[f32; 2]; 3],
+    pub rgba: [[u8; 4]; 3],
+    pub image: Option<Handle<Image>>,
+}
+
 #[derive(Resource, Clone, Debug, Default)]
 pub struct HudInputView {
     pub use_key: Option<String>,

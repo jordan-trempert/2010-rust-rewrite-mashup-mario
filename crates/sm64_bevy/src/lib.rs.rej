@@ -1,0 +1,56 @@
+diff a/crates/sm64_bevy/src/lib.rs b/crates/sm64_bevy/src/lib.rs	(rejected hunks)
+@@ -242,6 +242,10 @@ pub struct Sm64ExternalPlayer {
+     pub sm64_yaw: i16,
+     pub sm64_pitch: i16,
+     pub attack_flags: u32,
++    /// One-shot inputs latched by the render-rate COD sync and cleared only
++    /// after a 30 Hz native step has actually consumed them.
++    pub pending_use: bool,
++    pub pending_fire: bool,
+     pub health: i32,
+     pub active: bool,
+ }
+@@ -1743,7 +1747,7 @@ fn advance_sm64_runtime(
+     enabled: Res<Sm64Enabled>,
+     input: Res<Sm64ControllerInput>,
+     cod_active: Option<Res<Sm64CodActive>>,
+-    external: Res<Sm64ExternalPlayer>,
++    mut external: ResMut<Sm64ExternalPlayer>,
+     mut native: NonSendMut<Sm64NativeRuntime>,
+     mut native_output: ResMut<Sm64NativePlayerOutput>,
+     mut native_dialog: ResMut<Sm64NativeDialogOutput>,
+@@ -1783,20 +1787,33 @@ fn advance_sm64_runtime(
+                 continue;
+             };
+ 
++            let step_flags = external.attack_flags
++                | if external.pending_use { 2 } else { 0 }
++                | if external.pending_fire { 1 } else { 0 };
+             match client.step(sm64_native::NativePlayerProxy {
+                 pos:external.sm64_pos,
+                 vel:external.sm64_vel,
+                 yaw:external.sm64_yaw,
+                 pitch:external.sm64_pitch,
+                 health:external.health,
+-                attack_flags:external.attack_flags,
++                attack_flags:step_flags,
+             }) {
+                 Ok(mut snapshot)=>{
++                    external.pending_use=false;
++                    external.pending_fire=false;
+                     let native_object_count=snapshot.objects.len();
+                     native_audio.tick=snapshot.tick;
+                     native_audio.sample_rate=snapshot.audio_sample_rate;
+                     native_audio.channels=snapshot.audio_channels;
+                     native_audio.samples=std::mem::take(&mut snapshot.audio_samples);
++                    if native_dialog.id!=snapshot.dialog_id || (step_flags & 2)!=0 {
++                        info!(
++                            "SM64 COD input: flags={step_flags:#x} dialog_id {} -> {} action={:#010x}",
++                            native_dialog.id,
++                            snapshot.dialog_id,
++                            snapshot.mario_action
++                        );
++                    }
+                     native_dialog.id=snapshot.dialog_id;
+                     native_dialog.text=snapshot.dialog_text.clone();
+                     native_collision.tick=snapshot.tick;
