@@ -918,6 +918,55 @@ fn apply_sm64_dynamic_collision(
     authority.0.install_content(content);
 }
 
+fn sm64_safe_transition_origin(
+    authority: &sim::SimWorld,
+    native_origin: [f32; 3],
+) -> ([f32; 3], Option<trace_iw4::Trace>) {
+    /*
+     * Native SM64 warp nodes often place Mario exactly on the floor plane.
+     * IW4's imported triangle world is one-sided, so starting the COD capsule
+     * exactly on (or a tiny float-rounding amount below) that plane can let the
+     * first gravity step pass through it. Probe downward from safely above the
+     * native point and only snap when the discovered floor is already very
+     * close to the native Y. Airborne painting/course spawns stay untouched.
+     */
+    const PROBE_UP: f32 = 48.0;
+    const PROBE_DOWN: f32 = 96.0;
+    const GROUNDED_TOLERANCE: f32 = 24.0;
+    const FLOOR_EPSILON: f32 = 1.0;
+
+    let start = [
+        native_origin[0],
+        native_origin[1],
+        native_origin[2] + PROBE_UP,
+    ];
+    let end = [
+        native_origin[0],
+        native_origin[1],
+        native_origin[2] - PROBE_DOWN,
+    ];
+    let probe = authority.trace_world(
+        start,
+        end,
+        [0.0; 3],
+        [0.0; 3],
+        sim::MASK_PLAYER_SOLID,
+    );
+
+    if probe.fraction < 1.0
+        && probe.startsolid == 0
+        && probe.allsolid == 0
+        && probe.normal[2] >= 0.5
+        && (native_origin[2] - probe.endpos[2]).abs() <= GROUNDED_TOLERANCE
+    {
+        let mut safe = native_origin;
+        safe[2] = probe.endpos[2] + FLOOR_EPSILON;
+        (safe, Some(probe))
+    } else {
+        (native_origin, Some(probe))
+    }
+}
+
 fn apply_sm64_native_player_output(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
@@ -1038,25 +1087,46 @@ fn apply_sm64_native_player_output(
         let dz = native_origin[2] - player.origin[2];
         let distance2 = dx * dx + dy * dy + dz * dz;
         if bridge_state.force_native_reposition || area_changed || distance2 > 48.0 * 48.0 {
-            authority.0.teleport(id, native_origin);
+            let (teleport_origin, floor_probe) = if bridge_state.force_native_reposition {
+                sm64_safe_transition_origin(&authority.0, native_origin)
+            } else {
+                (native_origin, None)
+            };
+            authority.0.teleport(id, teleport_origin);
+            authority.0.set_velocity(id, [0.0; 3]);
 
             if bridge_state.force_native_reposition {
                 let sm64_yaw_degrees =
                     output.sm64_yaw as u16 as f32 * 360.0 / 65536.0;
                 if let Some(spawn) = spawn.as_deref_mut() {
-                    spawn.origin = native_origin;
+                    spawn.origin = teleport_origin;
                     spawn.view = [0.0, sm64_yaw_degrees - 90.0, 0.0];
+                }
+
+                if let Some(probe) = floor_probe {
+                    diag::info!(
+                        World,
+                        "SM64 COD transition floor probe native={:?} chosen={:?} hit={} end={:?} normal={:?} startsolid={} allsolid={}",
+                        native_origin,
+                        teleport_origin,
+                        probe.fraction < 1.0,
+                        probe.endpos,
+                        probe.normal,
+                        probe.startsolid,
+                        probe.allsolid
+                    );
                 }
             }
 
             bridge_state.force_native_reposition = false;
             diag::info!(
                 World,
-                "SM64 COD transition reposition area {} -> {} action=0x{:08x} origin={:?}",
+                "SM64 COD transition reposition area {} -> {} action=0x{:08x} native={:?} origin={:?}",
                 bridge_state.last_area,
                 output.area_index,
                 output.action,
-                native_origin
+                native_origin,
+                teleport_origin
             );
         }
     }
