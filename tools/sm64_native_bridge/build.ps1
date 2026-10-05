@@ -202,9 +202,17 @@ void bhv_mario_update(void) {
         gCurrentObject->oMarioParticleFlags = particleFlags;
     } else {
         /*
-         * IW4L embedded mode: COD owns ordinary locomotion. gMarioState was
-         * populated from the COD player immediately before this object pass.
+         * IW4L embedded mode: COD owns ordinary locomotion, but the original
+         * Mario interaction pipeline must still run. This preserves native
+         * coins/stars/cannons/NPCs/warps/damage without executing Mario's
+         * stationary/moving/airborne movement actions.
          */
+        mario_reset_bodystate(gMarioState);
+        update_mario_inputs(gMarioState);
+        mario_handle_special_floors(gMarioState);
+        mario_process_interactions(gMarioState);
+        update_mario_health(gMarioState);
+        mario_update_hitbox_and_cap_model(gMarioState);
         gCurrentObject->oMarioParticleFlags = 0;
     }
 
