@@ -780,7 +780,11 @@ static int native_runs_mario_action(void) {
         case ACT_TELEPORT_FADE_OUT:
         case ACT_TELEPORT_FADE_IN:
         case ACT_EXIT_AIRBORNE:
+        case ACT_DEATH_EXIT:
+        case ACT_UNUSED_DEATH_EXIT:
         case ACT_SPECIAL_EXIT_AIRBORNE:
+        case ACT_SPECIAL_DEATH_EXIT:
+        case ACT_FALLING_EXIT_AIRBORNE:
             return 1;
         default:
             return 0;
@@ -802,6 +806,18 @@ static int native_owns_mario_motion(void) {
         case ACT_TORNADO_TWIRLING:
         case ACT_GRABBED:
         case ACT_RIDING_HOOT:
+        /*
+         * Course success/death warp nodes intentionally put Mario at the
+         * painting/exit object and then launch him away from it. Native SM64
+         * must own these few spawn frames or the COD proxy overwrites the
+         * launch and leaves the player sitting inside the loading zone.
+         */
+        case ACT_EXIT_AIRBORNE:
+        case ACT_DEATH_EXIT:
+        case ACT_UNUSED_DEATH_EXIT:
+        case ACT_SPECIAL_EXIT_AIRBORNE:
+        case ACT_SPECIAL_DEATH_EXIT:
+        case ACT_FALLING_EXIT_AIRBORNE:
             return 1;
         default:
             return 0;
@@ -1323,6 +1339,51 @@ static void apply_external_attack(const struct Request *request) {
      * firing cannot accidentally become a pound.
      */
     if (ground_pound) {
+        /*
+         * The Chain Chomp post does not use normal attack status. Its vanilla
+         * behavior asks whether Mario is ground-pounding THIS platform. COD is
+         * the physical player, so translate the landing pulse into the same
+         * post state machine and let bhv_wooden_post_update perform the normal
+         * ~65-unit drop. Three real pounds still release the Chomp.
+         */
+        for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+            struct ObjectNode *head = &gObjectLists[list_index];
+            struct ObjectNode *node = head->next;
+            while (node != head) {
+                struct Object *object = (struct Object *)node;
+                const BehaviorScript *behavior;
+                float dx;
+                float dz;
+                float down;
+
+                node = node->next;
+                if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                    continue;
+                }
+                behavior = object->behavior;
+                if (behavior != segmented_to_virtual(bhvWoodenPost)) {
+                    continue;
+                }
+
+                dx = object->oPosX - request->pos[0];
+                dz = object->oPosZ - request->pos[2];
+                down = request->pos[1] - object->oPosY;
+                if (dx * dx + dz * dz <= 230.0f * 230.0f
+                    && down >= -70.0f
+                    && down <= 360.0f) {
+                    object->oWoodenPostMarioPounding = 1;
+                    object->oWoodenPostSpeedY = -70.0f;
+                    fprintf(
+                        stderr,
+                        "iw4l-sm64-native: COD ground pound hit wooden post offset=%.1f\n",
+                        (double)object->oWoodenPostOffsetY
+                    );
+                    fflush(stderr);
+                    return;
+                }
+            }
+        }
+
         for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
             struct ObjectNode *head = &gObjectLists[list_index];
             struct ObjectNode *node = head->next;
@@ -2074,6 +2135,7 @@ IW4L_SM64_API int iw4l_sm64_init(
     uint32_t warp_arg
 ) {
     const struct LevelSpec *level;
+    int selected_act;
 
     if (gIw4lInitialized) {
         snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime already initialized");
@@ -2117,7 +2179,27 @@ IW4L_SM64_API int iw4l_sm64_init(
     thread5_game_loop(NULL);
 
     gCurrSaveFileNum = 1;
-    gCurrActNum = (s16)act;
+
+    selected_act = act;
+    if (selected_act < 1 || selected_act > 6) {
+        selected_act = 1;
+        if (level->course >= COURSE_MIN && level->course <= COURSE_STAGES_MAX) {
+            const s32 course_index = COURSE_NUM_TO_INDEX(level->course);
+            const u32 star_flags = save_file_get_star_flags(0, course_index);
+            int candidate;
+            for (candidate = 1; candidate <= 6; ++candidate) {
+                if ((star_flags & (1u << (candidate - 1))) == 0) {
+                    selected_act = candidate;
+                    break;
+                }
+            }
+            if (candidate > 6) {
+                selected_act = 6;
+            }
+        }
+    }
+
+    gCurrActNum = (s16)selected_act;
     gCurrLevelNum = level->level;
     gCurrCourseNum = level->course;
     save_file_set_flags(SAVE_FLAG_FILE_EXISTS);
@@ -2153,7 +2235,7 @@ IW4L_SM64_API int iw4l_sm64_init(
             "level '%s' did not initialize area/player (area=%d act=%d)",
             level_name,
             area,
-            act
+            selected_act
         );
         gIw4lLevelCommand = NULL;
         return 0;
@@ -2173,7 +2255,7 @@ IW4L_SM64_API int iw4l_sm64_init(
         "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) room=%d action=0x%08X static_surfaces=%u\n",
         level_name,
         area,
-        act,
+        selected_act,
         warp_node,
         gIw4lPreserveNativeSpawn,
         gMarioState->pos[0],
