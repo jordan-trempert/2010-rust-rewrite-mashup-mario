@@ -406,6 +406,29 @@ if (-not $renderGraphText.Contains($cameraNeedle)) {
     throw "Could not locate native camera transform in $renderGraphSource"
 }
 $renderGraphText = $renderGraphText.Replace($cameraNeedle, $cameraReplacement)
+
+$objCullNeedle = @"
+static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
+    s16 cullingRadius;
+"@
+$objCullReplacement = @"
+static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
+#ifdef IW4L_SM64_EMBEDDED
+    /*
+     * COD/Bevy owns the final frustum. Do not discard native objects using
+     * SM64's original 4:3/45-degree camera bounds before capture.
+     */
+    if (node->node.flags & GRAPH_RENDER_INVISIBLE) {
+        return FALSE;
+    }
+    return TRUE;
+#endif
+    s16 cullingRadius;
+"@
+if (-not $renderGraphText.Contains($objCullNeedle)) {
+    throw "Could not locate obj_is_in_view in $renderGraphSource"
+}
+$renderGraphText = $renderGraphText.Replace($objCullNeedle, $objCullReplacement)
 Set-Content -Path $renderGraphSource -Value $renderGraphText -Encoding UTF8
 
 Copy-Item $gfxPcSource $gfxPcBackup -Force
@@ -511,6 +534,25 @@ if (-not $gfxPcText.Contains($shaderInfoNeedle)) {
     throw "Could not locate shader info in $gfxPcSource"
 }
 $gfxPcText = $gfxPcText.Replace($shaderInfoNeedle, $shaderInfoReplacement)
+
+$clipNeedle = @"
+    if (v1->clip_rej & v2->clip_rej & v3->clip_rej) {
+        // The whole triangle lies outside the visible area
+        return;
+    }
+"@
+$clipReplacement = @"
+#ifndef IW4L_SM64_EMBEDDED
+    if (v1->clip_rej & v2->clip_rej & v3->clip_rej) {
+        // The whole triangle lies outside the visible area
+        return;
+    }
+#endif
+"@
+if (-not $gfxPcText.Contains($clipNeedle)) {
+    throw "Could not locate gfx triangle clip rejection in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($clipNeedle, $clipReplacement)
 
 $captureNeedle = @"
     bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
