@@ -143,6 +143,12 @@ struct Sm64PresentationCache {
 }
 
 #[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeStaticCollision {
+    pub triangles: Vec<[[f32; 3]; 3]>,
+    pub tick: u32,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
 pub struct Sm64NativeDynamicCollision {
     pub triangles: Vec<[[f32; 3]; 3]>,
     pub tick: u32,
@@ -361,6 +367,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64NativePlayerOutput>()
             .init_resource::<Sm64NativeTransitionOutput>()
             .init_resource::<Sm64NativeDialogOutput>()
+            .init_resource::<Sm64NativeStaticCollision>()
             .init_resource::<Sm64NativeDynamicCollision>()
             .init_resource::<Sm64NativeAudioFrame>()
             .init_resource::<Sm64NativeRenderFrame>()
@@ -1921,6 +1928,7 @@ fn advance_sm64_runtime(
     mut native_output: ResMut<Sm64NativePlayerOutput>,
     mut native_transition: ResMut<Sm64NativeTransitionOutput>,
     mut native_dialog: ResMut<Sm64NativeDialogOutput>,
+    mut native_static_collision: ResMut<Sm64NativeStaticCollision>,
     mut native_collision: ResMut<Sm64NativeDynamicCollision>,
     mut native_audio: ResMut<Sm64NativeAudioFrame>,
     mut native_render: ResMut<Sm64NativeRenderFrame>,
@@ -1942,6 +1950,8 @@ fn advance_sm64_runtime(
                 native_output.area_index = 0;
                 native_dialog.id = -1;
                 native_dialog.text.clear();
+                native_static_collision.triangles.clear();
+                native_static_collision.tick = 0;
                 native_collision.triangles.clear();
                 steps += 1;
                 continue;
@@ -1998,6 +2008,8 @@ fn advance_sm64_runtime(
                     native_audio.samples = std::mem::take(&mut snapshot.audio_samples);
                     native_dialog.id = snapshot.dialog_id;
                     native_dialog.text = snapshot.dialog_text.clone();
+                    native_static_collision.tick = snapshot.tick;
+                    native_static_collision.triangles = snapshot.static_surfaces.clone();
                     native_collision.tick = snapshot.tick;
                     native_collision.triangles = snapshot.dynamic_surfaces.clone();
                     native_render.tick = snapshot.tick;
@@ -2043,6 +2055,8 @@ fn advance_sm64_runtime(
                     native_output.area_index = 0;
                     native_dialog.id = -1;
                     native_dialog.text.clear();
+                    native_static_collision.triangles.clear();
+                    native_static_collision.tick = 0;
                     native_collision.triangles.clear();
                     native_audio.samples.clear();
                     native_audio.tick = 0;
