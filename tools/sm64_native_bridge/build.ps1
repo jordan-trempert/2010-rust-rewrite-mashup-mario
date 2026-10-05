@@ -227,11 +227,11 @@ if (-not $levelScriptText.Contains($levelPrototypeNeedle)) {
 $levelScriptText = $levelScriptText.Replace($levelPrototypeNeedle, $levelPrototypeReplacement)
 Set-Content -Path $levelScriptSource -Value $levelScriptText -Encoding UTF8
 
-# COD owns level/session transitions. If native SM64 completes a death/star exit
-# or another level-changing warp, vanilla lvl_init_or_update would let the
-# course script fall through CLEAR_LEVEL/EXIT and unwind the main-pool stack.
-# The bridge intentionally stays inside the selected course, so consume that
-# transition result and resume normal play instead.
+# COD owns the outer level/session transition, but native SM64 still decides
+# the destination. Capture the exact vanilla destination (level/area/node/arg)
+# before preventing this embedded course script from unwinding its main-pool
+# stack. Rust then relaunches the destination level and resumes at that warp
+# node, preserving star exits, paintings, doors, pipes, and other level warps.
 Copy-Item $levelUpdateSource $levelUpdateBackup -Force
 $levelUpdateText = Get-Content $levelUpdateSource -Raw
 $updateNeedle = @"
@@ -244,14 +244,26 @@ $updateReplacement = @"
             result = update_level();
             if (result != 0) {
                 /*
-                 * IW4L owns map/session transitions. Vanilla update_level()
-                 * returns the destination level after a delayed cross-level
-                 * warp, but leaving sWarpDest populated while suppressing that
-                 * return makes the next play_mode_normal() call treat the stale
-                 * destination as an in-area warp. That reaches
-                 * init_mario_after_warp() with a node that does not exist in
-                 * the current area.
+                 * Preserve the original SM64 destination before the embedded
+                 * runtime suppresses its own outer level-script unwind. The
+                 * host consumes this once and relaunches the destination
+                 * course/castle at the exact warp node.
                  */
+                if (sWarpDest.type == WARP_TYPE_CHANGE_LEVEL) {
+                    extern void iw4l_sm64_capture_level_warp(
+                        int32_t level_num,
+                        uint32_t area,
+                        uint32_t node,
+                        uint32_t arg
+                    );
+                    iw4l_sm64_capture_level_warp(
+                        result,
+                        sWarpDest.areaIdx,
+                        sWarpDest.nodeId,
+                        sWarpDest.arg
+                    );
+                }
+
                 sWarpDest.type = WARP_TYPE_NOT_WARPING;
                 sDelayedWarpOp = WARP_OP_NONE;
                 sTransitionTimer = 0;
