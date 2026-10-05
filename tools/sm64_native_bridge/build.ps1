@@ -482,7 +482,7 @@ $keyWarpDelayReplacement = $keyWarpCasePrefix + @"
 ${keyWarpIndent}#ifdef IW4L_SM64_EMBEDDED
 ${keyWarpIndent}{
 ${keyWarpIndent}    const s16 iw4lWarpDoorId =
-${keyWarpIndent}        m->usedObj != NULL ? (s16)(m->usedObj->oBhvParams >> 24) : 0;
+${keyWarpIndent}        m->usedObj != NULL ? (s16)(m->usedObj->oBehParams >> 24) : 0;
 ${keyWarpIndent}    sDelayedWarpTimer =
 ${keyWarpIndent}        (iw4lWarpDoorId == 1 || iw4lWarpDoorId == 2) ? 1 : 20;
 ${keyWarpIndent}}
