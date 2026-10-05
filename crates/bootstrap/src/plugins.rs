@@ -907,6 +907,160 @@ fn sync_sm64_cap_collision(
     );
 }
 
+fn sm64_dynamic_triangle_to_iw4(tri: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let s = sm64_core::SM64_TO_IW4_SCALE;
+    [
+        [tri[0][0] * s, -tri[0][2] * s, tri[0][1] * s],
+        [tri[1][0] * s, -tri[1][2] * s, tri[1][1] * s],
+        [tri[2][0] * s, -tri[2][2] * s, tri[2][1] * s],
+    ]
+}
+
+fn sm64_barycentric_xy(
+    point: [f32; 2],
+    tri: &[[f32; 3]; 3],
+) -> Option<[f32; 3]> {
+    let ax = tri[0][0];
+    let ay = tri[0][1];
+    let bx = tri[1][0];
+    let by = tri[1][1];
+    let cx = tri[2][0];
+    let cy = tri[2][1];
+
+    let v0x = bx - ax;
+    let v0y = by - ay;
+    let v1x = cx - ax;
+    let v1y = cy - ay;
+    let v2x = point[0] - ax;
+    let v2y = point[1] - ay;
+    let denom = v0x * v1y - v1x * v0y;
+    if denom.abs() < 0.0001 {
+        return None;
+    }
+
+    let wb = (v2x * v1y - v1x * v2y) / denom;
+    let wc = (v0x * v2y - v2x * v0y) / denom;
+    let wa = 1.0 - wb - wc;
+
+    // A little edge tolerance prevents a standing player from being dropped
+    // when their capsule origin is microscopically outside a triangle seam.
+    if wa >= -0.06 && wb >= -0.06 && wc >= -0.06
+        && wa <= 1.06 && wb <= 1.06 && wc <= 1.06
+    {
+        Some([wa, wb, wc])
+    } else {
+        None
+    }
+}
+
+fn carry_cod_players_with_sm64_platforms(
+    authority: &mut sim::SimWorld,
+    previous: &[[[f32; 3]; 3]],
+    current: &[[[f32; 3]; 3]],
+) {
+    const ENTITYNUM_NONE: i32 = 1023;
+    const MAX_SUPPORT_DISTANCE: f32 = 72.0;
+    const MAX_PLATFORM_STEP: f32 = 256.0;
+    const FLOOR_EPSILON: f32 = 1.0;
+
+    if previous.is_empty() || previous.len() != current.len() {
+        return;
+    }
+
+    let mut players = Vec::new();
+    authority.visit_players(|id, player| {
+        players.push((id, *player));
+    });
+
+    for (id, player) in players {
+        if player.health <= 0 || player.ground_entity_num == ENTITYNUM_NONE {
+            continue;
+        }
+
+        let mut best: Option<(f32, [f32; 3])> = None;
+
+        for (old_native, new_native) in previous.iter().zip(current.iter()) {
+            let old_tri = sm64_dynamic_triangle_to_iw4(old_native);
+            let new_tri = sm64_dynamic_triangle_to_iw4(new_native);
+
+            let ux = old_tri[1][0] - old_tri[0][0];
+            let uy = old_tri[1][1] - old_tri[0][1];
+            let uz = old_tri[1][2] - old_tri[0][2];
+            let vx = old_tri[2][0] - old_tri[0][0];
+            let vy = old_tri[2][1] - old_tri[0][1];
+            let vz = old_tri[2][2] - old_tri[0][2];
+            let nx = uy * vz - uz * vy;
+            let ny = uz * vx - ux * vz;
+            let nz = ux * vy - uy * vx;
+            let normal_len = (nx * nx + ny * ny + nz * nz).sqrt();
+            if normal_len < 0.001 || (nz / normal_len).abs() < 0.45 {
+                continue;
+            }
+
+            let Some(weights) =
+                sm64_barycentric_xy([player.origin[0], player.origin[1]], &old_tri)
+            else {
+                continue;
+            };
+
+            let old_point = [
+                old_tri[0][0] * weights[0]
+                    + old_tri[1][0] * weights[1]
+                    + old_tri[2][0] * weights[2],
+                old_tri[0][1] * weights[0]
+                    + old_tri[1][1] * weights[1]
+                    + old_tri[2][1] * weights[2],
+                old_tri[0][2] * weights[0]
+                    + old_tri[1][2] * weights[1]
+                    + old_tri[2][2] * weights[2],
+            ];
+            let support_distance = (player.origin[2] - old_point[2]).abs();
+            if support_distance > MAX_SUPPORT_DISTANCE {
+                continue;
+            }
+
+            let new_point = [
+                new_tri[0][0] * weights[0]
+                    + new_tri[1][0] * weights[1]
+                    + new_tri[2][0] * weights[2],
+                new_tri[0][1] * weights[0]
+                    + new_tri[1][1] * weights[1]
+                    + new_tri[2][1] * weights[2],
+                new_tri[0][2] * weights[0]
+                    + new_tri[1][2] * weights[1]
+                    + new_tri[2][2] * weights[2],
+            ];
+            let delta = [
+                new_point[0] - old_point[0],
+                new_point[1] - old_point[1],
+                new_point[2] - old_point[2],
+            ];
+            let step2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+            if step2 > MAX_PLATFORM_STEP * MAX_PLATFORM_STEP {
+                continue;
+            }
+
+            if best
+                .as_ref()
+                .is_none_or(|(distance, _)| support_distance < *distance)
+            {
+                best = Some((support_distance, delta));
+            }
+        }
+
+        if let Some((_, delta)) = best {
+            if delta[0].abs() > 0.001 || delta[1].abs() > 0.001 || delta[2].abs() > 0.001 {
+                let origin = [
+                    player.origin[0] + delta[0],
+                    player.origin[1] + delta[1],
+                    player.origin[2] + delta[2] + FLOOR_EPSILON,
+                ];
+                authority.set_origin(id, origin);
+            }
+        }
+    }
+}
+
 fn apply_sm64_dynamic_collision(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     dynamic: Res<sm64_bevy::Sm64NativeDynamicCollision>,
@@ -928,20 +1082,31 @@ fn apply_sm64_dynamic_collision(
     if dynamic.triangles == collision_state.last_dynamic_triangles {
         return;
     }
-    collision_state.last_dynamic_triangles = dynamic.triangles.clone();
 
+    let previous_triangles = collision_state.last_dynamic_triangles.clone();
     let Some(authority) = authority.as_deref_mut() else {
+        collision_state.last_dynamic_triangles = dynamic.triangles.clone();
         return;
     };
 
-    let s = sm64_core::SM64_TO_IW4_SCALE;
+    /*
+     * IW4's imported mesh has no moving brush/entity identity, so pmove cannot
+     * inherit platform displacement by itself. Carry grounded players using
+     * the same native triangle's old/new barycentric point before installing
+     * the new collision snapshot.
+     */
+    carry_cod_players_with_sm64_platforms(
+        &mut authority.0,
+        &previous_triangles,
+        &dynamic.triangles,
+    );
+    collision_state.last_dynamic_triangles = dynamic.triangles.clone();
+
     let mut verts = collision_state.static_vertices.clone();
-    verts.reserve(dynamic.triangles.len() * 3);
+    verts.reserve(dynamic.triangles.len() * 6);
 
     for tri in &dynamic.triangles {
-        let v0 = [tri[0][0] * s, -tri[0][2] * s, tri[0][1] * s];
-        let v1 = [tri[1][0] * s, -tri[1][2] * s, tri[1][1] * s];
-        let v2 = [tri[2][0] * s, -tri[2][2] * s, tri[2][1] * s];
+        let [v0, v1, v2] = sm64_dynamic_triangle_to_iw4(tri);
 
         // Keep moving platforms/doors solid from both sides as well.
         verts.extend_from_slice(&[v0, v2, v1]);
