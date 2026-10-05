@@ -95,11 +95,11 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             place_sm64_cod_player_on_life_started,
             sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
             apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
-            handle_sm64_cod_level_transition,
             sync_sm64_cod_area_collision,
+            apply_sm64_dynamic_collision,
+            handle_sm64_cod_level_transition,
             publish_sm64_native_audio,
             publish_sm64_cod_hud,
-            apply_sm64_dynamic_collision,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ).chain());
@@ -579,6 +579,7 @@ fn handle_sm64_cod_level_transition(
     mut bridge_state: ResMut<Sm64CodNativeState>,
     mut move_state: ResMut<Sm64CodMoveState>,
     mut collision_state: ResMut<Sm64CodCollisionState>,
+    mut native_dynamic: ResMut<sm64_bevy::Sm64NativeDynamicCollision>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
     mut commands: Commands,
 ) {
@@ -627,16 +628,18 @@ fn handle_sm64_cod_level_transition(
                 ]);
             }
         }
-        collision_state.static_vertices=verts.clone();
+            collision_state.static_vertices=verts.clone();
         collision_state.area=area;
         collision_state.last_dynamic_tick=0;
         collision_state.last_dynamic_triangles.clear();
+        native_dynamic.tick=0;
+        native_dynamic.triangles.clear();
 
         let mesh=sim::SimClipMesh::from_linear_triangles(verts);
         let content=authority.0.content().with_clip_mesh(mesh);
         authority.0.install_content(content);
 
-        if let Some(spawn)=spawn.as_ref() {
+        let fallback_spawn=spawn.as_ref().map(|spawn|{
             let floor_y=parsed.world
                 .find_floor(spawn.pos[0] as f32,30_000.0,spawn.pos[2] as f32)
                 .map(|hit|hit.height)
@@ -647,10 +650,13 @@ fn handle_sm64_cod_level_transition(
                 floor_y*s+128.0,
             ];
             let sm64_yaw=spawn.yaw_sm64() as u16 as f32*360.0/65536.0;
-            commands.insert_resource(Sm64CodSpawn {
+            Sm64CodSpawn {
                 origin:spawn_cod,
                 view:[0.0,sm64_yaw-90.0,0.0],
-            });
+            }
+        });
+        if let Some(fallback)=fallback_spawn {
+            commands.insert_resource(fallback);
         }
 
         let mut first=None;
@@ -659,6 +665,11 @@ fn handle_sm64_cod_level_transition(
         });
         if let Some(id)=first {
             authority.0.set_external_motion(id,false);
+            if let Some(fallback)=fallback_spawn {
+                authority.0.teleport(id,fallback.origin);
+                authority.0.set_viewangles(id,fallback.view);
+                authority.0.set_velocity(id,[0.0;3]);
+            }
         }
     }
 
