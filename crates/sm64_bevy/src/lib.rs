@@ -1593,11 +1593,7 @@ fn spawn_sm64_skybox(
             base_color_texture:Some(texture),
             unlit:true,
             cull_mode:None,
-            depth_bias:if key.2==NativePrimitiveClass::Shadow {
-                2.0
-            } else {
-                0.0
-            },
+            depth_bias:0.0,
             ..default()
         })),
         Transform::IDENTITY,
