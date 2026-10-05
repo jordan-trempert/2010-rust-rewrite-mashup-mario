@@ -246,6 +246,8 @@ pub struct Sm64ExternalPlayer {
     /// after a 30 Hz native step has actually consumed them.
     pub pending_use: bool,
     pub pending_fire: bool,
+    /// COD-side ground pound impact latched until the 30 Hz native step sees it.
+    pub pending_ground_pound: bool,
     pub health: i32,
     pub active: bool,
 }
@@ -1793,7 +1795,8 @@ fn advance_sm64_runtime(
 
             let step_flags = external.attack_flags
                 | if external.pending_use { 2 } else { 0 }
-                | if external.pending_fire { 1 | 4 } else { 0 };
+                | if external.pending_fire { 1 | 4 } else { 0 }
+                | if external.pending_ground_pound { 8 } else { 0 };
             match client.step(sm64_native::NativePlayerProxy {
                 pos:external.sm64_pos,
                 vel:external.sm64_vel,
@@ -1813,6 +1816,7 @@ fn advance_sm64_runtime(
                     }
                     external.pending_use=false;
                     external.pending_fire=false;
+                    external.pending_ground_pound=false;
                     let native_object_count=snapshot.objects.len();
                     native_audio.tick=snapshot.tick;
                     native_audio.sample_rate=snapshot.audio_sample_rate;
