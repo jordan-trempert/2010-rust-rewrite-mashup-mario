@@ -4,6 +4,7 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::ClearColorConfig,
     image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
+    light::{NotShadowCaster, NotShadowReceiver},
     log::{error, info, warn},
     prelude::*,
     render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
@@ -1600,6 +1601,8 @@ fn spawn_sm64_skybox(
             ..default()
         })),
         Transform::IDENTITY,
+        NotShadowCaster,
+        NotShadowReceiver,
         Sm64SkyboxPresentation,
         Sm64DebugWorld,
     ));
@@ -2024,6 +2027,8 @@ fn sync_native_render_frame(
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
             Transform::IDENTITY,
+            NotShadowCaster,
+            NotShadowReceiver,
             Sm64NativeRenderPresentation,
             Sm64DebugWorld,
         )).id();
