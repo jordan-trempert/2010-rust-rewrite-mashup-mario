@@ -1,0 +1,29 @@
+name: Restore SM64 bridge
+
+on:
+  push:
+    paths:
+      - '.github/workflows/restore-sm64-bridge.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore bridge from known-good commit
+        shell: bash
+        run: |
+          git show 1d65a7a8669c8a65f0210a7f718db2945a36c5c9:tools/sm64_native_bridge/bridge.c > tools/sm64_native_bridge/bridge.c
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/sm64_native_bridge/bridge.c
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Restore native SM64 bridge"
+          git push
