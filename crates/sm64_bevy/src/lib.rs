@@ -581,7 +581,7 @@ fn spawn_runtime_object_presentations(
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
             Transform {
                 translation:sm64_render_vec3(object.pos),
-                rotation:sm64_object_rotation(object.face_angle),
+                rotation:sm64_presentation_rotation(&object.model,object.face_angle),
                 scale:Vec3::from_array(object.scale),
             },
             if (object.render_flags & 1)!=0 && (object.render_flags & (1<<4))==0 {
@@ -668,6 +668,7 @@ fn spawn_runtime_object_presentations(
                 } else if let Some((geometry,textures))=cache.dl.get(&object.model) {
                     spawn_flat_object_geometry(
                         commands,meshes,materials,images,root,geometry,textures,
+                        sm64_flat_geo_scale(&object.model),
                     );
                 }
             }
@@ -690,7 +691,7 @@ fn spawn_runtime_object_presentations(
                 }
                 let Some((geometry,textures))=cache.dl.get(&object.model) else {continue;};
                 spawn_flat_object_geometry(
-                    commands,meshes,materials,images,root,geometry,textures,
+                    commands,meshes,materials,images,root,geometry,textures,1.0,
                 );
             }
         }
@@ -788,6 +789,7 @@ fn spawn_flat_object_geometry(
     parent:Entity,
     geometry:&sm64_assets::ParsedRenderGeometry,
     texture_sources:&HashMap<String,std::path::PathBuf>,
+    local_scale:f32,
 ) {
     let mut texture_cache=HashMap::<String,Handle<Image>>::new();
     for (batch_index,batch) in geometry.batches.iter().enumerate() {
@@ -852,7 +854,7 @@ fn spawn_flat_object_geometry(
                     else{AlphaMode::Opaque},
                 ..default()
             })),
-            Transform::IDENTITY,
+            Transform::from_scale(Vec3::splat(local_scale)),
             ChildOf(parent),
             Sm64DebugWorld,
         ));
@@ -984,6 +986,39 @@ fn sm64_object_rotation(angle:[i16;3])->Quat {
         to_deg(angle[1]),
         to_deg(angle[2]),
     ])
+}
+
+#[inline]
+fn sm64_upright_actor(model:&str)->bool {
+    model.contains("GOOMBA")
+        || model.contains("BOBOMB")
+        || model.contains("BOB_OMB")
+}
+
+#[inline]
+fn sm64_presentation_rotation(model:&str,angle:[i16;3])->Quat {
+    if sm64_upright_actor(model) {
+        // These actors are authored upright. Their native graphics node may
+        // carry transient pitch/roll from animation/ground alignment that we
+        // cannot reproduce correctly until the full skeletal channel evaluator
+        // is present. Preserve native yaw while keeping the presentation
+        // upright instead of laying Goombas/Bob-ombs on their side.
+        sm64_object_rotation([0,angle[1],0])
+    } else {
+        sm64_object_rotation(angle)
+    }
+}
+
+#[inline]
+fn sm64_flat_geo_scale(model:&str)->f32 {
+    // star_geo carries GEO_SCALE(0x00, 16384). When hierarchical GeoLayout
+    // resolution falls back to the flat display-list resolver that scale node
+    // is otherwise lost, producing a 4x oversized star.
+    if matches!(model,"MODEL_STAR"|"MODEL_TRANSPARENT_STAR") {
+        0.25
+    } else {
+        1.0
+    }
 }
 
 fn spawn_display_list_geometry(
@@ -1795,7 +1830,7 @@ fn sync_object_presentations(
 
         presented.insert(presentation.id);
         transform.translation=sm64_render_vec3(object.pos);
-        transform.rotation=sm64_object_rotation(object.face_angle);
+        transform.rotation=sm64_presentation_rotation(&object.model,object.face_angle);
         transform.scale=Vec3::from_array(object.scale);
         *visibility=if (object.render_flags & 1)!=0 && (object.render_flags & (1<<4))==0 {
             Visibility::Visible
