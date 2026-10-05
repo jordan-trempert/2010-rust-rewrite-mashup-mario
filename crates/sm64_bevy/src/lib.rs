@@ -879,7 +879,7 @@ fn spawn_flat_object_geometry(
             let a=sm64_render_vec3(triangle[0].position);
             let b=sm64_render_vec3(triangle[1].position);
             let d=sm64_render_vec3(triangle[2].position);
-            let n=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Z).to_array();
+            let n={ let n=(b-a).cross(d-a).normalize_or_zero(); if n.length_squared()>0.0 {n} else {Vec3::Z} }.to_array();
             for vertex in triangle {
                 positions.push(sm64_render_pos(vertex.position));
                 normals.push(n);
@@ -1777,7 +1777,7 @@ fn sync_native_render_frame(
         image.sampler=ImageSampler::Descriptor(sampler);
 
         if let Some(handle)=cache.textures.get(&update.id) {
-            if let Some(existing)=images.get_mut(handle) {
+            if let Some(existing)=images.get_mut(handle.id()) {
                 *existing=image;
             }
         } else {
@@ -1800,8 +1800,8 @@ fn sync_native_render_frame(
     for key in stale {
         if let Some(batch)=cache.batches.remove(&key) {
             commands.entity(batch.entity).despawn();
-            meshes.remove(&batch.mesh);
-            materials.remove(&batch.material);
+            meshes.remove(batch.mesh.id());
+            materials.remove(batch.material.id());
         }
     }
 
