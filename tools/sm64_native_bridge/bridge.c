@@ -18,6 +18,7 @@
 #include "levels/scripts.h"
 #include "game/area.h"
 #include "game/game_init.h"
+#include "game/interaction.h"
 #include "game/level_update.h"
 #include "game/mario.h"
 #include "game/memory.h"
@@ -28,6 +29,7 @@
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
 #include "engine/level_script.h"
+#include "engine/math_util.h"
 #include "engine/surface_collision.h"
 #include "engine/surface_load.h"
 
@@ -285,6 +287,123 @@ static void apply_proxy(const struct Request *request) {
         if (inputYaw < -0x4000) inputYaw = -0x4000;
         gMarioObject->oMarioCannonInputYaw = inputYaw;
         gMarioState->faceAngle[0] = request->pitch;
+    }
+}
+
+static void apply_external_attack(const struct Request *request) {
+    if ((request->attack_flags & 1u) == 0 || gObjectLists == NULL) {
+        return;
+    }
+
+    /*
+     * COD bullets are translated into the original SM64 object interaction
+     * protocol. Behaviors already know how to react to INT_STATUS_WAS_ATTACKED
+     * and the low-byte ATTACK_* value, so keep death/loot/state changes native.
+     */
+    const int ground_pound = request->pitch < -0x1800;
+    struct Object *best = NULL;
+    float best_score = 1.0e30f;
+    int list_index;
+
+    if (ground_pound) {
+        for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+            struct ObjectNode *head = &gObjectLists[list_index];
+            struct ObjectNode *node = head->next;
+            while (node != head) {
+                struct Object *object = (struct Object *)node;
+                node = node->next;
+                if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                    continue;
+                }
+                if (object->oInteractType == 0) {
+                    continue;
+                }
+                {
+                    const float dx = object->oPosX - request->pos[0];
+                    const float dz = object->oPosZ - request->pos[2];
+                    const float down = request->pos[1] - object->oPosY;
+                    const float horizontal2 = dx * dx + dz * dz;
+                    if (down >= -80.0f && down <= 650.0f && horizontal2 <= 260.0f * 260.0f) {
+                        const float score = horizontal2 + down * down * 0.15f;
+                        if (score < best_score) {
+                            best_score = score;
+                            best = object;
+                        }
+                    }
+                }
+            }
+        }
+        if (best != NULL) {
+            best->oInteractStatus |=
+                INT_STATUS_INTERACTED |
+                INT_STATUS_WAS_ATTACKED |
+                ATTACK_GROUND_POUND_OR_TWIRL;
+            return;
+        }
+    }
+
+    {
+        const float yaw_s = sins(request->yaw);
+        const float yaw_c = coss(request->yaw);
+        const float pitch_s = sins(request->pitch);
+        const float pitch_c = coss(request->pitch);
+        const float dir_x = yaw_s * pitch_c;
+        const float dir_y = pitch_s;
+        const float dir_z = yaw_c * pitch_c;
+        const float max_range = 2600.0f;
+
+        for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
+            struct ObjectNode *head = &gObjectLists[list_index];
+            struct ObjectNode *node = head->next;
+            while (node != head) {
+                struct Object *object = (struct Object *)node;
+                node = node->next;
+                if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                    continue;
+                }
+                if (object->oInteractType == 0) {
+                    continue;
+                }
+
+                {
+                    const float dx = object->oPosX - request->pos[0];
+                    const float dy = (object->oPosY + 80.0f) - request->pos[1];
+                    const float dz = object->oPosZ - request->pos[2];
+                    const float along = dx * dir_x + dy * dir_y + dz * dir_z;
+                    float radius;
+                    float px;
+                    float py;
+                    float pz;
+                    float perp2;
+
+                    if (along < 0.0f || along > max_range) {
+                        continue;
+                    }
+
+                    px = dx - dir_x * along;
+                    py = dy - dir_y * along;
+                    pz = dz - dir_z * along;
+                    perp2 = px * px + py * py + pz * pz;
+                    radius = object->hitboxRadius > 1.0f ? object->hitboxRadius : 120.0f;
+                    radius += 55.0f;
+
+                    if (perp2 <= radius * radius) {
+                        const float score = along + perp2 * 0.002f;
+                        if (score < best_score) {
+                            best_score = score;
+                            best = object;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (best != NULL) {
+        best->oInteractStatus |=
+            INT_STATUS_INTERACTED |
+            INT_STATUS_WAS_ATTACKED |
+            ATTACK_FAST_ATTACK;
     }
 }
 
@@ -694,6 +813,8 @@ static int bridge_main(int argc, char **argv) {
 
             gBridgeStage = "apply_proxy";
             apply_proxy(&request);
+            gBridgeStage = "apply_external_attack";
+            apply_external_attack(&request);
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u proxy applied\n", bridge_step);
