@@ -340,6 +340,49 @@ static void apply_proxy(const struct Request *request) {
     }
 }
 
+static int bridge_attackable_object(const struct Object *object) {
+    int32_t model;
+    if (object == NULL || object == gMarioObject) {
+        return 0;
+    }
+    if ((object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+        return 0;
+    }
+
+    model = model_id_for_object(object);
+    if (model < 0) {
+        /* Skip logic-only helpers/spawners with no rendered graph node. */
+        return 0;
+    }
+
+    switch (model) {
+        case MODEL_YELLOW_COIN:
+        case MODEL_YELLOW_COIN_NO_SHADOW:
+        case MODEL_BLUE_COIN:
+        case MODEL_BLUE_COIN_NO_SHADOW:
+        case MODEL_RED_COIN:
+        case MODEL_RED_COIN_NO_SHADOW:
+        case MODEL_STAR:
+        case MODEL_TRANSPARENT_STAR:
+            return 0;
+        default:
+            break;
+    }
+
+    /*
+     * Some behaviors populate oInteractType/hitboxes during their own update,
+     * so don't require interactType to already be nonzero. But also avoid
+     * targeting inert scenery with no interaction/hit volume at all.
+     */
+    if (object->oInteractType == 0 &&
+        object->hitboxRadius <= 1.0f &&
+        object->hurtboxRadius <= 1.0f) {
+        return 0;
+    }
+
+    return 1;
+}
+
 static void apply_external_attack(const struct Request *request) {
     if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0 || gObjectLists == NULL) {
         return;
@@ -362,7 +405,7 @@ static void apply_external_attack(const struct Request *request) {
             while (node != head) {
                 struct Object *object = (struct Object *)node;
                 node = node->next;
-                if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                if (!bridge_attackable_object(object)) {
                     continue;
                 }
                 {
@@ -405,7 +448,7 @@ static void apply_external_attack(const struct Request *request) {
             while (node != head) {
                 struct Object *object = (struct Object *)node;
                 node = node->next;
-                if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
+                if (!bridge_attackable_object(object)) {
                     continue;
                 }
 
