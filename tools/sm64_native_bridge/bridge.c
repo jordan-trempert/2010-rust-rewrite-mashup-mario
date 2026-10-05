@@ -922,8 +922,7 @@ static void bridge_bypass_star_door_unlock_cutscene(void) {
 
     fprintf(
         stderr,
-        "iw4l-sm64-native: star door unlock cutscene bypassed required_stars=%d save_flag=0x%08X action_arg=0x%X\n",
-        (int)(gMarioState->usedObj->oBhvParams >> 24),
+        "iw4l-sm64-native: star door unlock cutscene bypassed save_flag=0x%08X action_arg=0x%X\n",
         (unsigned)save_flag,
         (unsigned)gMarioState->actionArg
     );
