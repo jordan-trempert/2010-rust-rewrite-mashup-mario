@@ -1939,10 +1939,19 @@ fn sync_native_render_frame(
     }
 
     if frame.tick<=3 || frame.tick%300==0 {
+        let textured_triangles=frame.triangles.iter()
+            .filter(|triangle|triangle.texture_id.is_some())
+            .count();
+        let unique_texture_ids=frame.triangles.iter()
+            .filter_map(|triangle|triangle.texture_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         info!(
-            "SM64 native renderer frame tick={} triangles={} texture_updates={} textures={} batches={}",
+            "SM64 native renderer frame tick={} triangles={} textured_triangles={} unique_texture_ids={} texture_updates={} textures={} batches={}",
             frame.tick,
             frame.triangles.len(),
+            textured_triangles,
+            unique_texture_ids,
             frame.texture_updates.len(),
             cache.textures.len(),
             cache.batches.len()
