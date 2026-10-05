@@ -26,6 +26,35 @@ impl MarioSpawn {
     }
 }
 
+pub fn load_skybox_name(
+    decomp_root: impl AsRef<Path>,
+    level: &str,
+) -> Result<Option<String>, crate::CollisionParseError> {
+    let path=decomp_root.as_ref().join("levels").join(level).join("script.c");
+    let text=std::fs::read_to_string(&path)
+        .map_err(|e|crate::CollisionParseError::new(format!("{}: {e}",path.display())))?;
+    Ok(parse_skybox_name(&text))
+}
+
+pub fn parse_skybox_name(source:&str)->Option<String> {
+    for raw in source.lines() {
+        let line=remove_block_comments(raw);
+        let line=line.trim();
+        let Some(args)=macro_args(line,"LOAD_MIO0") else {continue;};
+        let parts=args.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len()<2 || parse_i16(parts[0])!=Some(0x0A) {
+            continue;
+        }
+        let symbol=parts[1].trim();
+        let suffix="_skybox_mio0SegmentRomStart";
+        let base=symbol.strip_prefix('_')?.strip_suffix(suffix)?;
+        if !base.is_empty() {
+            return Some(base.to_owned());
+        }
+    }
+    None
+}
+
 pub fn load_mario_spawn(
     decomp_root: impl AsRef<Path>,
     level: &str,
