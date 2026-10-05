@@ -659,7 +659,9 @@ $captureReplacement = @"
             const uint8_t *rgba12,
             uint32_t texture_id,
             int textured,
-            int alpha
+            int alpha,
+            uint8_t wrap_s,
+            uint8_t wrap_t
         );
         float native_pos[9];
         float native_uv[6];
@@ -733,7 +735,9 @@ $captureReplacement = @"
             native_rgba,
             native_texture_id,
             native_textured,
-            use_alpha
+            use_alpha,
+            (uint8_t)rdp.texture_tile.cms,
+            (uint8_t)rdp.texture_tile.cmt
         );
     }
 #endif
