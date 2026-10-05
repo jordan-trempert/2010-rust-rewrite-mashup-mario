@@ -349,11 +349,13 @@ impl Default for HostClassLoadouts {
     }
 }
 
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sm64HudView {
     pub active: bool,
     pub health: i32,
     pub coins: i32,
+    pub dialog_id: i16,
+    pub dialog_text: String,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
