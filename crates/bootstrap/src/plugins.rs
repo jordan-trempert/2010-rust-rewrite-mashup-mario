@@ -442,6 +442,14 @@ fn apply_sm64_native_player_output(
             | sm64_core::ACT_TORNADO_TWIRLING
             | sm64_core::ACT_GRABBED
             | sm64_core::ACT_RIDING_HOOT
+            | sm64_core::ACT_WARP_DOOR_SPAWN
+            | sm64_core::ACT_EMERGE_FROM_PIPE
+            | sm64_core::ACT_SPAWN_SPIN_AIRBORNE
+            | sm64_core::ACT_SPAWN_NO_SPIN_AIRBORNE
+            | sm64_core::ACT_TELEPORT_FADE_OUT
+            | sm64_core::ACT_TELEPORT_FADE_IN
+            | sm64_core::ACT_EXIT_AIRBORNE
+            | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
     );
 
     authority.0.set_external_motion(id,owns_motion);
