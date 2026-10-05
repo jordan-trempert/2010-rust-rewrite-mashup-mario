@@ -2241,7 +2241,15 @@ IW4L_SM64_API int iw4l_sm64_init(
         return 0;
     }
 
-    if ((gMarioState->action & ACT_GROUP_MASK) == ACT_GROUP_CUTSCENE) {
+    /*
+     * Fresh embedded loads used to collapse every cutscene-group spawn to
+     * ACT_IDLE. That is wrong for authored course-return nodes: painting/star
+     * and death exits intentionally spawn Mario at the loading-zone object and
+     * use a short native launch action to carry him away from it. Preserve
+     * those actions so COD can follow native motion until the launch finishes.
+     */
+    if ((gMarioState->action & ACT_GROUP_MASK) == ACT_GROUP_CUTSCENE
+        && !native_owns_mario_motion()) {
         set_mario_action(gMarioState, ACT_IDLE, 0);
     }
 
