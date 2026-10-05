@@ -1843,9 +1843,9 @@ fn sync_native_render_frame(
                 sm64_render_vec3(triangle.pos[1]),
                 sm64_render_vec3(triangle.pos[2]),
             ];
-            let a=Vec3::from_array(converted[0]);
-            let b=Vec3::from_array(converted[1]);
-            let d=Vec3::from_array(converted[2]);
+            let a=converted[0];
+            let b=converted[1];
+            let d=converted[2];
             let raw_normal=(b-a).cross(d-a);
             let normal=if raw_normal.length_squared()>1.0e-12 {
                 raw_normal.normalize()
@@ -1854,7 +1854,7 @@ fn sync_native_render_frame(
             }.to_array();
 
             for i in 0..3 {
-                positions.push(converted[i]);
+                positions.push(converted[i].to_array());
                 normals.push(normal);
                 uvs.push(triangle.uv[i]);
                 colors.push([
