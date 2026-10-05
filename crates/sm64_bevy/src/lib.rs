@@ -359,18 +359,32 @@ fn launch_requested_sm64_map(
         }
     };
 
-    let render_geometry=match sm64_assets::load_level_render_geometry(&root,&level,area) {
-        Ok(geometry)=>Some(geometry),
-        Err(error)=>{
-            warn!("SM64 render geometry load failed; using collision fallback: {error}");
-            None
+    /*
+     * sm64cod:* receives all 3D geometry from the embedded DLL's native
+     * GeoLayout/Fast3D traversal. Do not even parse the old Rust presentation
+     * geometry in native mode; this makes it impossible for the previous
+     * renderer to leak back into the COD path.
+     */
+    let render_geometry=if cod_active.is_some() {
+        None
+    } else {
+        match sm64_assets::load_level_render_geometry(&root,&level,area) {
+            Ok(geometry)=>Some(geometry),
+            Err(error)=>{
+                warn!("SM64 render geometry load failed; using collision fallback: {error}");
+                None
+            }
         }
     };
-    let texture_sources=match sm64_assets::load_texture_sources(&root,&level) {
-        Ok(sources)=>sources,
-        Err(error)=>{
-            warn!("SM64 texture source resolution failed: {error}");
-            HashMap::new()
+    let texture_sources=if cod_active.is_some() {
+        HashMap::new()
+    } else {
+        match sm64_assets::load_texture_sources(&root,&level) {
+            Ok(sources)=>sources,
+            Err(error)=>{
+                warn!("SM64 texture source resolution failed: {error}");
+                HashMap::new()
+            }
         }
     };
     let skybox_name=sm64_assets::load_skybox_name(&root,&level)
@@ -378,28 +392,40 @@ fn launch_requested_sm64_map(
             warn!("SM64 skybox discovery failed: {error}");
             None
         });
-    let mario_hierarchy=sm64_assets::resolve_geo_model_parts(&root,"mario_geo")
-        .map_err(|error|{
-            warn!("SM64 Mario GeoLayout hierarchy failed; using legacy part placement: {error}");
-            error
-        })
-        .ok();
-    let mario_geometry=match sm64_assets::load_model_display_lists(
-        &root,
-        "actors/mario/model.inc.c",
-        MARIO_MODEL_ROOTS,
-    ) {
-        Ok(geometry)=>Some(geometry),
-        Err(error)=>{
-            warn!("SM64 Mario model load failed; using cuboid fallback: {error}");
-            None
+    let mario_hierarchy=if cod_active.is_some() {
+        None
+    } else {
+        sm64_assets::resolve_geo_model_parts(&root,"mario_geo")
+            .map_err(|error|{
+                warn!("SM64 Mario GeoLayout hierarchy failed; using legacy part placement: {error}");
+                error
+            })
+            .ok()
+    };
+    let mario_geometry=if cod_active.is_some() {
+        None
+    } else {
+        match sm64_assets::load_model_display_lists(
+            &root,
+            "actors/mario/model.inc.c",
+            MARIO_MODEL_ROOTS,
+        ) {
+            Ok(geometry)=>Some(geometry),
+            Err(error)=>{
+                warn!("SM64 Mario model load failed; using cuboid fallback: {error}");
+                None
+            }
         }
     };
-    let mario_texture_sources=sm64_assets::load_actor_texture_sources(&root,"mario")
-        .unwrap_or_else(|error|{
-            warn!("SM64 Mario texture resolution failed: {error}");
-            HashMap::new()
-        });
+    let mario_texture_sources=if cod_active.is_some() {
+        HashMap::new()
+    } else {
+        sm64_assets::load_actor_texture_sources(&root,"mario")
+            .unwrap_or_else(|error|{
+                warn!("SM64 Mario texture resolution failed: {error}");
+                HashMap::new()
+            })
+    };
     let (object_spawns,behavior_lists)=if cod_active.is_none() {
         (
             sm64_assets::load_level_object_spawns(&root,&level,area)
@@ -513,7 +539,7 @@ fn launch_requested_sm64_map(
         runtime.world.mario.terrain_type=area_settings.terrain_type;
 
         info!(
-            "SM64 COD map: NATIVE-ONLY GAMEPLAY enabled; Rust Sm64World objects=0, Rust fallback simulation=disabled"
+            "SM64 COD map: NATIVE-ONLY GAMEPLAY + 3D RENDERING enabled; Rust Sm64World objects=0, Rust gameplay fallback=disabled, Rust GeoLayout renderer=disabled"
         );
     } else {
         // Standalone/debug sm64:* mode keeps the Rust simulation.
