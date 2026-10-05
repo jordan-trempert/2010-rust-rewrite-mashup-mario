@@ -303,6 +303,12 @@ static struct LevelCommand *gIw4lLevelCommand = NULL;
 extern void mario_update_hitbox_and_cap_model(struct MarioState *m);
 
 static int gIw4lInitialized = 0;
+/*
+ * After a host level handoff the freshly initialized SM64 runtime already
+ * contains the exact destination warp-node position. The first COD proxy step
+ * must not overwrite it before Rust has consumed that spawn.
+ */
+static int gIw4lPreserveNativeSpawnOneStep = 0;
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
 int gIw4lRunMarioAction = 0;
@@ -1708,25 +1714,16 @@ IW4L_SM64_API int iw4l_sm64_init(
     gDebugLevelSelect = FALSE;
 
     /*
-     * Castle grounds -> castle_inside uses destination nodes 0/1 for the
-     * exterior double doors, but a freshly initialized castle area does not
-     * have a reliable ObjectWarpNode spawn object for those IDs in the PC
-     * decomp. Re-warping the already-loaded area can bind one of those IDs to
-     * an unrelated castle door and place COD in a side painting room.
-     *
-     * The level's authored MARIO_POS is the canonical front-lobby entrance, so
-     * keep that initial spawn for these two exterior-door destinations. Other
-     * incoming nodes (key doors, course exits, etc.) still use native warp
-     * placement normally.
+     * Recreate the exact destination spawn selected by vanilla SM64. Rust will
+     * consume this native position on the first snapshot before COD is allowed
+     * to mirror its own transform back into Mario.
      */
-    const int use_default_castle_lobby_spawn =
-        strcmp(level_name, "castle_inside") == 0 &&
-        area == 1 &&
-        (warp_node == 0 || warp_node == 1);
-
-    if (gCurrentArea != NULL && warp_node >= 0 && !use_default_castle_lobby_spawn) {
+    if (gCurrentArea != NULL && warp_node >= 0) {
         initiate_warp(level->level, (s16)area, (s16)warp_node, (s32)warp_arg);
         warp_area();
+        gIw4lPreserveNativeSpawnOneStep = 1;
+    } else {
+        gIw4lPreserveNativeSpawnOneStep = 0;
     }
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
@@ -1751,12 +1748,15 @@ IW4L_SM64_API int iw4l_sm64_init(
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
-        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d default_lobby_spawn=%d action=0x%08X\n",
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) action=0x%08X\n",
         level_name,
         area,
         act,
         warp_node,
-        use_default_castle_lobby_spawn,
+        gIw4lPreserveNativeSpawnOneStep,
+        gMarioState->pos[0],
+        gMarioState->pos[1],
+        gMarioState->pos[2],
         gMarioState->action
     );
     fflush(stderr);
@@ -1772,6 +1772,17 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     if (!gIw4lInitialized || gIw4lLevelCommand == NULL || player == NULL) {
         snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime is not initialized");
         return NULL;
+    }
+
+    if (gIw4lPreserveNativeSpawnOneStep) {
+        /*
+         * The destination level/warp was initialized in iw4l_sm64_init().
+         * Return that exact native position once before apply_proxy() can copy
+         * the source-level COD coordinates over it.
+         */
+        gIw4lPreserveNativeSpawnOneStep = 0;
+        gBridgeStage = "initial_warp_snapshot";
+        return fill_snapshot_view();
     }
 
     memset(&request, 0, sizeof(request));
@@ -1823,6 +1834,7 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
         gIw4lRenderTriangleCount=0;
     }
     gIw4lInitialized = 0;
+    gIw4lPreserveNativeSpawnOneStep = 0;
     gIw4lAudioFrameCount = 0;
     gIw4lAudioCadence = 0;
     gIw4lRunMarioAction = 0;
