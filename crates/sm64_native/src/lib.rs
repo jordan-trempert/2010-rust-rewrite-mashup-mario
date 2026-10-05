@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 5;
+const ABI_VERSION: u32 = 6;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -60,9 +60,18 @@ pub struct NativeTextureUpdate {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct NativeTransition {
+    pub level: String,
+    pub area: u8,
+    pub node: u8,
+    pub arg: u32,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct NativeSnapshot {
     pub tick: u32,
     pub area_index: u32,
+    pub transition: Option<NativeTransition>,
     pub mario_health: i32,
     pub coins: i32,
     pub mario_action: u32,
@@ -131,6 +140,10 @@ struct NativeSnapshotView {
     abi_version: u32,
     tick: u32,
     area_index: u32,
+    transition_level: [c_char; 32],
+    transition_area: u32,
+    transition_node: u32,
+    transition_arg: u32,
     mario_health: i32,
     coins: i32,
     mario_action: u32,
@@ -156,7 +169,7 @@ struct NativeSnapshotView {
 }
 
 type AbiVersionFn = unsafe extern "C" fn() -> u32;
-type InitFn = unsafe extern "C" fn(*const c_char, i32, i32) -> i32;
+type InitFn = unsafe extern "C" fn(*const c_char, i32, i32, i32, u32) -> i32;
 type StepFn = unsafe extern "C" fn(*const NativePlayerProxy) -> *const NativeSnapshotView;
 type ShutdownFn = unsafe extern "C" fn();
 type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
@@ -246,6 +259,17 @@ impl NativeClient {
         area: u8,
         act: u8,
     ) -> Result<Self, NativeBridgeError> {
+        Self::launch_at(decomp_root, level, area, act, None, 0)
+    }
+
+    pub fn launch_at(
+        decomp_root: impl AsRef<Path>,
+        level: &str,
+        area: u8,
+        act: u8,
+        warp_node: Option<u8>,
+        warp_arg: u32,
+    ) -> Result<Self, NativeBridgeError> {
         let asset_root = decomp_root.as_ref();
         let module_path = default_module_path(asset_root);
         if !module_path.is_file() {
@@ -293,7 +317,15 @@ impl NativeClient {
             )));
         }
 
-        let initialized = unsafe { init_fn(level.as_ptr(), i32::from(area), i32::from(act)) };
+        let initialized = unsafe {
+            init_fn(
+                level.as_ptr(),
+                i32::from(area),
+                i32::from(act),
+                warp_node.map_or(-1, i32::from),
+                warp_arg,
+            )
+        };
         if initialized == 0 {
             return Err(NativeBridgeError::new(format!(
                 "embedded SM64 initialization failed: {}",
@@ -505,9 +537,35 @@ impl NativeClient {
             unsafe { slice::from_raw_parts(view.audio_samples, audio_sample_count) }.to_vec()
         };
 
+        let transition_len = view
+            .transition_level
+            .iter()
+            .position(|&ch| ch == 0)
+            .unwrap_or(view.transition_level.len());
+        let transition = if transition_len == 0 {
+            None
+        } else {
+            let level_bytes = unsafe {
+                slice::from_raw_parts(
+                    view.transition_level.as_ptr().cast::<u8>(),
+                    transition_len,
+                )
+            };
+            let level = String::from_utf8_lossy(level_bytes).into_owned();
+            let area = u8::try_from(view.transition_area).unwrap_or(1).max(1);
+            let node = u8::try_from(view.transition_node).unwrap_or(0);
+            Some(NativeTransition {
+                level,
+                area,
+                node,
+                arg: view.transition_arg,
+            })
+        };
+
         Ok(NativeSnapshot {
             tick: view.tick,
             area_index: view.area_index,
+            transition,
             mario_health: view.mario_health,
             coins: view.coins,
             mario_action: view.mario_action,
