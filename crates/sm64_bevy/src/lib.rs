@@ -1879,6 +1879,33 @@ fn sync_native_render_frame(
             if let Some(mut mesh)=meshes.get_mut(&existing.mesh) {
                 *mesh=mesh_data;
             }
+
+            /*
+             * Native Fast3D texture uploads can arrive after a draw batch is
+             * first observed. A batch created before its texture existed was
+             * previously left with base_color_texture=None forever, producing
+             * an all-white SM64 scene even though the DLL later uploaded the
+             * correct native texture.
+             *
+             * Refresh the material every native frame so late/reuploaded
+             * textures are bound to the already-existing batch.
+             */
+            if let Some(mut material)=materials.get_mut(&existing.material) {
+                material.base_color=Color::WHITE;
+                material.base_color_texture=if key.0==u32::MAX {
+                    None
+                } else {
+                    cache.textures.get(&key.0).cloned()
+                };
+                material.unlit=true;
+                material.alpha_mode=if key.1 {
+                    AlphaMode::Blend
+                } else {
+                    AlphaMode::Opaque
+                };
+                material.cull_mode=None;
+            }
+
             continue;
         }
 
@@ -1913,9 +1940,10 @@ fn sync_native_render_frame(
 
     if frame.tick<=3 || frame.tick%300==0 {
         info!(
-            "SM64 native renderer frame tick={} triangles={} textures={} batches={}",
+            "SM64 native renderer frame tick={} triangles={} texture_updates={} textures={} batches={}",
             frame.tick,
             frame.triangles.len(),
+            frame.texture_updates.len(),
             cache.textures.len(),
             cache.batches.len()
         );
