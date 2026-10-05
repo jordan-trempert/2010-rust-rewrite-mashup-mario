@@ -1226,6 +1226,12 @@ impl SimState {
         self.anim_command_buttons.get(&id).copied().unwrap_or(0)
     }
 
+    /// Latest authoritative user-command button bits for integrations that
+    /// need input even while normal weapon/movement simulation is suppressed.
+    pub fn command_buttons(&self, id: ClientId) -> u32 {
+        self.anim_command_buttons(id)
+    }
+
     pub fn last_anim_movetype(&self, id: ClientId) -> Option<u8> {
         self.last_anim_movement
             .get(&id)
