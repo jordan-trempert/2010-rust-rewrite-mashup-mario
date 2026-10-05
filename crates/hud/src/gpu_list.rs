@@ -180,6 +180,7 @@ pub struct HudTessPass {
     pub mantle_hint: TessJob,
     pub breath_hint: TessJob,
     pub use_hint: TessJob,
+    pub sm64: TessJob,
     pub hud_elems: TessJob,
     pub hud_elems_back: TessJob,
     pub script_menus: TessJob,
