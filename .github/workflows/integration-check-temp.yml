@@ -1,0 +1,15 @@
+name: Temporary integration check
+on:
+  push:
+    paths:
+      - ".github/workflows/integration-check-temp.yml"
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check touched integration crates
+        run: cargo check -p bootstrap -p hud -p audio -p render_frontend -p sim -p weapon_iw4 -p sm64_native -p sm64_bevy
