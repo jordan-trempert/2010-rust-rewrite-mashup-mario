@@ -786,7 +786,6 @@ static int native_runs_mario_action(void) {
         case ACT_PULLING_DOOR:
         case ACT_PUSHING_DOOR:
         case ACT_WARP_DOOR_SPAWN:
-        case ACT_WARP_DOOR_SPAWN:
         case ACT_EMERGE_FROM_PIPE:
         case ACT_SPAWN_SPIN_AIRBORNE:
         case ACT_SPAWN_NO_SPIN_AIRBORNE:
