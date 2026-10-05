@@ -48,6 +48,17 @@
 #define BRIDGE_INPUT_USE          0x00000002u
 #define BRIDGE_INPUT_ATTACK_PRESS 0x00000004u
 #define BRIDGE_INPUT_GROUND_POUND 0x00000008u
+/*
+ * Some sm64-port forks expose the special warp-node IDs only inside the level
+ * script sources, not through game/level_update.h. The values are part of the
+ * SM64 level-script ABI and are stable across the decomp/port:
+ *   0xF0 = successful course exit (star/key)
+ *   0xF1 = death exit
+ *
+ * Keep bridge-private names so this file builds against both header layouts.
+ */
+#define IW4L_WARP_NODE_SUCCESS 0xF0u
+#define IW4L_WARP_NODE_DEATH   0xF1u
 
 #if defined(_WIN32) || defined(_WIN64)
 #define IW4L_SM64_API __declspec(dllexport)
@@ -889,7 +900,7 @@ static int bridge_capture_star_or_death_exit(void) {
          || gMarioState->action == ACT_STAR_DANCE_WATER)
         && (gMarioState->actionArg & 1) == 0
         && gMarioState->actionTimer >= 80) {
-        return bridge_capture_authored_warp_node(WARP_NODE_SUCCESS, "star exit");
+        return bridge_capture_authored_warp_node((u8)IW4L_WARP_NODE_SUCCESS, "star exit");
     }
 
     /*
@@ -899,7 +910,7 @@ static int bridge_capture_star_or_death_exit(void) {
      * immediately kill the new COD life again.
      */
     if (gMarioState->health < 0x100) {
-        return bridge_capture_authored_warp_node(WARP_NODE_DEATH, "death");
+        return bridge_capture_authored_warp_node((u8)IW4L_WARP_NODE_DEATH, "death");
     }
 
     return 0;
