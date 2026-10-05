@@ -99,6 +99,8 @@ $levelScriptSource = Join-Path $root "src\engine\level_script.c"
 $levelScriptBackup = Join-Path $root "level_script.iw4l-backup.txt"
 $levelUpdateSource = Join-Path $root "src\game\level_update.c"
 $levelUpdateBackup = Join-Path $root "level_update.iw4l-backup.txt"
+$gameInitSource = Join-Path $root "src\game\game_init.c"
+$gameInitBackup = Join-Path $root "game_init.iw4l-backup.txt"
 $areaSource = Join-Path $root "src\game\area.c"
 $areaBackup = Join-Path $root "area.iw4l-backup.txt"
 $objectProcessorSource = Join-Path $root "src\game\object_list_processor.c"
@@ -139,6 +141,7 @@ $pcMainObject = Join-Path $build "src\pc\pc_main.o"
 Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
 Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\game\game_init.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\area.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\rendering_graph_node.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_pc.o") -Force -ErrorAction SilentlyContinue
@@ -152,6 +155,7 @@ $recoveryPairs = @(
     @($backup, $pcMain),
     @($levelScriptBackup, $levelScriptSource),
     @($levelUpdateBackup, $levelUpdateSource),
+    @($gameInitBackup, $gameInitSource),
     @($areaBackup, $areaSource),
     @($objectProcessorBackup, $objectProcessorSource),
     @($renderGraphBackup, $renderGraphSource),
@@ -287,6 +291,39 @@ if (-not $levelUpdateText.Contains($warpNeedle)) {
 }
 $levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
 Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
+
+# read_controller_inputs() runs after bridge.c supplies the COD input for this
+# native tick. The stock port polls its dummy controller and overwrites those
+# values before dialogs/actions can see them. Merge the bridge latch at the end
+# of the native controller read so Use/Fire survive until gameplay/render code.
+Copy-Item $gameInitSource $gameInitBackup -Force
+$gameInitText = Get-Content $gameInitSource -Raw
+$controllerNeedle = @"
+    gPlayer3Controller->buttonPressed = gPlayer1Controller->buttonPressed;
+    gPlayer3Controller->buttonDown = gPlayer1Controller->buttonDown;
+}
+"@
+$controllerReplacement = @"
+    gPlayer3Controller->buttonPressed = gPlayer1Controller->buttonPressed;
+    gPlayer3Controller->buttonDown = gPlayer1Controller->buttonDown;
+#ifdef IW4L_SM64_EMBEDDED
+    {
+        extern u16 gIw4lBridgeButtonDown;
+        extern u16 gIw4lBridgeButtonPressed;
+
+        gPlayer1Controller->buttonDown |= gIw4lBridgeButtonDown;
+        gPlayer1Controller->buttonPressed |= gIw4lBridgeButtonPressed;
+        gPlayer3Controller->buttonDown |= gIw4lBridgeButtonDown;
+        gPlayer3Controller->buttonPressed |= gIw4lBridgeButtonPressed;
+    }
+#endif
+}
+"@
+if (-not $gameInitText.Contains($controllerNeedle)) {
+    throw "Could not locate read_controller_inputs tail in $gameInitSource"
+}
+$gameInitText = $gameInitText.Replace($controllerNeedle, $controllerReplacement)
+Set-Content -Path $gameInitSource -Value $gameInitText -Encoding UTF8
 
 # Mario remains allocated because the original SM64 behaviors, interaction
 # system, warps, cannons and cutscenes all reference gMarioState/gMarioObject.
@@ -987,6 +1024,10 @@ finally {
     if (Test-Path $levelUpdateBackup) {
         Copy-Item $levelUpdateBackup $levelUpdateSource -Force
         Remove-Item $levelUpdateBackup -Force
+    }
+    if (Test-Path $gameInitBackup) {
+        Copy-Item $gameInitBackup $gameInitSource -Force
+        Remove-Item $gameInitBackup -Force
     }
     if (Test-Path $areaBackup) {
         Copy-Item $areaBackup $areaSource -Force
