@@ -239,9 +239,12 @@ struct Sm64NativeRenderPresentation;
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64NativePlayerOutput {
     pub active: bool,
+    pub tick: u32,
     pub area_index: u32,
     pub sm64_pos: [f32; 3],
     pub sm64_vel: [f32; 3],
+    pub platform_displacement: [f32; 3],
+    pub platform_active: bool,
     pub sm64_yaw: i16,
     pub action: u32,
     pub mario_flags: u32,
@@ -2067,9 +2070,12 @@ fn advance_sm64_runtime(
                         .texture_updates
                         .extend(snapshot.texture_updates.iter().cloned());
                     native_output.active = true;
+                    native_output.tick = snapshot.tick;
                     native_output.area_index = snapshot.area_index;
                     native_output.sm64_pos = snapshot.mario_pos;
                     native_output.sm64_vel = snapshot.mario_vel;
+                    native_output.platform_displacement = snapshot.platform_displacement;
+                    native_output.platform_active = snapshot.platform_active;
                     native_output.sm64_yaw = snapshot.mario_yaw;
                     native_output.action = snapshot.mario_action;
                     native_output.mario_flags = snapshot.mario_flags;
