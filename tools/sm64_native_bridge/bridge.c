@@ -43,6 +43,14 @@
 #define BRIDGE_INPUT_ATTACK 0x00000001u
 #define BRIDGE_INPUT_USE    0x00000002u
 static volatile const char *gBridgeStage = "startup";
+static int gBridgeDialogPendingReset = 0;
+
+/* ingame_menu.c owns these. The normal renderer advances them, but the bridge
+   intentionally removes render_game(), so the headless host must complete the
+   close/response edge itself. */
+extern s16 gDialogID;
+extern s32 gDialogResponse;
+extern s8 gLastDialogResponse;
 
 
 OSMesg gMainReceivedMesg;
@@ -192,6 +200,35 @@ static int read_request(struct Request *request) {
     return 1;
 }
 
+static void bridge_update_headless_dialog(const struct Request *request) {
+    if (gBridgeDialogPendingReset && get_dialog_id() == DIALOG_NONE) {
+        /*
+         * The previous native update had one full tick to consume
+         * gDialogResponse / the DIALOG_NONE edge. Reset the visual state now
+         * so another dialog can be opened normally.
+         */
+        reset_dialog_render_state();
+        gBridgeDialogPendingReset = 0;
+    }
+
+    if ((request->attack_flags & BRIDGE_INPUT_USE) != 0 &&
+        get_dialog_id() != DIALOG_NONE) {
+        /*
+         * render_dialog_entries() normally performs the close animation and
+         * publishes the response. render_game() is disabled in this headless
+         * bridge, so emit the same gameplay-visible result directly.
+         *
+         * create_dialog_box_with_response() seeds gLastDialogResponse to 1;
+         * ordinary dialogs leave it at zero and use NOT_DEFINED.
+         */
+        gDialogResponse = gLastDialogResponse != 0
+            ? gLastDialogResponse
+            : DIALOG_RESPONSE_NOT_DEFINED;
+        gDialogID = DIALOG_NONE;
+        gBridgeDialogPendingReset = 1;
+    }
+}
+
 static int native_owns_mario_motion(void) {
     u32 action;
     u32 group;
@@ -267,6 +304,7 @@ static void apply_proxy(const struct Request *request) {
         return;
     }
 
+    bridge_update_headless_dialog(request);
     native_owns = native_owns_mario_motion();
 
     if (!native_owns) {
