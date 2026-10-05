@@ -280,6 +280,33 @@ if (-not $levelUpdateText.Contains($updateNeedle)) {
 }
 $levelUpdateText = $levelUpdateText.Replace($updateNeedle, $updateReplacement)
 
+# A host-side DLL reload loses SM64's static sWarpDest even though vanilla
+# keeps it alive while the destination level script starts. Expose a tiny
+# embedded-only helper so bridge.c can restore that pending destination BEFORE
+# the destination's first lvl_init_or_update(0). This makes warp_level() perform
+# the original node/object spawn instead of booting at MARIO_POS and re-warping
+# an already initialized area.
+$primeWarpAnchor = @"
+void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3) {
+"@
+$primeWarpHelper = @"
+#ifdef IW4L_SM64_EMBEDDED
+void iw4l_sm64_prime_level_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3) {
+    sWarpDest.type = WARP_TYPE_CHANGE_LEVEL;
+    sWarpDest.levelNum = destLevel;
+    sWarpDest.areaIdx = destArea;
+    sWarpDest.nodeId = destWarpNode;
+    sWarpDest.arg = arg3;
+}
+#endif
+
+void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3) {
+"@
+if (-not $levelUpdateText.Contains($primeWarpAnchor)) {
+    throw "Could not locate initiate_warp in $levelUpdateSource"
+}
+$levelUpdateText = $levelUpdateText.Replace($primeWarpAnchor, $primeWarpHelper)
+
 # Painting warps are level changes too, but the stock transition spends 74
 # native frames in ACT_DISAPPEARED/basic_update before lvl_init_or_update
 # returns the destination. In the embedded DLL that transition can run through
