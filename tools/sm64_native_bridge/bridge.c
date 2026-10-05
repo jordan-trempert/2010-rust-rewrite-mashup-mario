@@ -19,6 +19,8 @@
 #include "game/area.h"
 #include "game/game_init.h"
 #include "game/interaction.h"
+#include "game/ingame_menu.h"
+#include "game/segment2.h"
 #include "game/level_update.h"
 #include "game/mario.h"
 #include "game/memory.h"
@@ -37,6 +39,8 @@
 #define SNAPSHOT_MAGIC 0x31534D53u /* SMS1 */
 #define OP_STEP 1u
 #define OP_SHUTDOWN 2u
+#define BRIDGE_INPUT_ATTACK 0x00000001u
+#define BRIDGE_INPUT_USE    0x00000002u
 static volatile const char *gBridgeStage = "startup";
 
 
@@ -187,99 +191,144 @@ static int read_request(struct Request *request) {
     return 1;
 }
 
-static void apply_proxy(const struct Request *request) {
-    if (gMarioState == NULL || gMarioObject == NULL) {
-        return;
+static int native_owns_mario_motion(void) {
+    u32 action;
+    u32 group;
+    if (gMarioState == NULL) {
+        return 0;
+    }
+    action = gMarioState->action;
+    group = action & ACT_GROUP_MASK;
+
+    if (group == ACT_GROUP_OBJECT ||
+        group == ACT_GROUP_AUTOMATIC ||
+        group == ACT_GROUP_CUTSCENE) {
+        return 1;
     }
 
-    /*
-     * COD is authoritative for ordinary locomotion. The decomp is authoritative
-     * for object/automatic/cutscene actions such as cannons, poles, warps and
-     * grabs. Do not allow stale walking/airborne state from a previous native
-     * frame to survive after COD teleports the hidden Mario proxy.
-     */
-    switch (gMarioState->action & ACT_GROUP_MASK) {
-        case ACT_GROUP_OBJECT:
-        case ACT_GROUP_AUTOMATIC:
-        case ACT_GROUP_CUTSCENE:
-            break;
+    switch (action) {
+        case ACT_SHOT_FROM_CANNON:
+        case ACT_TORNADO_TWIRLING:
+        case ACT_GRABBED:
+        case ACT_RIDING_HOOT:
+        case ACT_WARP_DOOR_SPAWN:
+        case ACT_EMERGE_FROM_PIPE:
+        case ACT_SPAWN_SPIN_AIRBORNE:
+        case ACT_SPAWN_NO_SPIN_AIRBORNE:
+        case ACT_TELEPORT_FADE_OUT:
+        case ACT_TELEPORT_FADE_IN:
+        case ACT_EXIT_AIRBORNE:
+        case ACT_SPECIAL_EXIT_AIRBORNE:
+            return 1;
         default:
-            if (gMarioState->action != ACT_IDLE) {
-                set_mario_action(gMarioState, ACT_IDLE, 0);
-            }
             break;
     }
 
-    /*
-     * update_objects() applies last frame's gMarioPlatform displacement before
-     * Mario's action refreshes collision. Since COD replaces Mario's position
-     * every bridge tick, that platform reference is stale by definition and
-     * can point at an object state unrelated to the new external position.
-     */
-    clear_mario_platform();
-    gMarioObject->platform = NULL;
+    /* Dialogs/cutscene text can remain active while Mario's action changes
+       briefly. Never let the COD proxy stomp the hidden Mario state while a
+       native dialog is open. */
+    if (get_dialog_id() != DIALOG_NONE) {
+        return 1;
+    }
 
-    gMarioState->pos[0] = request->pos[0];
-    gMarioState->pos[1] = request->pos[1];
-    gMarioState->pos[2] = request->pos[2];
-    gMarioState->vel[0] = request->vel[0];
-    gMarioState->vel[1] = request->vel[1];
-    gMarioState->vel[2] = request->vel[2];
-    gMarioState->faceAngle[1] = request->yaw;
-    gMarioState->faceAngle[0] = request->pitch;
-    gMarioState->input = 0;
+    return 0;
+}
 
-    /*
-     * MarioState caches collision pointers/heights. Because COD can move the
-     * proxy arbitrarily between native ticks, those caches must be rebuilt at
-     * the new position before any vanilla Mario/object behavior runs. Keeping
-     * a floor/ceiling pointer from the previous external position can leave a
-     * dangling dynamic-surface reference and eventually crash update_level().
-     */
-    gMarioState->floorHeight = find_floor(
-        gMarioState->pos[0],
-        gMarioState->pos[1],
-        gMarioState->pos[2],
-        &gMarioState->floor
-    );
-    gMarioState->ceilHeight = find_ceil(
-        gMarioState->pos[0],
-        gMarioState->pos[1],
-        gMarioState->pos[2],
-        &gMarioState->ceil
-    );
-    gMarioState->waterLevel = find_water_level(
-        gMarioState->pos[0],
-        gMarioState->pos[2]
-    );
-
-    gMarioObject->oPosX = request->pos[0];
-    gMarioObject->oPosY = request->pos[1];
-    gMarioObject->oPosZ = request->pos[2];
-    gMarioObject->oFaceAngleYaw = request->yaw;
-    gMarioObject->oMoveAngleYaw = request->yaw;
-    gMarioObject->header.gfx.pos[0] = request->pos[0];
-    gMarioObject->header.gfx.pos[1] = request->pos[1];
-    gMarioObject->header.gfx.pos[2] = request->pos[2];
-
+static void set_bridge_controller_buttons(u16 down, u16 pressed) {
     if (gPlayer1Controller != NULL) {
-        u16 buttons = 0;
-
-        /* Primary fire becomes the cannon's A press only while Mario's hidden
-           proxy is actually in the cannon action. It must not turn ordinary
-           COD gunfire into Mario jumps. */
-        if (gMarioState->action == ACT_IN_CANNON && (request->attack_flags & 1u)) {
-            buttons |= A_BUTTON;
-        }
-
-        gPlayer1Controller->buttonDown = buttons;
-        gPlayer1Controller->buttonPressed = buttons;
+        gPlayer1Controller->buttonDown = down;
+        gPlayer1Controller->buttonPressed = pressed;
         gPlayer1Controller->rawStickX = 0;
         gPlayer1Controller->rawStickY = 0;
         gPlayer1Controller->stickX = 0.0f;
         gPlayer1Controller->stickY = 0.0f;
         gPlayer1Controller->stickMag = 0.0f;
     }
+    /* SM64's dialog renderer reads controller 3, while Mario interactions read
+       controller 1. Feed both so one COD Use press can start and advance NPC
+       text without bypassing the native dialog state machine. */
+    if (gPlayer3Controller != NULL) {
+        gPlayer3Controller->buttonDown = down;
+        gPlayer3Controller->buttonPressed = pressed;
+        gPlayer3Controller->rawStickX = 0;
+        gPlayer3Controller->rawStickY = 0;
+        gPlayer3Controller->stickX = 0.0f;
+        gPlayer3Controller->stickY = 0.0f;
+        gPlayer3Controller->stickMag = 0.0f;
+    }
+}
+
+static void apply_proxy(const struct Request *request) {
+    int native_owns;
+    u16 buttons = 0;
+
+    if (gMarioState == NULL || gMarioObject == NULL) {
+        return;
+    }
+
+    native_owns = native_owns_mario_motion();
+
+    if (!native_owns) {
+        /*
+         * COD owns normal locomotion. Only in this mode may the bridge replace
+         * Mario's transform/collision cache with the external player state.
+         * Previously this happened even inside cannons and dialog cutscenes,
+         * pinning Mario to stale COD coordinates and trapping the action.
+         */
+        if (gMarioState->action != ACT_IDLE) {
+            set_mario_action(gMarioState, ACT_IDLE, 0);
+        }
+
+        clear_mario_platform();
+        gMarioObject->platform = NULL;
+
+        gMarioState->pos[0] = request->pos[0];
+        gMarioState->pos[1] = request->pos[1];
+        gMarioState->pos[2] = request->pos[2];
+        gMarioState->vel[0] = request->vel[0];
+        gMarioState->vel[1] = request->vel[1];
+        gMarioState->vel[2] = request->vel[2];
+        gMarioState->faceAngle[1] = request->yaw;
+        gMarioState->faceAngle[0] = request->pitch;
+        gMarioState->input = 0;
+
+        gMarioState->floorHeight = find_floor(
+            gMarioState->pos[0],
+            gMarioState->pos[1],
+            gMarioState->pos[2],
+            &gMarioState->floor
+        );
+        gMarioState->ceilHeight = find_ceil(
+            gMarioState->pos[0],
+            gMarioState->pos[1],
+            gMarioState->pos[2],
+            &gMarioState->ceil
+        );
+        gMarioState->waterLevel = find_water_level(
+            gMarioState->pos[0],
+            gMarioState->pos[2]
+        );
+
+        gMarioObject->oPosX = request->pos[0];
+        gMarioObject->oPosY = request->pos[1];
+        gMarioObject->oPosZ = request->pos[2];
+        gMarioObject->oFaceAngleYaw = request->yaw;
+        gMarioObject->oMoveAngleYaw = request->yaw;
+        gMarioObject->header.gfx.pos[0] = request->pos[0];
+        gMarioObject->header.gfx.pos[1] = request->pos[1];
+        gMarioObject->header.gfx.pos[2] = request->pos[2];
+    }
+
+    /* COD Use is Mario B: starts native NPC/sign interactions and advances
+       dialogs. Fire is Mario A only in a cannon or while a dialog is open. */
+    if (request->attack_flags & BRIDGE_INPUT_USE) {
+        buttons |= B_BUTTON;
+    }
+    if ((request->attack_flags & BRIDGE_INPUT_ATTACK) &&
+        (gMarioState->action == ACT_IN_CANNON || get_dialog_id() != DIALOG_NONE)) {
+        buttons |= A_BUTTON;
+    }
+    set_bridge_controller_buttons(buttons, buttons);
 
     if (gMarioState->action == ACT_IN_CANNON && gMarioState->usedObj != NULL) {
         s32 inputYaw = (s16)(request->yaw - gMarioState->usedObj->oMoveAngleYaw);
@@ -291,7 +340,7 @@ static void apply_proxy(const struct Request *request) {
 }
 
 static void apply_external_attack(const struct Request *request) {
-    if ((request->attack_flags & 1u) == 0 || gObjectLists == NULL) {
+    if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0 || gObjectLists == NULL) {
         return;
     }
 
@@ -313,9 +362,6 @@ static void apply_external_attack(const struct Request *request) {
                 struct Object *object = (struct Object *)node;
                 node = node->next;
                 if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
-                    continue;
-                }
-                if (object->oInteractType == 0) {
                     continue;
                 }
                 {
@@ -359,9 +405,6 @@ static void apply_external_attack(const struct Request *request) {
                 struct Object *object = (struct Object *)node;
                 node = node->next;
                 if (object == gMarioObject || (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0) {
-                    continue;
-                }
-                if (object->oInteractType == 0) {
                     continue;
                 }
 
@@ -559,12 +602,79 @@ static void print_native_census_once(
     );
 }
 
+static uint16_t bridge_dialog_text(char *out, uint16_t capacity, int16_t *dialog_id) {
+    void **dialog_table;
+    struct DialogEntry *dialog;
+    const u8 *src;
+    uint16_t n = 0;
+    s16 id = get_dialog_id();
+
+    *dialog_id = id;
+    if (id == DIALOG_NONE || capacity == 0) {
+        return 0;
+    }
+
+    dialog_table = segmented_to_virtual(seg2_dialog_table);
+    dialog = segmented_to_virtual(dialog_table[id]);
+    if (dialog == NULL) {
+        return 0;
+    }
+    src = segmented_to_virtual(dialog->str);
+    if (src == NULL) {
+        return 0;
+    }
+
+    while (*src != DIALOG_CHAR_TERMINATOR && n + 1 < capacity) {
+        u8 ch = *src++;
+        char ascii = '?';
+        if (ch <= 0x09) ascii = (char)('0' + ch);
+        else if (ch >= 0x0A && ch <= 0x23) ascii = (char)('A' + (ch - 0x0A));
+        else if (ch >= 0x24 && ch <= 0x3D) ascii = (char)('a' + (ch - 0x24));
+        else if (ch == 0x3E) ascii = '\'';
+        else if (ch == 0x3F || ch == 0x6E) ascii = '.';
+        else if (ch == 0x6F) ascii = ',';
+        else if (ch == 0x9E) ascii = ' ';
+        else if (ch == 0x9F) ascii = '-';
+        else if (ch == 0xD0) ascii = '/';
+        else if (ch == 0xD1) {
+            const char *s = "the";
+            while (*s && n + 1 < capacity) out[n++] = *s++;
+            continue;
+        } else if (ch == 0xD2) {
+            const char *s = "you";
+            while (*s && n + 1 < capacity) out[n++] = *s++;
+            continue;
+        } else if (ch == 0xE1) ascii = '(';
+        else if (ch == 0xE3) ascii = ')';
+        else if (ch == 0xE4) ascii = '+';
+        else if (ch == 0xE5) ascii = '&';
+        else if (ch == 0xE6) ascii = ':';
+        else if (ch == 0xF2) ascii = '!';
+        else if (ch == 0xF3) ascii = '%';
+        else if (ch == 0xF4) ascii = '?';
+        else if (ch == 0xF5 || ch == 0xF6) ascii = '"';
+        else if (ch == 0xF7) ascii = '~';
+        else if (ch == 0xF8) {
+            const char *s = "...";
+            while (*s && n + 1 < capacity) out[n++] = *s++;
+            continue;
+        } else if (ch == 0xF9) ascii = '$';
+        else if (ch == 0xFE) ascii = '\n';
+        out[n++] = ascii;
+    }
+    out[n] = '\0';
+    return n;
+}
+
 static void write_snapshot(void) {
     const struct Object *objects[4096];
     const struct Surface *dynamic_surfaces[8192];
     uint32_t count;
     uint32_t dynamic_count;
     uint32_t i;
+    int16_t dialog_id = DIALOG_NONE;
+    uint16_t dialog_text_len = 0;
+    char dialog_text[4096];
     static uint32_t snapshot_number = 0;
 
     snapshot_number++;
@@ -591,6 +701,7 @@ static void write_snapshot(void) {
     }
 
     print_native_census_once(objects, count, dynamic_count);
+    dialog_text_len = bridge_dialog_text(dialog_text, sizeof(dialog_text), &dialog_id);
 
     gBridgeStage = "write_snapshot";
     write_u32(SNAPSHOT_MAGIC);
@@ -607,7 +718,11 @@ static void write_snapshot(void) {
     write_f32(gMarioState != NULL ? gMarioState->vel[1] : 0.0f);
     write_f32(gMarioState != NULL ? gMarioState->vel[2] : 0.0f);
     write_i16(gMarioState != NULL ? gMarioState->faceAngle[1] : 0);
-    write_u16(0);
+    write_i16(dialog_id);
+    write_u16(dialog_text_len);
+    if (dialog_text_len > 0) {
+        fwrite(dialog_text, 1, dialog_text_len, stdout);
+    }
 
     for (i = 0; i < count; ++i) {
         const struct Object *object = objects[i];
