@@ -318,7 +318,6 @@ impl Plugin for Sm64Plugin {
                 update_debug_input.after(launch_requested_sm64_map),
                 advance_sm64_runtime.after(launch_requested_sm64_map),
                 sync_sm64_dialog_overlay.after(advance_sm64_runtime),
-                sync_sm64_hud_overlay.after(advance_sm64_runtime),
                 sync_native_render_frame.after(advance_sm64_runtime),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
