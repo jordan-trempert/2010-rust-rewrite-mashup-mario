@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 4;
+const ABI_VERSION: u32 = 5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -62,6 +62,7 @@ pub struct NativeTextureUpdate {
 #[derive(Clone, Debug, Default)]
 pub struct NativeSnapshot {
     pub tick: u32,
+    pub area_index: u32,
     pub mario_health: i32,
     pub coins: i32,
     pub mario_action: u32,
@@ -129,6 +130,7 @@ struct NativeTextureView {
 struct NativeSnapshotView {
     abi_version: u32,
     tick: u32,
+    area_index: u32,
     mario_health: i32,
     coins: i32,
     mario_action: u32,
@@ -505,6 +507,7 @@ impl NativeClient {
 
         Ok(NativeSnapshot {
             tick: view.tick,
+            area_index: view.area_index,
             mario_health: view.mario_health,
             coins: view.coins,
             mario_action: view.mario_action,
