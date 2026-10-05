@@ -29,6 +29,11 @@
 #include "game/platform_displacement.h"
 #include "game/save_file.h"
 #include "audio/external.h"
+#include "pc/audio/audio_api.h"
+#include "pc/audio/audio_null.h"
+#ifdef HAVE_WASAPI
+#include "pc/audio/audio_wasapi.h"
+#endif
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
 #include "engine/level_script.h"
@@ -71,6 +76,54 @@ s8 gShowProfiler;
 s8 gShowDebugText;
 
 extern void thread5_game_loop(void *arg);
+
+extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
+
+#ifdef VERSION_EU
+#define IW4L_AUDIO_SAMPLES_HIGH 656
+#define IW4L_AUDIO_SAMPLES_LOW 640
+#else
+#define IW4L_AUDIO_SAMPLES_HIGH 544
+#define IW4L_AUDIO_SAMPLES_LOW 528
+#endif
+
+static struct AudioAPI *gIw4lAudioApi = NULL;
+
+static void bridge_audio_backend_init(void) {
+#ifdef HAVE_WASAPI
+    if (audio_wasapi.init()) {
+        gIw4lAudioApi = &audio_wasapi;
+    }
+#endif
+    if (gIw4lAudioApi == NULL) {
+        gIw4lAudioApi = &audio_null;
+    }
+}
+
+static void bridge_audio_tick(void) {
+    s16 audio_buffer[IW4L_AUDIO_SAMPLES_HIGH * 2 * 2];
+    u32 num_audio_samples;
+    int samples_left;
+    int i;
+
+    if (gIw4lAudioApi == NULL) {
+        return;
+    }
+
+    samples_left = gIw4lAudioApi->buffered();
+    num_audio_samples =
+        samples_left < gIw4lAudioApi->get_desired_buffered()
+            ? IW4L_AUDIO_SAMPLES_HIGH
+            : IW4L_AUDIO_SAMPLES_LOW;
+
+    for (i = 0; i < 2; ++i) {
+        create_next_audio_buffer(
+            audio_buffer + i * (num_audio_samples * 2),
+            num_audio_samples
+        );
+    }
+    gIw4lAudioApi->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
+}
 
 void dispatch_audio_sptask(UNUSED struct SPTask *spTask) {
 }
@@ -1205,6 +1258,8 @@ IW4L_SM64_API int iw4l_sm64_init(const char *level_name, int area, int act) {
         "IW4L Embedded SM64",
         0
     );
+    gBridgeStage = "audio_backend_init";
+    bridge_audio_backend_init();
     gBridgeStage = "audio_init";
     audio_init();
     gBridgeStage = "sound_init";
@@ -1288,6 +1343,8 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gBridgeStage = "level_script_execute";
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gGlobalTimer++;
+    gBridgeStage = "audio_tick";
+    bridge_audio_tick();
     if (gMarioState != NULL && gMarioState->health != health_before) {
         fprintf(
             stderr,
@@ -1392,6 +1449,8 @@ static int bridge_main(int argc, char **argv) {
         "IW4L SM64 Gameplay Bridge",
         0
     );
+    gBridgeStage = "audio_backend_init";
+    bridge_audio_backend_init();
     gBridgeStage = "audio_init";
     audio_init();
     gBridgeStage = "sound_init";
