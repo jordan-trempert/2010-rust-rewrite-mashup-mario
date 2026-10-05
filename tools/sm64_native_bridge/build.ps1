@@ -50,10 +50,11 @@ if (Test-Path $armipsSource) {
     }
 }
 $backup = Join-Path $root "pc_main.iw4l-backup.txt"
-$builtExe = Join-Path $build "sm64.us.exe"
-$output = Join-Path $build "iw4l-sm64-bridge.exe"
+$builtModule = Join-Path $build "iw4l-sm64-native.dll"
+$output = $builtModule
 $staleBackupSource = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
 $staleBackupObject = Join-Path $build "src\pc\pc_main.iw4l-backup.o"
+$pcMainObject = Join-Path $build "src\pc\pc_main.o"
 
 # Older versions of this script created the backup inside src/pc with a .c
 # extension. sm64-port recursively globs src/pc/*.c, so that backup was
@@ -61,8 +62,9 @@ $staleBackupObject = Join-Path $build "src\pc\pc_main.iw4l-backup.o"
 # global symbol definitions. Remove both stale artifacts before this build.
 Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
 Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
+Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
 
-Write-Host "Building native SM64 gameplay bridge from $root"
+Write-Host "Building embedded native SM64 gameplay module from $root"
 Copy-Item $pcMain $backup -Force
 Copy-Item $bridgeSource $pcMain -Force
 
@@ -166,13 +168,16 @@ try {
             throw "sm64-port host tools build failed with exit code $LASTEXITCODE"
         }
 
+        $moduleRel = "$buildRel/iw4l-sm64-native.dll"
         $makeArgs = @(
             "BUILD_DIR=$buildRel",
+            "EXE=$moduleRel",
             "ENABLE_DX11=0",
             "ENABLE_DX12=0",
             "ENABLE_OPENGL=0",
-            "GFX_CFLAGS=-DENABLE_GFX_DUMMY -DWIDESCREEN",
-            "OPT_FLAGS=-O0 -g3",
+            "GFX_CFLAGS=-DENABLE_GFX_DUMMY -DWIDESCREEN -DIW4L_SM64_EMBEDDED",
+            "LDFLAGS=-lm -lxinput9_1_0 -lole32 -lgdi32 -mwindows -shared",
+            "OPT_FLAGS=-O2 -g1",
             "-j$Jobs"
         )
         & make @makeArgs
@@ -184,45 +189,20 @@ try {
         Pop-Location
     }
 
-    if (-not (Test-Path $builtExe)) {
-        throw "Expected bridge executable was not produced at $builtExe"
+    if (-not (Test-Path $builtModule)) {
+        throw "Expected embedded SM64 module was not produced at $builtModule"
     }
-
-    # Windows locks a running executable. A previous launcher run can leave
-    # iw4l-sm64-bridge.exe alive if the game or bridge terminated abnormally.
-    # Stop only the bridge helper before replacing it; never touch the game.
-    Get-Process -Name "iw4l-sm64-bridge" -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(3)
-    while ((Test-Path $output) -and ([DateTime]::UtcNow -lt $deadline)) {
-        try {
-            $stream = [System.IO.File]::Open(
-                $output,
-                [System.IO.FileMode]::Open,
-                [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::None
-            )
-            $stream.Dispose()
-            break
-        }
-        catch {
-            Start-Sleep -Milliseconds 100
-        }
-    }
-
-    Copy-Item $builtExe $output -Force
 
     # Generate a self-contained sorted symbol table while MinGW tools are
     # definitely available. The Rust launcher can use this file later even
     # when addr2line/nm are not on the runtime PATH.
-    $symbolMap = Join-Path $build "iw4l-sm64-bridge.sym"
+    $symbolMap = Join-Path $build "iw4l-sm64-native.sym"
     $nm = Get-Command "x86_64-w64-mingw32-nm" -ErrorAction SilentlyContinue
     if (-not $nm) {
         $nm = Get-Command "nm" -ErrorAction SilentlyContinue
     }
     if ($nm) {
-        & $nm.Source -n $output | Set-Content -Path $symbolMap -Encoding ASCII
+        & $nm.Source -n $builtModule | Set-Content -Path $symbolMap -Encoding ASCII
         Write-Host "Native symbol map: $symbolMap"
     }
     else {
@@ -230,10 +210,10 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Native SM64 gameplay bridge built:"
+    Write-Host "Embedded SM64 gameplay module built:"
     Write-Host "  $output"
     Write-Host ""
-    Write-Host "IW4L auto-detects this when SM64_NATIVE_ROOT points at this checkout."
+    Write-Host "IW4L loads this DLL in-process when SM64_NATIVE_ROOT points at this checkout."
 }
 finally {
     if (Test-Path $backup) {
