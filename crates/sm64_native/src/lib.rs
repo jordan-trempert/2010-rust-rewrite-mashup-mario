@@ -384,24 +384,38 @@ fn symbolize_native_fault(
         }
     })?;
 
+    let mut candidates=vec![address.clone()];
+    // MinGW PE executables normally load at 0x140000000. Some addr2line
+    // builds expect the RVA rather than the process virtual address.
+    if let Some(hex)=address.strip_prefix("0x").or_else(||address.strip_prefix("0X")) {
+        if let Ok(value)=u64::from_str_radix(hex,16) {
+            const PE_IMAGE_BASE:u64=0x1_4000_0000;
+            if value>=PE_IMAGE_BASE {
+                candidates.push(format!("0x{:x}",value-PE_IMAGE_BASE));
+            }
+        }
+    }
+
     for tool in ["addr2line","x86_64-w64-mingw32-addr2line"] {
-        let output=Command::new(tool)
-            .arg("-f")
-            .arg("-C")
-            .arg("-e")
-            .arg(bridge)
-            .arg(&address)
-            .output();
-        let Ok(output)=output else {continue;};
-        if !output.status.success() {continue;}
-        let text=String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(str::trim)
-            .filter(|line|!line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" @ ");
-        if !text.is_empty() && !text.contains("??") {
-            return Some(format!("{address} => {text}"));
+        for candidate in &candidates {
+            let output=Command::new(tool)
+                .arg("-f")
+                .arg("-C")
+                .arg("-e")
+                .arg(bridge)
+                .arg(candidate)
+                .output();
+            let Ok(output)=output else {continue;};
+            if !output.status.success() {continue;}
+            let text=String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line|!line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" @ ");
+            if !text.is_empty() && !text.contains("??") {
+                return Some(format!("{address} ({candidate}) => {text}"));
+            }
         }
     }
     None
