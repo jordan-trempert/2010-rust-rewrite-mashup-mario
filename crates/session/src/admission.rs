@@ -44,8 +44,22 @@ pub fn update_admission(
             && audio_ready
             && skate_ready
             && minecraft_ready);
-    if presentation_ready && let Some(live) = live.as_ref() {
-        admission.core.apply_presentation(live.load_key);
+    if presentation_ready {
+        if external_ready {
+            /*
+             * External presentations are attached after MatchInstalled and own
+             * the visible world independently of the donor WorldScene. Use the
+             * admission core's canonical installed key directly. LiveWorldIdentity
+             * can still be one frame behind (or carry the pre-normalized local
+             * key) during the donor -> external-world handoff, and
+             * apply_presentation() intentionally requires exact key equality.
+             */
+            if let Some(installed)=admission.core.installed() {
+                admission.core.apply_presentation(installed);
+            }
+        } else if let Some(live)=live.as_ref() {
+            admission.core.apply_presentation(live.load_key);
+        }
     }
     let world_installed = has_world.is_some_and(|world| world.0);
     let authority_ready = !hold.is_some_and(|hold| hold.0);
