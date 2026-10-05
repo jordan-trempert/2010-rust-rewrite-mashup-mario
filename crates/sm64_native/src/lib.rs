@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -38,6 +38,24 @@ pub struct NativeObject {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct NativeRenderTriangle {
+    pub pos: [[f32;3];3],
+    pub uv: [[f32;2];3],
+    pub rgba: [[u8;4];3],
+    pub texture_id: Option<u32>,
+    pub alpha: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct NativeTextureUpdate {
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct NativeSnapshot {
     pub tick: u32,
     pub mario_health: i32,
@@ -50,6 +68,8 @@ pub struct NativeSnapshot {
     pub dialog_text: String,
     pub objects: Vec<NativeObject>,
     pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
+    pub render_triangles: Vec<NativeRenderTriangle>,
+    pub texture_updates: Vec<NativeTextureUpdate>,
 }
 
 #[repr(C)]
@@ -76,6 +96,28 @@ struct NativeTriangleView {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+struct NativeRenderTriangleView {
+    pos: [f32;9],
+    uv: [f32;6],
+    rgba: [u8;12],
+    texture_id: u32,
+    textured: u8,
+    alpha: u8,
+    pad: [u8;2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NativeTextureView {
+    id: u32,
+    width: u32,
+    height: u32,
+    generation: u32,
+    rgba: *const u8,
+}
+
+#[repr(C)]
 struct NativeSnapshotView {
     abi_version: u32,
     tick: u32,
@@ -92,6 +134,10 @@ struct NativeSnapshotView {
     object_count: u32,
     dynamic_surfaces: *const NativeTriangleView,
     dynamic_surface_count: u32,
+    render_triangles: *const NativeRenderTriangleView,
+    render_triangle_count: u32,
+    textures: *const NativeTextureView,
+    texture_count: u32,
 }
 
 type AbiVersionFn = unsafe extern "C" fn() -> u32;
@@ -171,6 +217,7 @@ pub struct NativeClient {
     shutdown_fn: ShutdownFn,
     last_error_fn: LastErrorFn,
     module_path: PathBuf,
+    texture_generations: std::collections::HashMap<u32,u32>,
 }
 
 impl NativeClient {
@@ -245,6 +292,7 @@ impl NativeClient {
             shutdown_fn,
             last_error_fn,
             module_path,
+            texture_generations: std::collections::HashMap::new(),
         })
     }
 
@@ -285,6 +333,18 @@ impl NativeClient {
             return Err(NativeBridgeError::new(format!(
                 "embedded SM64 returned impossible dynamic surface count {}",
                 view.dynamic_surface_count
+            )));
+        }
+        if view.render_triangle_count > 65_536 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible render triangle count {}",
+                view.render_triangle_count
+            )));
+        }
+        if view.texture_count > 512 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible texture count {}",
+                view.texture_count
             )));
         }
         if view.dialog_text_len > 4095 {
@@ -347,6 +407,67 @@ impl NativeClient {
             })
             .collect();
 
+        let render_views = if view.render_triangles.is_null() || view.render_triangle_count == 0 {
+            &[][..]
+        } else {
+            unsafe {
+                slice::from_raw_parts(
+                    view.render_triangles,
+                    view.render_triangle_count as usize,
+                )
+            }
+        };
+        let render_triangles=render_views.iter().map(|source|{
+            NativeRenderTriangle {
+                pos:[
+                    [source.pos[0],source.pos[1],source.pos[2]],
+                    [source.pos[3],source.pos[4],source.pos[5]],
+                    [source.pos[6],source.pos[7],source.pos[8]],
+                ],
+                uv:[
+                    [source.uv[0],source.uv[1]],
+                    [source.uv[2],source.uv[3]],
+                    [source.uv[4],source.uv[5]],
+                ],
+                rgba:[
+                    [source.rgba[0],source.rgba[1],source.rgba[2],source.rgba[3]],
+                    [source.rgba[4],source.rgba[5],source.rgba[6],source.rgba[7]],
+                    [source.rgba[8],source.rgba[9],source.rgba[10],source.rgba[11]],
+                ],
+                texture_id:(source.textured!=0 && source.texture_id!=u32::MAX)
+                    .then_some(source.texture_id),
+                alpha:source.alpha!=0,
+            }
+        }).collect();
+
+        let texture_views = if view.textures.is_null() || view.texture_count == 0 {
+            &[][..]
+        } else {
+            unsafe { slice::from_raw_parts(view.textures,view.texture_count as usize) }
+        };
+        let mut texture_updates=Vec::new();
+        for source in texture_views {
+            let known=self.texture_generations.get(&source.id).copied().unwrap_or(0);
+            if source.generation==known || source.rgba.is_null() || source.width==0 || source.height==0 {
+                continue;
+            }
+            let byte_len=(source.width as usize)
+                .saturating_mul(source.height as usize)
+                .saturating_mul(4);
+            if byte_len==0 || byte_len>64*1024*1024 {
+                continue;
+            }
+            let rgba=unsafe { slice::from_raw_parts(source.rgba,byte_len) }.to_vec();
+            self.texture_generations.insert(source.id,source.generation);
+            texture_updates.push(NativeTextureUpdate {
+                id:source.id,
+                width:source.width,
+                height:source.height,
+                generation:source.generation,
+                rgba,
+            });
+        }
+
         Ok(NativeSnapshot {
             tick: view.tick,
             mario_health: view.mario_health,
@@ -359,6 +480,8 @@ impl NativeClient {
             dialog_text,
             objects,
             dynamic_surfaces,
+            render_triangles,
+            texture_updates,
         })
     }
 }
