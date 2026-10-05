@@ -26,6 +26,7 @@ struct Sm64CodCollisionState {
     normal_static_vertices: Vec<[f32; 3]>,
     vanish_static_vertices: Vec<[f32; 3]>,
     vanish_active: bool,
+    level: String,
     area: u8,
     last_dynamic_tick: u32,
     last_dynamic_triangles: Vec<[[f32; 3]; 3]>,
@@ -241,6 +242,7 @@ fn launch_installed_sm64_cod_map(
         collision_state.normal_static_vertices = verts.clone();
         collision_state.vanish_static_vertices = vanish_verts;
         collision_state.vanish_active = false;
+        collision_state.level = level.clone();
         collision_state.area = area;
         collision_state.last_dynamic_tick = 0;
         collision_state.last_dynamic_triangles.clear();
@@ -679,15 +681,24 @@ fn handle_sm64_cod_level_transition(
         collision_state.normal_static_vertices = verts.clone();
         collision_state.vanish_static_vertices = vanish_verts;
         collision_state.vanish_active = false;
+        collision_state.level = target.level.clone();
         collision_state.area = area;
         collision_state.last_dynamic_tick = 0;
         collision_state.last_dynamic_triangles.clear();
         native_dynamic.tick = 0;
         native_dynamic.triangles.clear();
 
+        let static_triangle_count = verts.len() / 3;
         let mesh = sim::SimClipMesh::from_linear_triangles(verts);
         let content = authority.0.content().with_clip_mesh(mesh);
         authority.0.install_content(content);
+        diag::info!(
+            World,
+            "SM64 COD level transition collision: installed {} static triangles for {} area {}",
+            static_triangle_count,
+            target.level,
+            area
+        );
 
         let fallback_spawn = spawn.as_ref().map(|spawn| {
             let floor_y = parsed
@@ -769,7 +780,10 @@ fn sync_sm64_cod_area_collision(
     let Ok(area) = u8::try_from(output.area_index) else {
         return;
     };
-    if !output.active || area == 0 || area == collision_state.area {
+    if !output.active
+        || area == 0
+        || (active.level == collision_state.level && area == collision_state.area)
+    {
         return;
     }
 
@@ -801,6 +815,7 @@ fn sync_sm64_cod_area_collision(
     collision_state.normal_static_vertices = verts.clone();
     collision_state.vanish_static_vertices = vanish_verts;
     collision_state.vanish_active = false;
+    collision_state.level = active.level.clone();
     collision_state.area = area;
     collision_state.last_dynamic_tick = 0;
     collision_state.last_dynamic_triangles.clear();
