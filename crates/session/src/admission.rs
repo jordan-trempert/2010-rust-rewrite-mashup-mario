@@ -17,6 +17,7 @@ pub fn update_admission(
     audio: Option<Res<audio::AudioReady>>,
     mut live: Option<ResMut<LiveWorldIdentity>>,
     headless: Option<Res<frame::Headless>>,
+    external_world: Option<Res<frame::ExternalWorldPresentation>>,
     minecraft: Option<Res<frame::MinecraftUi>>,
 ) {
     if let (Some(live), Some(installed)) = (live.as_mut(), admission.core.installed())
@@ -31,7 +32,14 @@ pub fn update_admission(
     let skate_ready =
         *role != RuntimeRole::Listen || skate.is_none_or(|skate| !skate.preload_pending);
     let minecraft_ready = minecraft.is_none_or(|ui| !ui.loading_world);
+    // External-world modes (SM64 COD, Minecraft, etc.) own the visible
+    // world themselves and must not be blocked by the donor IW4 WorldScene's
+    // two-frame GPU quiet gate. Once their presentation is explicitly armed,
+    // admission may proceed; the donor scene can settle after the loading
+    // process finishes.
+    let external_ready=external_world.is_some_and(|external| external.0);
     let presentation_ready = headless.is_some()
+        || external_ready
         || (scene.is_some_and(|scene| scene.spawned)
             && audio_ready
             && skate_ready
@@ -53,7 +61,7 @@ pub fn update_admission(
         signon.admitted = admitted;
         diag::info!(
             Sim,
-            "admission admitted={admitted} role={role:?} phase={:?} presentation={presentation_ready} audio={audio_ready}",
+            "admission admitted={admitted} role={role:?} phase={:?} presentation={presentation_ready} external={external_ready} audio={audio_ready}",
             signon.phase
         );
     }
