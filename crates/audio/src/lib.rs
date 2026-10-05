@@ -8,6 +8,7 @@ mod clip_store;
 mod emit;
 mod entity_events;
 mod frontend;
+mod external_pcm;
 mod messages;
 mod minecraft;
 mod pcm;
@@ -31,6 +32,7 @@ pub use ambient::{
 pub use clip_store::{ClipPath, ClipPathCost, ClipPrepCost, ClipStore, PREP_BATCH, clip_prep_cost};
 pub use emit::{BobCycleTracker, emit_footstep_on_bob_wrap, emit_weapon_fire};
 pub use frontend::FrontendAudio;
+pub use external_pcm::ExternalPcmChunk;
 pub use match_set::{AudioReady, AudioSilent};
 pub use minecraft::{McSoundQueue, McSoundRequest};
 pub use messages::{
