@@ -63,5 +63,7 @@ pub use model_registry::{
 
 pub use geo_layout::{
     GeoRenderPart, ResolvedGeoModel, ResolvedGeoPart, parse_geo_render_parts,
-    resolve_geo_model_parts, resolve_geo_model_parts_for_level,
+    parse_geo_render_parts_with_switch, resolve_geo_model_parts,
+    resolve_geo_model_parts_for_level, resolve_geo_model_parts_for_level_state,
+    resolve_geo_model_parts_with_switch,
 };
