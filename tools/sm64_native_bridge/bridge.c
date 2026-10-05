@@ -348,7 +348,6 @@ static int gIw4lInitialized = 0;
  * frame while the destination is loading.
  */
 static int gIw4lPreserveNativeSpawn = 0;
-static float gIw4lPlatformBefore[3] = { 0.0f, 0.0f, 0.0f };
 static float gIw4lPlatformDisplacement[3] = { 0.0f, 0.0f, 0.0f };
 static uint32_t gIw4lPlatformActive = 0;
 
@@ -2139,10 +2138,6 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
         }
 
         gIw4lPreserveNativeSpawn = 0;
-    gIw4lPlatformActive = 0;
-    gIw4lPlatformDisplacement[0] = 0.0f;
-    gIw4lPlatformDisplacement[1] = 0.0f;
-    gIw4lPlatformDisplacement[2] = 0.0f;
     }
 
     gIw4lPlatformActive = 0;
