@@ -181,9 +181,11 @@ impl Default for Sm64LoadStatus {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Sm64MarioPresentation;
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone)]
 struct Sm64ObjectPresentation {
     id: sm64_core::ObjectId,
+    model:String,
+    anim_state:i32,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -587,7 +589,11 @@ fn spawn_runtime_object_presentations(
             } else {
                 Visibility::Hidden
             },
-            Sm64ObjectPresentation{id:object.id},
+            Sm64ObjectPresentation{
+                id:object.id,
+                model:object.model.clone(),
+                anim_state:object.anim_state,
+            },
         ));
         if (object.render_flags & (1<<2))!=0 {
             root_entity.insert(Sm64BillboardObject);
@@ -1759,6 +1765,15 @@ fn sync_object_presentations(
             commands.entity(entity).despawn();
             continue;
         };
+
+        // Geo switch cases and even the shared model can change at runtime.
+        // Rebuild only when that authored render state changes; otherwise keep
+        // the cached meshes and just update transform/visibility.
+        if presentation.model!=object.model || presentation.anim_state!=object.anim_state {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
         presented.insert(presentation.id);
         transform.translation=sm64_render_vec3(object.pos);
         transform.rotation=sm64_object_rotation(object.face_angle);
