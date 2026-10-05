@@ -204,6 +204,7 @@ struct Sm64NativeRenderPresentation;
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct Sm64NativePlayerOutput {
     pub active: bool,
+    pub area_index: u32,
     pub sm64_pos: [f32;3],
     pub sm64_vel: [f32;3],
     pub sm64_yaw: i16,
@@ -1773,6 +1774,7 @@ fn advance_sm64_runtime(
             // player to spawn.
             if !native.active {
                 native_output.active=false;
+            native_output.area_index=0;
                 native_dialog.id=-1;
                 native_dialog.text.clear();
                 native_collision.triangles.clear();
@@ -1781,6 +1783,7 @@ fn advance_sm64_runtime(
             }
             if !external.active {
                 native_output.active=false;
+            native_output.area_index=0;
                 steps += 1;
                 continue;
             }
@@ -1789,6 +1792,7 @@ fn advance_sm64_runtime(
                 error!("SM64 native-only mode lost its loaded DLL client; refusing Rust fallback");
                 native.active=false;
                 native_output.active=false;
+            native_output.area_index=0;
                 steps += 1;
                 continue;
             };
@@ -1832,6 +1836,7 @@ fn advance_sm64_runtime(
                     // upload until the renderer consumes it, including first-load assets.
                     native_render.texture_updates.extend(snapshot.texture_updates.iter().cloned());
                     native_output.active=true;
+                    native_output.area_index=snapshot.area_index;
                     native_output.sm64_pos=snapshot.mario_pos;
                     native_output.sm64_vel=snapshot.mario_vel;
                     native_output.sm64_yaw=snapshot.mario_yaw;
@@ -1856,6 +1861,7 @@ fn advance_sm64_runtime(
                     native.client=None;
                     native.active=false;
                     native_output.active=false;
+            native_output.area_index=0;
                     native_dialog.id=-1;
                     native_dialog.text.clear();
                     native_collision.triangles.clear();
@@ -1869,6 +1875,7 @@ fn advance_sm64_runtime(
         } else {
             // Standalone/debug sm64:* mode only.
             native_output.active=false;
+            native_output.area_index=0;
             native_dialog.id=-1;
             native_dialog.text.clear();
             native_collision.triangles.clear();
