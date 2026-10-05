@@ -751,7 +751,7 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
 }
 
 static void apply_external_attack(const struct Request *request) {
-    const uint32_t attack_mask = BRIDGE_INPUT_ATTACK | BRIDGE_INPUT_GROUND_POUND;
+    const uint32_t attack_mask = BRIDGE_INPUT_ATTACK_PRESS | BRIDGE_INPUT_GROUND_POUND;
     const int ground_pound =
         (request->attack_flags & BRIDGE_INPUT_GROUND_POUND) != 0;
     struct Object *best = NULL;
@@ -811,7 +811,7 @@ static void apply_external_attack(const struct Request *request) {
         }
 
         /* A pure pound with nothing underneath is not also a hitscan shot. */
-        if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0) {
+        if ((request->attack_flags & BRIDGE_INPUT_ATTACK_PRESS) == 0) {
             return;
         }
     }
