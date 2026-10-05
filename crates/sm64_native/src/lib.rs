@@ -248,6 +248,10 @@ impl NativeClient {
         })
     }
 
+    pub fn module_path(&self) -> &Path {
+        &self.module_path
+    }
+
     pub fn step(
         &mut self,
         player: NativePlayerProxy,
