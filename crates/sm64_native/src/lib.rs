@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 7;
+const ABI_VERSION: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -84,6 +84,7 @@ pub struct NativeSnapshot {
     pub dialog_id: i16,
     pub dialog_text: String,
     pub objects: Vec<NativeObject>,
+    pub static_surfaces: Vec<[[f32; 3]; 3]>,
     pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
     pub render_triangles: Vec<NativeRenderTriangle>,
     pub texture_updates: Vec<NativeTextureUpdate>,
@@ -161,6 +162,8 @@ struct NativeSnapshotView {
     dialog_text_len: u32,
     objects: *const NativeObjectView,
     object_count: u32,
+    static_surfaces: *const NativeTriangleView,
+    static_surface_count: u32,
     dynamic_surfaces: *const NativeTriangleView,
     dynamic_surface_count: u32,
     render_triangles: *const NativeRenderTriangleView,
@@ -387,6 +390,12 @@ impl NativeClient {
                 view.object_count
             )));
         }
+        if view.static_surface_count > 16_384 {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned impossible static surface count {}",
+                view.static_surface_count
+            )));
+        }
         if view.dynamic_surface_count > 8192 {
             return Err(NativeBridgeError::new(format!(
                 "embedded SM64 returned impossible dynamic surface count {}",
@@ -451,6 +460,25 @@ impl NativeClient {
                 anim_state: source.anim_state,
                 interact_status: source.interact_status,
                 damage_or_coin_value: source.damage_or_coin_value,
+            })
+            .collect();
+
+        let static_triangle_views =
+            if view.static_surfaces.is_null() || view.static_surface_count == 0 {
+                &[][..]
+            } else {
+                unsafe {
+                    slice::from_raw_parts(view.static_surfaces, view.static_surface_count as usize)
+                }
+            };
+        let static_surfaces = static_triangle_views
+            .iter()
+            .map(|source| {
+                [
+                    [source.vertices[0], source.vertices[1], source.vertices[2]],
+                    [source.vertices[3], source.vertices[4], source.vertices[5]],
+                    [source.vertices[6], source.vertices[7], source.vertices[8]],
+                ]
             })
             .collect();
 
@@ -604,6 +632,7 @@ impl NativeClient {
             dialog_id: view.dialog_id,
             dialog_text,
             objects,
+            static_surfaces,
             dynamic_surfaces,
             render_triangles,
             texture_updates,
