@@ -960,7 +960,6 @@ fn carry_cod_players_with_sm64_platforms(
     const ENTITYNUM_NONE: i32 = 1023;
     const MAX_SUPPORT_DISTANCE: f32 = 72.0;
     const MAX_PLATFORM_STEP: f32 = 256.0;
-    const FLOOR_EPSILON: f32 = 1.0;
 
     if previous.is_empty() || previous.len() != current.len() {
         return;
@@ -1050,12 +1049,17 @@ fn carry_cod_players_with_sm64_platforms(
 
         if let Some((_, delta)) = best {
             if delta[0].abs() > 0.001 || delta[1].abs() > 0.001 || delta[2].abs() > 0.001 {
-                let origin = [
-                    player.origin[0] + delta[0],
-                    player.origin[1] + delta[1],
-                    player.origin[2] + delta[2] + FLOOR_EPSILON,
-                ];
-                authority.set_origin(id, origin);
+                /*
+                 * Do not use set_origin() here. SimWorld::set_origin intentionally
+                 * zeroes player velocity (appropriate for teleports/spawns), which
+                 * made a moving platform erase COD movement input every native tick
+                 * and effectively glue the player to the platform.
+                 *
+                 * gate_nudge_origin() applies only the platform displacement while
+                 * preserving the player's own velocity, so they can walk, strafe,
+                 * jump, and leave the platform normally while still being carried.
+                 */
+                authority.gate_nudge_origin(id, delta);
             }
         }
     }
