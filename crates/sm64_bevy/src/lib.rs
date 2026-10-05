@@ -144,15 +144,50 @@ enum NativePrimitiveClass {
 
 #[derive(Resource, Default)]
 struct Sm64NativeRenderCache {
-    textures:HashMap<u32,Handle<Image>>,
+    textures:HashMap<(u32,u8,u8),Handle<Image>>,
+    texture_data:HashMap<u32,sm64_native::NativeTextureUpdate>,
     texture_alpha:HashMap<u32,NativeTextureAlphaClass>,
-    batches:HashMap<(u32,NativeTextureAlphaClass,NativePrimitiveClass),NativeRenderBatchHandles>,
+    batches:HashMap<(u32,NativeTextureAlphaClass,NativePrimitiveClass,u8,u8),NativeRenderBatchHandles>,
 }
 
 struct NativeRenderBatchHandles {
     entity:Entity,
     mesh:Handle<Mesh>,
     material:Handle<StandardMaterial>,
+}
+
+fn native_address_mode(bits:u8)->ImageAddressMode {
+    if (bits & 0x2)!=0 {
+        ImageAddressMode::ClampToEdge
+    } else if (bits & 0x1)!=0 {
+        ImageAddressMode::MirrorRepeat
+    } else {
+        ImageAddressMode::Repeat
+    }
+}
+
+fn native_texture_image(
+    update:&sm64_native::NativeTextureUpdate,
+    wrap_s:u8,
+    wrap_t:u8,
+)->Image {
+    let mut image=Image::new(
+        Extent3d {
+            width:update.width,
+            height:update.height,
+            depth_or_array_layers:1,
+        },
+        TextureDimension::D2,
+        update.rgba.clone(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let mut sampler=ImageSamplerDescriptor::nearest();
+    sampler.address_mode_u=native_address_mode(wrap_s);
+    sampler.address_mode_v=native_address_mode(wrap_t);
+    sampler.address_mode_w=ImageAddressMode::ClampToEdge;
+    image.sampler=ImageSampler::Descriptor(sampler);
+    image
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -333,6 +368,7 @@ fn launch_requested_sm64_map(
     native_render.triangles.clear();
     native_render.texture_updates.clear();
     native_render_cache.textures.clear();
+    native_render_cache.texture_data.clear();
     native_render_cache.texture_alpha.clear();
     native_render_cache.batches.clear();
 
@@ -1830,35 +1866,25 @@ fn sync_native_render_frame(
         };
         cache.texture_alpha.insert(update.id,alpha_class);
 
-        let mut image=Image::new(
-            Extent3d {
-                width:update.width,
-                height:update.height,
-                depth_or_array_layers:1,
-            },
-            TextureDimension::D2,
-            update.rgba.clone(),
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        );
-        let mut sampler=ImageSamplerDescriptor::nearest();
-        sampler.address_mode_u=ImageAddressMode::Repeat;
-        sampler.address_mode_v=ImageAddressMode::Repeat;
-        sampler.address_mode_w=ImageAddressMode::ClampToEdge;
-        image.sampler=ImageSampler::Descriptor(sampler);
+        cache.texture_data.insert(update.id,update.clone());
 
-        if let Some(handle)=cache.textures.get(&update.id) {
-            if let Some(mut existing)=images.get_mut(handle.id()) {
-                *existing=image;
+        // The same native texture can be drawn with different N64 tile modes.
+        // Refresh every already-materialized sampler variant when its pixels
+        // change instead of forcing everything to Repeat.
+        let variants=cache.textures.iter()
+            .filter_map(|(&(id,wrap_s,wrap_t),handle)|{
+                (id==update.id).then_some((wrap_s,wrap_t,handle.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (wrap_s,wrap_t,handle) in variants {
+            if let Some(existing)=images.get_mut(handle.id()) {
+                *existing=native_texture_image(update,wrap_s,wrap_t);
             }
-        } else {
-            let handle=images.add(image);
-            cache.textures.insert(update.id,handle);
         }
     }
 
     let mut groups=HashMap::<
-        (u32,NativeTextureAlphaClass,NativePrimitiveClass),
+        (u32,NativeTextureAlphaClass,NativePrimitiveClass,u8,u8),
         Vec<&sm64_native::NativeRenderTriangle>
     >::new();
     for triangle in &frame.triangles {
@@ -1890,7 +1916,13 @@ fn sync_native_render_frame(
             NativePrimitiveClass::Normal
         };
 
-        groups.entry((texture_id,alpha_class,primitive_class))
+        groups.entry((
+            texture_id,
+            alpha_class,
+            primitive_class,
+            triangle.wrap_s,
+            triangle.wrap_t,
+        ))
             .or_default()
             .push(triangle);
     }
@@ -1978,7 +2010,14 @@ fn sync_native_render_frame(
                 material.base_color_texture=if key.0==u32::MAX {
                     None
                 } else {
-                    cache.textures.get(&key.0).cloned()
+                    let sampler_key=(key.0,key.3,key.4);
+                    if !cache.textures.contains_key(&sampler_key) {
+                        if let Some(update)=cache.texture_data.get(&key.0) {
+                            let handle=images.add(native_texture_image(update,key.3,key.4));
+                            cache.textures.insert(sampler_key,handle);
+                        }
+                    }
+                    cache.textures.get(&sampler_key).cloned()
                 };
                 material.unlit=true;
                 material.alpha_mode=match key.1 {
@@ -2000,7 +2039,14 @@ fn sync_native_render_frame(
         let texture=if key.0==u32::MAX {
             None
         } else {
-            cache.textures.get(&key.0).cloned()
+            let sampler_key=(key.0,key.3,key.4);
+            if !cache.textures.contains_key(&sampler_key) {
+                if let Some(update)=cache.texture_data.get(&key.0) {
+                    let handle=images.add(native_texture_image(update,key.3,key.4));
+                    cache.textures.insert(sampler_key,handle);
+                }
+            }
+            cache.textures.get(&sampler_key).cloned()
         };
         let material=materials.add(StandardMaterial {
             base_color:Color::WHITE,
@@ -2017,8 +2063,8 @@ fn sync_native_render_frame(
         let mesh=meshes.add(mesh_data);
         let entity=commands.spawn((
             Name::new(format!(
-                "SM64 native render batch tex={} alpha={:?} primitive={:?}",
-                key.0,key.1,key.2
+                "SM64 native render batch tex={} alpha={:?} primitive={:?} wrap=({}, {})",
+                key.0,key.1,key.2,key.3,key.4
             )),
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
