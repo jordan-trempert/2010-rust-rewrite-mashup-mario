@@ -301,6 +301,14 @@ struct Iw4lSm64SnapshotView {
 static struct LevelCommand *gIw4lLevelCommand = NULL;
 /* Defined in mario.c but not exported by upstream mario.h. */
 extern void mario_update_hitbox_and_cap_model(struct MarioState *m);
+#ifdef IW4L_SM64_EMBEDDED
+extern void iw4l_sm64_prime_level_warp(
+    s16 destLevel,
+    s16 destArea,
+    s16 destWarpNode,
+    s32 arg3
+);
+#endif
 
 static int gIw4lInitialized = 0;
 /*
@@ -1706,6 +1714,14 @@ IW4L_SM64_API int iw4l_sm64_init(
     save_file_set_flags(SAVE_FLAG_FILE_EXISTS);
 
     gIw4lLevelCommand = (struct LevelCommand *)level->entry;
+    if (warp_node >= 0) {
+        iw4l_sm64_prime_level_warp(
+            (s16)level->level,
+            (s16)area,
+            (s16)warp_node,
+            (s32)warp_arg
+        );
+    }
     gDebugLevelSelect = TRUE;
     gBridgeStage = "initial_select_gfx_pool";
     select_gfx_pool();
@@ -1715,17 +1731,11 @@ IW4L_SM64_API int iw4l_sm64_init(
     gDebugLevelSelect = FALSE;
 
     /*
-     * Recreate the exact destination spawn selected by vanilla SM64. Rust will
-     * consume this native position on the first snapshot before COD is allowed
-     * to mirror its own transform back into Mario.
+     * When warp_node is present, lvl_init_or_update(0) has now consumed the
+     * primed vanilla cross-level warp and placed Mario at the destination
+     * object. Hold that exact transform until COD accepts it.
      */
-    if (gCurrentArea != NULL && warp_node >= 0) {
-        initiate_warp(level->level, (s16)area, (s16)warp_node, (s32)warp_arg);
-        warp_area();
-        gIw4lPreserveNativeSpawn = 1;
-    } else {
-        gIw4lPreserveNativeSpawn = 0;
-    }
+    gIw4lPreserveNativeSpawn = warp_node >= 0 ? 1 : 0;
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
         snprintf(
