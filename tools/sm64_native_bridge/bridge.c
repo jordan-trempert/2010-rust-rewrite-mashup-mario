@@ -101,52 +101,45 @@ extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 
 static s16 gIw4lAudioSamples[IW4L_AUDIO_MAX_FRAMES * IW4L_AUDIO_CHANNELS];
 static uint32_t gIw4lAudioFrameCount = 0;
-static uint32_t gIw4lAudioFrameRemainder = 0;
+static uint32_t gIw4lAudioCadence = 0;
 
 static void bridge_audio_backend_init(void) {
     gIw4lAudioFrameCount = 0;
-    gIw4lAudioFrameRemainder = 0;
+    gIw4lAudioCadence = 0;
     memset(gIw4lAudioSamples, 0, sizeof(gIw4lAudioSamples));
 }
 
 static void bridge_audio_tick(void) {
-    uint32_t total_frames;
-    uint32_t first_frames;
-    uint32_t second_frames;
+    uint32_t frames_per_buffer;
+    int i;
 
+#ifdef VERSION_EU
     /*
-     * 32000 / 30 = 1066 2/3 frames per native game tick. Carry the fraction
-     * so the host stream has the exact long-term sample rate instead of slowly
-     * drifting against COD audio.
+     * PAL's 640-sample low buffer already yields 1280 frames per 25 Hz game
+     * tick. The embedded gameplay path is normally built as US, but keep the
+     * native PAL buffer contract intact if that changes.
      */
-    gIw4lAudioFrameRemainder += IW4L_AUDIO_SAMPLE_RATE;
-    total_frames = gIw4lAudioFrameRemainder / 30u;
-    gIw4lAudioFrameRemainder %= 30u;
-    if (total_frames > IW4L_AUDIO_MAX_FRAMES) {
-        total_frames = IW4L_AUDIO_MAX_FRAMES;
-    }
-
+    frames_per_buffer = IW4L_AUDIO_SAMPLES_LOW;
+#else
     /*
-     * sm64-port's synthesis path is traditionally fed buffers in the
-     * 528..544-frame range. Split the 1066/1067 host chunk into two legal
-     * synthesis calls while keeping one continuous interleaved stereo block.
+     * The original US synthesizer expects each task to be either 528 or 544
+     * frames (16-frame aligned). Two LOW tasks are 1056 frames and two HIGH
+     * tasks are 1088. Using HIGH once every three native 30 Hz ticks averages
+     * exactly 1066 2/3 frames/tick = 32000 Hz, without ever feeding an
+     * unsupported odd-sized synthesis task.
      */
-    first_frames = IW4L_AUDIO_SAMPLES_LOW;
-    if (first_frames > total_frames) {
-        first_frames = total_frames;
-    }
-    second_frames = total_frames - first_frames;
+    gIw4lAudioCadence = (gIw4lAudioCadence + 1u) % 3u;
+    frames_per_buffer =
+        gIw4lAudioCadence == 0u ? IW4L_AUDIO_SAMPLES_HIGH : IW4L_AUDIO_SAMPLES_LOW;
+#endif
 
-    if (first_frames != 0) {
-        create_next_audio_buffer(gIw4lAudioSamples, first_frames);
-    }
-    if (second_frames != 0) {
+    for (i = 0; i < 2; ++i) {
         create_next_audio_buffer(
-            gIw4lAudioSamples + first_frames * IW4L_AUDIO_CHANNELS,
-            second_frames
+            gIw4lAudioSamples + i * (frames_per_buffer * IW4L_AUDIO_CHANNELS),
+            frames_per_buffer
         );
     }
-    gIw4lAudioFrameCount = total_frames;
+    gIw4lAudioFrameCount = frames_per_buffer * 2u;
 }
 
 void dispatch_audio_sptask(UNUSED struct SPTask *spTask) {
