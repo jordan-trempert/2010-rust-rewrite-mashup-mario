@@ -34,6 +34,8 @@ $levelScriptSource = Join-Path $root "src\engine\level_script.c"
 $levelScriptBackup = Join-Path $root "level_script.iw4l-backup.txt"
 $levelUpdateSource = Join-Path $root "src\game\level_update.c"
 $levelUpdateBackup = Join-Path $root "level_update.iw4l-backup.txt"
+$objectProcessorSource = Join-Path $root "src\game\object_list_processor.c"
+$objectProcessorBackup = Join-Path $root "object_list_processor.iw4l-backup.txt"
 $armipsSource = Join-Path $root "tools\armips.cpp"
 if (Test-Path $armipsSource) {
     $armipsText = Get-Content $armipsSource -Raw
@@ -157,6 +159,76 @@ if (-not $levelUpdateText.Contains($warpNeedle)) {
 $levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
 Set-Content -Path $levelUpdateSource -Value $levelUpdateText -Encoding UTF8
 
+# Mario remains allocated because the original SM64 behaviors, interaction
+# system, warps, cannons and cutscenes all reference gMarioState/gMarioObject.
+# During ordinary gameplay, however, COD is the player controller. Replace the
+# native player behavior with a compatibility shim that only mirrors the
+# externally supplied MarioState into gMarioObject. Native action execution is
+# temporarily re-enabled by bridge.c for cannons/warps/cutscenes/etc.
+Copy-Item $objectProcessorSource $objectProcessorBackup -Force
+$objectProcessorText = Get-Content $objectProcessorSource -Raw
+$marioUpdateNeedle = @"
+void bhv_mario_update(void) {
+    u32 particleFlags = 0;
+    s32 i;
+
+    particleFlags = execute_mario_action(gCurrentObject);
+    gCurrentObject->oMarioParticleFlags = particleFlags;
+
+    // Mario code updates MarioState's versions of position etc, so we need
+    // to sync it with the Mario object
+    copy_mario_state_to_object();
+
+    i = 0;
+    while (sParticleTypes[i].particleFlag != 0) {
+        if (particleFlags & sParticleTypes[i].particleFlag) {
+            spawn_particle(sParticleTypes[i].activeParticleFlag, sParticleTypes[i].model,
+                           sParticleTypes[i].behavior);
+        }
+
+        i++;
+    }
+}
+"@
+$marioUpdateReplacement = @"
+extern int gIw4lRunMarioAction;
+
+void bhv_mario_update(void) {
+    u32 particleFlags = 0;
+    s32 i;
+
+    if (gIw4lRunMarioAction) {
+        particleFlags = execute_mario_action(gCurrentObject);
+        gCurrentObject->oMarioParticleFlags = particleFlags;
+    } else {
+        /*
+         * IW4L embedded mode: COD owns ordinary locomotion. gMarioState was
+         * populated from the COD player immediately before this object pass.
+         */
+        gCurrentObject->oMarioParticleFlags = 0;
+    }
+
+    copy_mario_state_to_object();
+
+    if (gIw4lRunMarioAction) {
+        i = 0;
+        while (sParticleTypes[i].particleFlag != 0) {
+            if (particleFlags & sParticleTypes[i].particleFlag) {
+                spawn_particle(particleFlags & sParticleTypes[i].particleFlag,
+                               sParticleTypes[i].model,
+                               sParticleTypes[i].behavior);
+            }
+            i++;
+        }
+    }
+}
+"@
+if (-not $objectProcessorText.Contains($marioUpdateNeedle)) {
+    throw "Could not locate bhv_mario_update in $objectProcessorSource"
+}
+$objectProcessorText = $objectProcessorText.Replace($marioUpdateNeedle, $marioUpdateReplacement)
+Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
+
 try {
     Push-Location $root
     try {
@@ -227,5 +299,9 @@ finally {
     if (Test-Path $levelUpdateBackup) {
         Copy-Item $levelUpdateBackup $levelUpdateSource -Force
         Remove-Item $levelUpdateBackup -Force
+    }
+    if (Test-Path $objectProcessorBackup) {
+        Copy-Item $objectProcessorBackup $objectProcessorSource -Force
+        Remove-Item $objectProcessorBackup -Force
     }
 }
