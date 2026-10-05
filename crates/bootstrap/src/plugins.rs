@@ -549,19 +549,16 @@ fn suppress_sm64_player_view(
     mut commands: Commands,
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     mario: Query<Entity, With<sm64_bevy::Sm64MarioPresentation>>,
-    cameras: Query<(Entity, &Camera), With<Camera3d>>,
 ) {
     if active.is_none() {
         return;
     }
 
+    // The sm64cod path never spawns Sm64DebugCamera. Do not delete arbitrary
+    // Camera3d entities by render order here: the COD first-person/viewmodel
+    // path owns its own overlay camera and was being removed along with Mario.
     for entity in &mario {
         commands.entity(entity).despawn();
-    }
-    for (entity, camera) in &cameras {
-        if camera.order == 1000 {
-            commands.entity(entity).despawn();
-        }
     }
 }
 
