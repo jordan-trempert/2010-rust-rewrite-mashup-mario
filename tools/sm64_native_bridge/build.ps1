@@ -470,7 +470,7 @@ $levelUpdateText = $levelUpdateText.Replace($warpNeedle, $warpReplacement)
 # multi-line source match. Find only the timer assignment belonging to
 # WARP_OP_WARP_DOOR and replace that single statement while preserving the
 # fork's indentation and all surrounding code.
-$keyWarpDelayPattern = '(?ms)(case\s+WARP_OP_WARP_DOOR\s*:\s*\r?\n)([ \t]*)sDelayedWarpTimer\s*=\s*20\s*;'
+$keyWarpDelayPattern = '(?ms)(case\s+WARP_OP_WARP_DOOR\s*:\s*\r?\n)([ \t]*)sDelayedWarpTimer\s*=\s*(?:20|0x14)\s*;'
 $keyWarpDelayMatch = [regex]::Match($levelUpdateText, $keyWarpDelayPattern)
 if (-not $keyWarpDelayMatch.Success) {
     throw "Could not locate WARP_OP_WARP_DOOR timer assignment in $levelUpdateSource"
