@@ -465,7 +465,12 @@ fn apply_sm64_native_player_output(
     // Preserve ordinary COD damage while layering SM64 damage/healing on top.
     // SM64's normal full health is 0x880, so apply the *delta* rather than
     // replacing COD health with an unrelated absolute scale every frame.
-    if let Some(previous)=bridge_state.last_sm64_health {
+    //
+    // Use full native health as the first baseline. If Mario is hit on the
+    // first native frame we see, initializing the baseline to that already-
+    // damaged value would silently discard the first enemy hit.
+    let previous=bridge_state.last_sm64_health.unwrap_or(0x880);
+    {
         let sm64_delta=output.health-previous;
         if sm64_delta!=0 {
             let mut scaled=((sm64_delta as f32)
