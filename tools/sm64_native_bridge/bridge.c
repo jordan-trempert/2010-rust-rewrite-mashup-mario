@@ -60,6 +60,19 @@
 #define IW4L_WARP_NODE_SUCCESS 0xF0u
 #define IW4L_WARP_NODE_DEATH   0xF1u
 
+/*
+ * Compatibility aliases for sm64-port forks whose level_update.h omits the
+ * special warp-node enum entirely. Keeping the canonical names defined here
+ * also makes older bridge call sites compile safely after a partial/local
+ * merge.
+ */
+#ifndef WARP_NODE_SUCCESS
+#define WARP_NODE_SUCCESS IW4L_WARP_NODE_SUCCESS
+#endif
+#ifndef WARP_NODE_DEATH
+#define WARP_NODE_DEATH IW4L_WARP_NODE_DEATH
+#endif
+
 #if defined(_WIN32) || defined(_WIN64)
 #define IW4L_SM64_API __declspec(dllexport)
 #else
