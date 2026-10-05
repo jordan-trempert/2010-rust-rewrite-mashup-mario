@@ -1,0 +1,34 @@
+name: One-shot SM64 compile fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix mutable asset guard and remove this workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('crates/sm64_bevy/src/lib.rs')
+          s = p.read_text()
+          old = 'if let Some(existing)=images.get_mut(handle.id()) {'
+          new = 'if let Some(mut existing)=images.get_mut(handle.id()) {'
+          if old not in s:
+              raise SystemExit('Expected compile-error line not found')
+          p.write_text(s.replace(old, new, 1))
+          Path('.github/workflows/fix-sm64-mut-existing.yml').unlink()
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix mutable SM64 texture asset update"
+          git push
