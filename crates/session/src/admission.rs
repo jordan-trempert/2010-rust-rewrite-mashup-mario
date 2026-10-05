@@ -62,7 +62,15 @@ pub fn update_admission(
         }
     }
     let world_installed = has_world.is_some_and(|world| world.0);
-    let authority_ready = !hold.is_some_and(|hold| hold.0);
+    /*
+     * AuthorityLoadHold belongs to the donor IW4 world's staged collision /
+     * presentation handoff. SM64 COD installs its own collision into the
+     * authority world before setting ExternalWorldPresentation, so once the
+     * external world is armed the donor hold is no longer a valid admission
+     * dependency.
+     */
+    let donor_hold=hold.is_some_and(|hold|hold.0);
+    let authority_ready = external_ready || !donor_hold;
     admission
         .core
         .apply_local_authority_ready(authority_ready && world_installed);
@@ -75,7 +83,7 @@ pub fn update_admission(
         signon.admitted = admitted;
         diag::info!(
             Sim,
-            "admission admitted={admitted} role={role:?} phase={:?} presentation={presentation_ready} external={external_ready} audio={audio_ready}",
+            "admission admitted={admitted} role={role:?} phase={:?} presentation={presentation_ready} external={external_ready} authority={authority_ready} donor_hold={donor_hold} audio={audio_ready}",
             signon.phase
         );
     }
