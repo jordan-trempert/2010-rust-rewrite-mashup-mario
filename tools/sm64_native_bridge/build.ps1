@@ -145,6 +145,30 @@ Remove-Item (Join-Path $build "src\pc\gfx\gfx_pc.o") -Force -ErrorAction Silentl
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_dummy.o") -Force -ErrorAction SilentlyContinue
 Remove-Item $legacyBridgeExe -Force -ErrorAction SilentlyContinue
 
+# Recover automatically if an older version of this script aborted before its
+# cleanup block. This is especially important for the native-render migration:
+# a failed patch must never leave the user's sm64-port checkout half-modified.
+$recoveryPairs = @(
+    @($backup, $pcMain),
+    @($levelScriptBackup, $levelScriptSource),
+    @($levelUpdateBackup, $levelUpdateSource),
+    @($areaBackup, $areaSource),
+    @($objectProcessorBackup, $objectProcessorSource),
+    @($renderGraphBackup, $renderGraphSource),
+    @($gfxPcBackup, $gfxPcSource),
+    @($gfxDummyBackup, $gfxDummySource)
+)
+foreach ($pair in $recoveryPairs) {
+    $backupPath = $pair[0]
+    $sourcePath = $pair[1]
+    if (Test-Path $backupPath) {
+        Write-Warning "Recovering source left patched by an interrupted previous build: $sourcePath"
+        Copy-Item $backupPath $sourcePath -Force
+        Remove-Item $backupPath -Force
+    }
+}
+
+try {
 Write-Host "Building embedded native SM64 gameplay module from $root"
 Copy-Item $pcMain $backup -Force
 Copy-Item $bridgeSource $pcMain -Force
@@ -772,7 +796,6 @@ if (-not $gfxDummyText.Contains($createShaderNeedle)) {
 $gfxDummyText = $gfxDummyText.Replace($createShaderNeedle, $createShaderReplacement)
 Set-Content -Path $gfxDummySource -Value $gfxDummyText -Encoding UTF8
 
-try {
     Push-Location $root
     try {
         # The normal sm64-port build uses all-except-recomp. Do not build
