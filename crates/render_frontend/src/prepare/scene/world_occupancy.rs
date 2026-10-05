@@ -66,6 +66,70 @@ pub fn place_external_camera(
     commands.entity(host_id).add_child(lens_id);
 }
 
+pub fn place_external_presentation_support(
+    commands: &mut Commands,
+    scene: &mut WorldScene,
+    images: &mut Assets<Image>,
+    exact_material_handles: Vec<Option<Handle<Image>>>,
+    reflection_probe_handles: Vec<Option<Handle<Image>>>,
+    lightmap_handles: Vec<Option<RuntimeLightmapHandles>>,
+) {
+    /*
+     * External worlds skip donor geometry, but COD first-person rendering is
+     * not geometry-free: FPV preparation requires the donor image pool and a
+     * model-lighting atlas owned by the same material generation. The previous
+     * external shortcut created only a Camera3d, which guaranteed
+     * prepare_fpv_compositions() would return at material_images.is_empty() or
+     * refuse every weapon with FpvNoLightingAtlas.
+     */
+    let atlas = lighting_iw4::model_lighting_atlas_dims(SMODEL_LIGHTING_MAX_CLIENT_VIEWS)
+        .map(|dims| crate::prepare::scene::model_lighting_atlas::WorldModelLightingAtlas::new(images, dims));
+
+    if let Some(atlas) = atlas {
+        let cache =
+            crate::prepare::scene::model_lighting_cache::WorldModelLightingCache::new(atlas.dims);
+        scene.model_lighting_image = Some(atlas.image.clone());
+        scene.model_lighting_dims = Some(atlas.dims);
+        commands.insert_resource(crate::assemble::drawsurf::RuntimeImageHandles::from_pools(
+            scene.runtime_material_catalog.generation_id,
+            exact_material_handles,
+            scene.exact_material_names.clone(),
+            reflection_probe_handles,
+            lightmap_handles,
+            Some(atlas.image.clone()),
+        ));
+        commands.insert_resource(cache);
+        commands.insert_resource(atlas);
+        diag::info!(
+            World,
+            "external presentation support: FPV image pools + model-lighting atlas installed"
+        );
+    } else {
+        commands.insert_resource(crate::assemble::drawsurf::RuntimeImageHandles::from_pools(
+            scene.runtime_material_catalog.generation_id,
+            exact_material_handles,
+            scene.exact_material_names.clone(),
+            reflection_probe_handles,
+            lightmap_handles,
+            None,
+        ));
+        diag::warn!(
+            World,
+            "external presentation support: model-lighting atlas dimensions unavailable"
+        );
+    }
+
+    commands.insert_resource(scene.map_xmodel_scene_assets.clone());
+
+    let pose = scene.intermission_view.unwrap_or_else(|| {
+        crate::prepare::scene::camera::WorldCameraPose {
+            origin: scene.center.to_array(),
+            angles: [0.0, 0.0, 0.0],
+        }
+    });
+    place_external_camera(commands, pose.origin, pose.angles);
+}
+
 pub fn place(
     commands: &mut Commands,
     scene: &mut WorldScene,
