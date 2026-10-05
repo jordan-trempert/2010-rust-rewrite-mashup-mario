@@ -420,6 +420,7 @@ fn launch_requested_sm64_map(
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
+    mut native_static_collision: ResMut<Sm64NativeStaticCollision>,
     mut native_render: ResMut<Sm64NativeRenderFrame>,
     mut native_render_cache: ResMut<Sm64NativeRenderCache>,
     mut native: NonSendMut<Sm64NativeRuntime>,
@@ -436,6 +437,8 @@ fn launch_requested_sm64_map(
     native.client = None;
     native.model_symbols.clear();
     native.active = false;
+    native_static_collision.tick = 0;
+    native_static_collision.triangles.clear();
     native_render.tick = 0;
     native_render.triangles.clear();
     native_render.texture_updates.clear();
