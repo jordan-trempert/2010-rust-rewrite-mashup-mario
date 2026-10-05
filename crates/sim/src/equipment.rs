@@ -1784,15 +1784,31 @@ fn bounce_velocity(
     facts: &EquipmentRuntimeFacts,
     surf_type: u8,
 ) {
-    let coefficients = facts
+    /*
+     * Runtime triangle meshes (including SM64's imported collision) do not
+     * necessarily carry an IW4 material/surface type that has authored grenade
+     * bounce coefficients. This is a content fallback, not a fatal invariant:
+     * use the requested coefficients when present, then surface 0, and finally
+     * a conservative generic bounce instead of panicking the entire game.
+     */
+    let authored = facts
         .parallel_bounce
         .as_ref()
-        .zip(facts.perpendicular_bounce.as_ref())
+        .zip(facts.perpendicular_bounce.as_ref());
+    let coefficients = authored
         .and_then(|(p, n)| p.get(surf_type as usize).zip(n.get(surf_type as usize)))
-        .unwrap_or_else(|| panic!("missing projectile surface bounce coefficients"));
+        .map(|(&parallel, &perpendicular)| (parallel, perpendicular))
+        .or_else(|| {
+            authored.and_then(|(p, n)| {
+                p.first()
+                    .zip(n.first())
+                    .map(|(&parallel, &perpendicular)| (parallel, perpendicular))
+            })
+        })
+        .unwrap_or((0.45, 0.35));
     let incoming = projectile.velocity;
     projectile.velocity =
-        bounce_reflected_scale(incoming, normal, *coefficients.0, *coefficients.1);
+        bounce_reflected_scale(incoming, normal, coefficients.0, coefficients.1);
 }
 
 fn bounce_reflected_scale(
