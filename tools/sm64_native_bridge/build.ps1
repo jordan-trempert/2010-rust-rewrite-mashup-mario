@@ -79,6 +79,7 @@ try {
             "ENABLE_DX12=0",
             "ENABLE_OPENGL=0",
             "GFX_CFLAGS=-DENABLE_GFX_DUMMY -DWIDESCREEN",
+            "OPT_FLAGS=-O0 -g3",
             "-j$Jobs"
         )
         & make @makeArgs
