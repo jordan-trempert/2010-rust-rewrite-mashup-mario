@@ -2206,10 +2206,24 @@ fn sync_sm64_hud_overlay(
 
 fn sync_sm64_dialog_overlay(
     mut commands:Commands,
+    cod_active:Option<Res<Sm64CodActive>>,
     dialog:Res<Sm64NativeDialogOutput>,
     roots:Query<Entity,With<Sm64DialogRoot>>,
     mut texts:Query<&mut Text,With<Sm64DialogText>>,
 ) {
+    /*
+     * sm64cod:* renders HUD/dialogue through the retained IW4 HUD pipeline.
+     * Leaving this ordinary Bevy UI tree alive produced the black rectangle
+     * seen in-game while its Text child never made it through the custom COD
+     * presentation path.
+     */
+    if cod_active.is_some() {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
     let visible=dialog.id>=0 && !dialog.text.trim().is_empty();
 
     if !visible {
