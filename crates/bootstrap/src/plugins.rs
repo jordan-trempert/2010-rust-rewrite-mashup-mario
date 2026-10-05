@@ -586,6 +586,7 @@ fn publish_sm64_native_audio(
 fn publish_sm64_cod_hud(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    dialog: Res<sm64_bevy::Sm64NativeDialogOutput>,
     mut hud: ResMut<frame::Sm64HudView>,
 ) {
     if active.is_none() || !output.active {
@@ -596,6 +597,8 @@ fn publish_sm64_cod_hud(
         active: true,
         health: output.health,
         coins: output.coins,
+        dialog_id: dialog.id,
+        dialog_text: dialog.text.clone(),
     };
 }
 
