@@ -30,6 +30,8 @@ if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
 $buildRel = "build/us_bridge"
 $build = Join-Path $root "build\us_bridge"
 $bridgeSource = Join-Path $PSScriptRoot "bridge.c"
+$levelScriptSource = Join-Path $root "src\engine\level_script.c"
+$levelScriptBackup = Join-Path $root "level_script.iw4l-backup.txt"
 $armipsSource = Join-Path $root "tools\armips.cpp"
 if (Test-Path $armipsSource) {
     $armipsText = Get-Content $armipsSource -Raw
@@ -61,6 +63,30 @@ Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Write-Host "Building native SM64 gameplay bridge from $root"
 Copy-Item $pcMain $backup -Force
 Copy-Item $bridgeSource $pcMain -Force
+
+# The native helper is headless: Bevy renders the SM64 geometry itself. The
+# vanilla level-script executor always runs the full SM64 render pipeline after
+# gameplay, which is unnecessary here and can execute graphics-only callbacks
+# against state the bridge intentionally does not maintain. Patch only this
+# temporary build checkout and restore the user's sm64-port source in finally.
+Copy-Item $levelScriptSource $levelScriptBackup -Force
+$levelScriptText = Get-Content $levelScriptSource -Raw
+$renderBlock = @"
+    profiler_log_thread5_time(LEVEL_SCRIPT_EXECUTE);
+    init_rcp();
+    render_game();
+    end_master_display_list();
+    alloc_display_list(0);
+"@
+$headlessBlock = @"
+    profiler_log_thread5_time(LEVEL_SCRIPT_EXECUTE);
+    /* IW4L headless gameplay bridge: host renderer consumes object state. */
+"@
+if (-not $levelScriptText.Contains($renderBlock)) {
+    throw "Could not locate level_script_execute render tail in $levelScriptSource"
+}
+$levelScriptText = $levelScriptText.Replace($renderBlock, $headlessBlock)
+Set-Content -Path $levelScriptSource -Value $levelScriptText -Encoding UTF8
 
 try {
     Push-Location $root
@@ -120,6 +146,22 @@ try {
 
     Copy-Item $builtExe $output -Force
 
+    # Generate a self-contained sorted symbol table while MinGW tools are
+    # definitely available. The Rust launcher can use this file later even
+    # when addr2line/nm are not on the runtime PATH.
+    $symbolMap = Join-Path $build "iw4l-sm64-bridge.sym"
+    $nm = Get-Command "x86_64-w64-mingw32-nm" -ErrorAction SilentlyContinue
+    if (-not $nm) {
+        $nm = Get-Command "nm" -ErrorAction SilentlyContinue
+    }
+    if ($nm) {
+        & $nm.Source -n $output | Set-Content -Path $symbolMap -Encoding ASCII
+        Write-Host "Native symbol map: $symbolMap"
+    }
+    else {
+        Write-Warning "nm was not found; crash symbol map was not generated."
+    }
+
     Write-Host ""
     Write-Host "Native SM64 gameplay bridge built:"
     Write-Host "  $output"
@@ -130,5 +172,9 @@ finally {
     if (Test-Path $backup) {
         Copy-Item $backup $pcMain -Force
         Remove-Item $backup -Force
+    }
+    if (Test-Path $levelScriptBackup) {
+        Copy-Item $levelScriptBackup $levelScriptSource -Force
+        Remove-Item $levelScriptBackup -Force
     }
 }
