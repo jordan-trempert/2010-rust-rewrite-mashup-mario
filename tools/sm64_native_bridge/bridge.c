@@ -831,6 +831,67 @@ static void apply_proxy(const struct Request *request) {
     }
 }
 
+static int bridge_capture_painting_warp(void) {
+    struct WarpNode *warp_node;
+    struct WarpNode warp;
+    s32 painting_index;
+
+    if (gCurrentArea == NULL
+        || gCurrentArea->paintingWarpNodes == NULL
+        || gMarioState == NULL
+        || gMarioState->floor == NULL) {
+        return 0;
+    }
+
+    /*
+     * The COD host owns cross-level transitions. Detect painting surfaces
+     * immediately after apply_proxy() refreshed Mario's native floor pointer,
+     * publish the destination, and do not let the source DLL enter SM64's
+     * ACT_DISAPPEARED / 74-frame painting transition.
+     */
+    painting_index = gMarioState->floor->type - SURFACE_PAINTING_WARP_D3;
+    if (painting_index < 0 || painting_index >= 0x2D) {
+        return 0;
+    }
+    if (painting_index >= 0x2A
+        && gMarioState->pos[1] - gMarioState->floorHeight >= 80.0f) {
+        return 0;
+    }
+    if (gMarioState->action & ACT_FLAG_INTANGIBLE) {
+        return 0;
+    }
+
+    warp_node = &gCurrentArea->paintingWarpNodes[painting_index];
+    if (warp_node == NULL || warp_node->id == 0) {
+        return 0;
+    }
+
+    warp = *warp_node;
+    if (!(warp.destLevel & 0x80)) {
+        sWarpCheckpointActive = check_warp_checkpoint(&warp);
+    }
+    check_if_should_set_warp_checkpoint(&warp);
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-native: painting warp intercepted index=%d floor=0x%04X -> level=%d area=%u node=%u\n",
+        (int)painting_index,
+        (unsigned)gMarioState->floor->type,
+        (int)(warp.destLevel & 0x7F),
+        (unsigned)warp.destArea,
+        (unsigned)warp.destNode
+    );
+    fflush(stderr);
+
+    iw4l_sm64_capture_level_warp(
+        warp.destLevel & 0x7F,
+        warp.destArea,
+        warp.destNode,
+        0
+    );
+    return gIw4lPendingTransitionLevel[0] != '\0';
+}
+
 static int bridge_attackable_object(const struct Object *object) {
     int32_t model;
     if (object == NULL || object == gMarioObject) {
@@ -1910,6 +1971,20 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
 
     gBridgeStage = "apply_proxy";
     apply_proxy(&request);
+
+    gBridgeStage = "painting_warp_probe";
+    if (bridge_capture_painting_warp()) {
+        /*
+         * Do not execute the source level again after a painting destination
+         * has been captured. Rust will consume the pending transition from this
+         * snapshot and replace the DLL on the host update.
+         */
+        gIw4lBridgeButtonDown = 0;
+        gIw4lBridgeButtonPressed = 0;
+        gBridgeStage = "painting_warp_snapshot";
+        return fill_snapshot_view();
+    }
+
     gBridgeStage = "apply_external_attack";
     apply_external_attack(&request);
     gBridgeStage = "auto_open_doors";
