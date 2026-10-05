@@ -48,6 +48,15 @@ struct Sm64CodAudioState {
     last_tick: u32,
 }
 
+#[derive(Resource, Debug, Default, Clone, Copy)]
+struct Sm64CodMoveState {
+    last_jump_down: bool,
+    last_pound_down: bool,
+    last_grounded: bool,
+    jump_stage: u8,
+    ground_pounding: bool,
+}
+
 
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
@@ -65,6 +74,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     }
     app.init_resource::<Sm64CodNativeState>();
     app.init_resource::<Sm64CodAudioState>();
+    app.init_resource::<Sm64CodMoveState>();
     app.init_resource::<Sm64CodCollisionState>();
     app.add_plugins(AssetPlugin)
         .add_plugins(UiPlugin)
@@ -80,6 +90,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             arm_sm64_cod_external_presentation,
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_on_life_started,
+            apply_sm64_cod_movement_abilities,
             sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
             apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
             publish_sm64_native_audio,
@@ -305,6 +316,159 @@ fn place_sm64_cod_player_on_life_started(
         );
     }
 }
+fn sm64_cod_native_owns_motion(action: u32) -> bool {
+    let group=action & sm64_core::ACT_GROUP_MASK;
+    matches!(
+        group,
+        sm64_core::ACT_GROUP_OBJECT
+            | sm64_core::ACT_GROUP_AUTOMATIC
+            | sm64_core::ACT_GROUP_CUTSCENE
+    ) || matches!(
+        action,
+        sm64_core::ACT_SHOT_FROM_CANNON
+            | sm64_core::ACT_TORNADO_TWIRLING
+            | sm64_core::ACT_GRABBED
+            | sm64_core::ACT_RIDING_HOOT
+            | sm64_core::ACT_WARP_DOOR_SPAWN
+            | sm64_core::ACT_EMERGE_FROM_PIPE
+            | sm64_core::ACT_SPAWN_SPIN_AIRBORNE
+            | sm64_core::ACT_SPAWN_NO_SPIN_AIRBORNE
+            | sm64_core::ACT_TELEPORT_FADE_OUT
+            | sm64_core::ACT_TELEPORT_FADE_IN
+            | sm64_core::ACT_EXIT_AIRBORNE
+            | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
+    )
+}
+
+fn apply_sm64_cod_movement_abilities(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    dialog: Res<sm64_bevy::Sm64NativeDialogOutput>,
+    mut state: ResMut<Sm64CodMoveState>,
+    mut external: ResMut<sm64_bevy::Sm64ExternalPlayer>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+) {
+    const ENTITYNUM_NONE: i32 = 1023;
+    const BUTTON_PRONE: u32 = 0x100;
+    const BUTTON_CROUCH: u32 = 0x200;
+    const BUTTON_JUMP: u32 = 0x400;
+    const DOUBLE_JUMP_VELOCITY: f32 = 360.0;
+    const TRIPLE_JUMP_VELOCITY: f32 = 500.0;
+    const GROUND_POUND_VELOCITY: f32 = -900.0;
+
+    if active.is_none() {
+        *state=Sm64CodMoveState::default();
+        external.pending_ground_pound=false;
+        return;
+    }
+    let Some(authority)=authority.as_deref_mut() else {
+        *state=Sm64CodMoveState::default();
+        external.pending_ground_pound=false;
+        return;
+    };
+
+    let mut first=None;
+    authority.0.visit_players(|id,player|{
+        if first.is_none() {
+            first=Some((id,*player));
+        }
+    });
+    let Some((id,player))=first else {
+        *state=Sm64CodMoveState::default();
+        external.pending_ground_pound=false;
+        return;
+    };
+
+    let buttons=authority.0.command_buttons(id);
+    let jump_down=(buttons & BUTTON_JUMP)!=0;
+    let pound_down=(buttons & (BUTTON_PRONE | BUTTON_CROUCH))!=0;
+    let jump_pressed=jump_down && !state.last_jump_down;
+    let pound_pressed=pound_down && !state.last_pound_down;
+    let grounded=player.ground_entity_num!=ENTITYNUM_NONE;
+    let just_left_ground=state.last_grounded && !grounded;
+
+    /*
+     * Cannons, warps, grabs and native cutscenes/dialogs own the player while
+     * active. Do not layer COD air abilities over those sequences.
+     */
+    if player.health<=0 ||
+        (output.active &&
+            (sm64_cod_native_owns_motion(output.action) || dialog.id>=0))
+    {
+        state.ground_pounding=false;
+        state.jump_stage=0;
+        state.last_jump_down=jump_down;
+        state.last_pound_down=pound_down;
+        state.last_grounded=grounded;
+        return;
+    }
+
+    if grounded {
+        if state.ground_pounding {
+            /*
+             * The falling motion itself is COD-side. The landing pulse is sent
+             * to the native SM64 object system once so poundable enemies and
+             * bosses see an actual SM64 attack at the landing position.
+             */
+            external.pending_ground_pound=true;
+            diag::info!(World, "SM64 COD ground pound landed");
+        }
+        state.ground_pounding=false;
+
+        // A press that begins COD's ordinary first jump arms the combo. Keep
+        // stage 1 while the key is held until authority marks us airborne.
+        if jump_pressed {
+            state.jump_stage=1;
+        } else if !jump_down {
+            state.jump_stage=0;
+        }
+    } else {
+        if just_left_ground {
+            // COD supplied jump #1 (or the player walked off an edge).
+            state.jump_stage=state.jump_stage.max(1);
+        }
+
+        if pound_pressed && !state.ground_pounding {
+            let mut velocity=player.velocity;
+            velocity[0]*=0.45;
+            velocity[1]*=0.45;
+            velocity[2]=GROUND_POUND_VELOCITY;
+            authority.0.set_velocity(id,velocity);
+            state.ground_pounding=true;
+            diag::info!(World, "SM64 COD ground pound started");
+        } else if state.ground_pounding {
+            // Keep the pound decisive even if normal COD air acceleration or
+            // gravity tries to soften it between fixed-authority ticks.
+            let mut velocity=player.velocity;
+            velocity[0]*=0.9;
+            velocity[1]*=0.9;
+            velocity[2]=velocity[2].min(GROUND_POUND_VELOCITY);
+            authority.0.set_velocity(id,velocity);
+        } else if jump_pressed && !just_left_ground {
+            let (next_stage,vertical)=match state.jump_stage {
+                0 | 1 => (2,DOUBLE_JUMP_VELOCITY),
+                2 => (3,TRIPLE_JUMP_VELOCITY),
+                _ => (state.jump_stage,player.velocity[2]),
+            };
+            if next_stage!=state.jump_stage {
+                let mut velocity=player.velocity;
+                velocity[2]=vertical.max(velocity[2]);
+                authority.0.set_velocity(id,velocity);
+                state.jump_stage=next_stage;
+                diag::info!(
+                    World,
+                    "SM64 COD {} jump",
+                    if next_stage==2 {"double"} else {"triple"}
+                );
+            }
+        }
+    }
+
+    state.last_jump_down=jump_down;
+    state.last_pound_down=pound_down;
+    state.last_grounded=grounded;
+}
+
 fn sync_cod_player_into_sm64(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     authority: Option<Res<net::AuthorityWorld>>,
@@ -316,6 +480,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         external.pending_use=false;
         external.pending_fire=false;
+        external.pending_ground_pound=false;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -326,6 +491,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         external.pending_use=false;
         external.pending_fire=false;
+        external.pending_ground_pound=false;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -349,6 +515,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         external.pending_use=false;
         external.pending_fire=false;
+        external.pending_ground_pound=false;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -379,12 +546,12 @@ fn sync_cod_player_into_sm64(
     let use_down=(command_buttons & (0x8 | 0x20))!=0;
     let use_pressed=use_down && !bridge_state.last_use_down;
 
-    // Bit 0: external weapon/ground-pound attack. Keep it asserted while fire
-    // is held so the 30 Hz native bridge cannot miss a short COD input pulse.
-    // Bit 1: one-shot native B/use press for NPCs, signs and dialog advance.
-    // Held fire is level-triggered; one-shot presses are latched until a 30 Hz
-    // native step consumes them (the render frame rate is usually higher, so
-    // a same-frame flag was cleared before any step could see it).
+    // Bit 0: held external weapon attack.
+    // Bit 1: one-shot native B/A use press for NPCs, signs and dialog advance.
+    // Bit 2 is added downstream for a discrete weapon shot; bit 3 is the
+    // movement system's one-shot ground-pound landing pulse.
+    // One-shot presses are latched until a 30 Hz native step consumes them
+    // because the render/update rate is normally higher than the SM64 tick.
     external.attack_flags=if attack_down {1} else {0};
     if weapon_fired || (attack_down && !bridge_state.last_attack_down) {
         external.pending_fire=true;
@@ -520,27 +687,7 @@ fn apply_sm64_native_player_output(
     }
     bridge_state.last_sm64_health=Some(output.health);
 
-    let group=output.action & sm64_core::ACT_GROUP_MASK;
-    let owns_motion=matches!(
-        group,
-        sm64_core::ACT_GROUP_OBJECT
-            | sm64_core::ACT_GROUP_AUTOMATIC
-            | sm64_core::ACT_GROUP_CUTSCENE
-    ) || matches!(
-        output.action,
-        sm64_core::ACT_SHOT_FROM_CANNON
-            | sm64_core::ACT_TORNADO_TWIRLING
-            | sm64_core::ACT_GRABBED
-            | sm64_core::ACT_RIDING_HOOT
-            | sm64_core::ACT_WARP_DOOR_SPAWN
-            | sm64_core::ACT_EMERGE_FROM_PIPE
-            | sm64_core::ACT_SPAWN_SPIN_AIRBORNE
-            | sm64_core::ACT_SPAWN_NO_SPIN_AIRBORNE
-            | sm64_core::ACT_TELEPORT_FADE_OUT
-            | sm64_core::ACT_TELEPORT_FADE_IN
-            | sm64_core::ACT_EXIT_AIRBORNE
-            | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
-    );
+    let owns_motion=sm64_cod_native_owns_motion(output.action);
 
     authority.0.set_external_motion(id,owns_motion);
     if owns_motion {
@@ -648,6 +795,7 @@ fn clear_sm64_cod_on_return(
     commands.remove_resource::<Sm64CodSpawn>();
     commands.insert_resource(Sm64CodCollisionState::default());
     commands.insert_resource(Sm64CodAudioState::default());
+    commands.insert_resource(Sm64CodMoveState::default());
     commands.remove_resource::<frame::ExternalWorldPresentation>();
     commands.remove_resource::<sm64_bevy::Sm64LaunchRequest>();
     commands.insert_resource(frame::Sm64HudView::default());
