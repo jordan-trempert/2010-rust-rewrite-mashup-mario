@@ -31,9 +31,7 @@
 #include "audio/external.h"
 #include "audio/audio_api.h"
 #include "audio/audio_null.h"
-#ifdef HAVE_WASAPI
 #include "audio/audio_wasapi.h"
-#endif
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_dummy.h"
 #include "engine/level_script.h"
@@ -90,7 +88,7 @@ extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 static struct AudioAPI *gIw4lAudioApi = NULL;
 
 static void bridge_audio_backend_init(void) {
-#ifdef HAVE_WASAPI
+#if HAVE_WASAPI
     if (audio_wasapi.init()) {
         gIw4lAudioApi = &audio_wasapi;
     }
