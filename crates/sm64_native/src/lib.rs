@@ -8,7 +8,7 @@ use std::{
 
 use libloading::Library;
 
-const ABI_VERSION: u32 = 2;
+const ABI_VERSION: u32 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -73,6 +73,9 @@ pub struct NativeSnapshot {
     pub dynamic_surfaces: Vec<[[f32; 3]; 3]>,
     pub render_triangles: Vec<NativeRenderTriangle>,
     pub texture_updates: Vec<NativeTextureUpdate>,
+    pub audio_samples: Vec<i16>,
+    pub audio_sample_rate: u32,
+    pub audio_channels: u16,
 }
 
 #[repr(C)]
@@ -142,6 +145,11 @@ struct NativeSnapshotView {
     render_triangle_count: u32,
     textures: *const NativeTextureView,
     texture_count: u32,
+    audio_samples: *const i16,
+    audio_frame_count: u32,
+    audio_sample_rate: u32,
+    audio_channels: u16,
+    audio_reserved: u16,
 }
 
 type AbiVersionFn = unsafe extern "C" fn() -> u32;
@@ -358,6 +366,17 @@ impl NativeClient {
             )));
         }
 
+        if view.audio_frame_count > 2048
+            || view.audio_channels > 2
+            || (view.audio_frame_count != 0
+                && !(8_000..=192_000).contains(&view.audio_sample_rate))
+        {
+            return Err(NativeBridgeError::new(format!(
+                "embedded SM64 returned invalid audio chunk frames={} rate={} channels={}",
+                view.audio_frame_count, view.audio_sample_rate, view.audio_channels
+            )));
+        }
+
         let dialog_text = if view.dialog_text.is_null() || view.dialog_text_len == 0 {
             String::new()
         } else {
@@ -474,6 +493,14 @@ impl NativeClient {
             });
         }
 
+        let audio_sample_count = (view.audio_frame_count as usize)
+            .saturating_mul(view.audio_channels as usize);
+        let audio_samples = if audio_sample_count == 0 || view.audio_samples.is_null() {
+            Vec::new()
+        } else {
+            unsafe { slice::from_raw_parts(view.audio_samples, audio_sample_count) }.to_vec()
+        };
+
         Ok(NativeSnapshot {
             tick: view.tick,
             mario_health: view.mario_health,
@@ -488,6 +515,9 @@ impl NativeClient {
             dynamic_surfaces,
             render_triangles,
             texture_updates,
+            audio_samples,
+            audio_sample_rate: view.audio_sample_rate,
+            audio_channels: view.audio_channels,
         })
     }
 }
