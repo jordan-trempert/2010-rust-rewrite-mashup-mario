@@ -495,12 +495,15 @@ static void write_snapshot(void) {
         write_u32(object_id(object));
         write_i32(model_id_for_object(object));
 
-        /* Use the exact graphics-node transform the original SM64 renderer
-           consumes. Behaviors often keep oPos/oFaceAngle as gameplay state
-           while header.gfx contains the render-facing interpolation/offset. */
-        write_f32(object->header.gfx.pos[0]);
-        write_f32(object->header.gfx.pos[1]);
-        write_f32(object->header.gfx.pos[2]);
+        /*
+         * Use gameplay-space oPos for the presentation root. This is the
+         * coordinate that matches level-script/macro-object placement and
+         * collision. header.gfx.pos may contain behavior-specific visual
+         * offsets and is therefore not a stable world-space anchor.
+         */
+        write_f32(object->oPosX);
+        write_f32(object->oPosY);
+        write_f32(object->oPosZ);
         write_i16(object->header.gfx.angle[0]);
         write_i16(object->header.gfx.angle[1]);
         write_i16(object->header.gfx.angle[2]);
