@@ -260,6 +260,16 @@ void bhv_mario_update(void) {
 $marioUpdateReplacement = @"
 extern int gIw4lRunMarioAction;
 
+/*
+ * These helpers are defined in mario.c but are not exported by mario.h in the
+ * upstream port. The embedded COD-player shim intentionally reuses the native
+ * interaction/health/hitbox half of Mario's update without running locomotion.
+ */
+void mario_reset_bodystate(struct MarioState *m);
+void update_mario_inputs(struct MarioState *m);
+void update_mario_health(struct MarioState *m);
+void mario_update_hitbox_and_cap_model(struct MarioState *m);
+
 void bhv_mario_update(void) {
     u32 particleFlags = 0;
     s32 i;
