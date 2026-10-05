@@ -39,6 +39,7 @@ struct Sm64CodNativeState {
     last_action: u32,
     last_weapon_shot_count: Option<i32>,
     last_attack_down: bool,
+    last_use_down: bool,
 }
 
 
@@ -286,6 +287,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
+        bridge_state.last_use_down=false;
         return;
     }
     let Some(authority)=authority else {
@@ -293,6 +295,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
+        bridge_state.last_use_down=false;
         return;
     };
     let mut first=None;
@@ -313,6 +316,7 @@ fn sync_cod_player_into_sm64(
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
+        bridge_state.last_use_down=false;
         return;
     };
     let inv_scale=1.0/sm64_core::SM64_TO_IW4_SCALE;
@@ -331,13 +335,27 @@ fn sync_cod_player_into_sm64(
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
     // IW4 pitch is positive downward; SM64 cannon pitch is positive upward.
     external.sm64_pitch=((-viewangles[0]/360.0)*65536.0) as i32 as i16;
-    let attack_down=(authority.0.command_buttons(id) & 0x1)!=0;
-    let attack_pressed=attack_down && !bridge_state.last_attack_down;
+    let command_buttons=authority.0.command_buttons(id);
+    let attack_down=(command_buttons & playerstate_iw4::buttons::ATTACK)!=0;
     let weapon_fired=bridge_state
         .last_weapon_shot_count
         .is_some_and(|previous|weapon_shot_count!=previous);
-    external.attack_flags=if weapon_fired || attack_pressed {1} else {0};
+    let use_down=(command_buttons & playerstate_iw4::buttons::USE)!=0;
+    let use_pressed=use_down && !bridge_state.last_use_down;
+
+    // Bit 0: external weapon/ground-pound attack. Keep it asserted while fire
+    // is held so the 30 Hz native bridge cannot miss a short COD input pulse.
+    // Bit 1: one-shot native B/use press for NPCs, signs and dialog advance.
+    external.attack_flags=0;
+    if attack_down || weapon_fired {
+        external.attack_flags|=1;
+    }
+    if use_pressed {
+        external.attack_flags|=2;
+    }
+
     bridge_state.last_attack_down=attack_down;
+    bridge_state.last_use_down=use_down;
     bridge_state.last_weapon_shot_count=Some(weapon_shot_count);
     external.health=health;
     external.active=true;
