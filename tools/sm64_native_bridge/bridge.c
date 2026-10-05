@@ -360,6 +360,10 @@ void iw4l_sm64_platform_displacement_begin(void) {
     float dz;
     float distance2;
 
+    if (gIw4lDoorWarpCooldownTicks > 0) {
+        gIw4lDoorWarpCooldownTicks--;
+    }
+
     gIw4lPlatformActive = 0;
     gIw4lPlatformDisplacement[0] = 0.0f;
     gIw4lPlatformDisplacement[1] = 0.0f;
@@ -428,6 +432,7 @@ static char gIw4lPendingTransitionLevel[32];
 static uint32_t gIw4lPendingTransitionArea = 0;
 static uint32_t gIw4lPendingTransitionNode = 0;
 static uint32_t gIw4lPendingTransitionArg = 0;
+static uint32_t gIw4lDoorWarpCooldownTicks = 0;
 static struct Iw4lSm64Object gIw4lObjects[4096];
 #define IW4L_SM64_MAX_STATIC_SURFACES 16384u
 static struct Iw4lSm64Triangle gIw4lStaticSurfaces[IW4L_SM64_MAX_STATIC_SURFACES];
@@ -644,13 +649,15 @@ static int bridge_door_is_unlocked(const struct Object *object) {
     return 1;
 }
 
-static void bridge_auto_open_nearby_doors(const struct Request *request) {
+static int bridge_auto_open_nearby_doors(const struct Request *request) {
     int list_index;
     const float open_radius = 300.0f;
     const float open_radius2 = open_radius * open_radius;
+    const float warp_radius = 245.0f;
+    const float warp_radius2 = warp_radius * warp_radius;
 
     if (request == NULL || gObjectLists == NULL) {
-        return;
+        return 0;
     }
 
     for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
@@ -676,31 +683,135 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
                 continue;
             }
 
+            dx = object->oPosX - request->pos[0];
+            dy = object->oPosY - request->pos[1];
+            dz = object->oPosZ - request->pos[2];
+
             /*
-             * Only the two Bowser-key doors need the special native traversal.
-             * Do NOT suppress ordinary castle warp doors here; doing so broke
-             * doors leading to/from the key-door hall.
+             * A bhvDoorWarp is not just a door animation. Its authored warp
+             * node is what swaps castle areas/rooms. Never proximity-open one
+             * without also executing that node, or COD can walk into geometry
+             * that has not been loaded.
+             *
+             * Do this directly from COD proximity instead of relying on hidden
+             * Mario to finish ACT_PUSHING_DOOR/ACT_PULLING_DOOR. That keeps the
+             * basement key door and ordinary painting-room warp doors on the
+             * same reliable path.
              */
-            if (bridge_is_key_warp_door(object)) {
+            if (behavior == segmented_to_virtual(bhvDoorWarp)) {
+                if (!bridge_door_is_unlocked(object)) {
+                    continue;
+                }
+
+                if (gIw4lDoorWarpCooldownTicks == 0
+                    && object->oAction == 0
+                    && dx * dx + dz * dz <= warp_radius2
+                    && dy > -220.0f
+                    && dy < 280.0f) {
+                    const u8 source_node_id =
+                        (u8)(((uint32_t)object->oBehParams >> 16) & 0xFFu);
+                    struct ObjectWarpNode *source_node =
+                        area_get_warp_node(source_node_id);
+
+                    if (source_node != NULL) {
+                        const s16 dest_level =
+                            (s16)(source_node->node.destLevel & 0x7Fu);
+                        const s16 dest_area = (s16)source_node->node.destArea;
+                        const s16 dest_node = (s16)source_node->node.destNode;
+                        const s32 action_arg =
+                            gMarioState != NULL
+                                ? (s32)should_push_or_pull_door(gMarioState, object) + 4
+                                : 5;
+
+                        /*
+                         * Consume a Bowser key exactly once when entering its
+                         * actual key door. Ordinary warp doors have id 0 and
+                         * skip this block.
+                         */
+                        if (bridge_is_key_warp_door(object)) {
+                            const s16 warp_door_id =
+                                (s16)(((uint32_t)object->oBehParams >> 24) & 0xFFu);
+                            const u32 flags = save_file_get_flags();
+
+                            if (warp_door_id == 1
+                                && !(flags & SAVE_FLAG_UNLOCKED_UPSTAIRS_DOOR)
+                                && (flags & SAVE_FLAG_HAVE_KEY_2)) {
+                                save_file_set_flags(SAVE_FLAG_UNLOCKED_UPSTAIRS_DOOR);
+                                save_file_clear_flags(SAVE_FLAG_HAVE_KEY_2);
+                                save_file_do_save(gCurrSaveFileNum - 1);
+                            } else if (warp_door_id == 2
+                                && !(flags & SAVE_FLAG_UNLOCKED_BASEMENT_DOOR)
+                                && (flags & SAVE_FLAG_HAVE_KEY_1)) {
+                                save_file_set_flags(SAVE_FLAG_UNLOCKED_BASEMENT_DOOR);
+                                save_file_clear_flags(SAVE_FLAG_HAVE_KEY_1);
+                                save_file_do_save(gCurrSaveFileNum - 1);
+                            }
+                        }
+
+                        object->oInteractStatus |=
+                            (action_arg & 1) ? 0x00010000u : 0x00020000u;
+
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-native: COD warp door source=%u level=%d area=%d -> level=%d area=%d node=%d arg=%d\n",
+                            (unsigned)source_node_id,
+                            (int)gCurrLevelNum,
+                            (int)gCurrAreaIndex,
+                            (int)dest_level,
+                            (int)dest_area,
+                            (int)dest_node,
+                            (int)action_arg
+                        );
+                        fflush(stderr);
+
+                        if (dest_level == gCurrLevelNum) {
+                            initiate_warp(
+                                dest_level,
+                                dest_area,
+                                dest_node,
+                                action_arg
+                            );
+
+                            /*
+                             * Same-level castle warp: execute now. Rust will
+                             * observe area_index changing in this snapshot,
+                             * install the new static collision, and place COD
+                             * at native Mario's destination-door spawn.
+                             */
+                            gIw4lStaticSurfaceArea = -1;
+                            warp_area();
+                            gIw4lStaticSurfaceArea = -1;
+                            gIw4lDoorWarpCooldownTicks = 12;
+                            return 1;
+                        }
+
+                        /*
+                         * Cross-level warp doors still use the normal host DLL
+                         * handoff, but publish the exact authored destination.
+                         */
+                        iw4l_sm64_capture_level_warp(
+                            dest_level,
+                            (u32)dest_area,
+                            (u32)dest_node,
+                            (u32)action_arg
+                        );
+                        gIw4lDoorWarpCooldownTicks = 12;
+                        return 1;
+                    }
+                }
+
+                /*
+                 * Never visually auto-open a warp door without performing the
+                 * warp. Locked doors remain available to vanilla interaction
+                 * so their key/dialog text can still appear.
+                 */
                 continue;
             }
 
             /*
-             * Never let an unlocked star door enter Mario's native
-             * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR path in the
-             * embedded host. Those actions dereference and animate hidden
-             * Mario/door state during level_script_execute(), so trying to
-             * bypass them after the native frame is too late if that same
-             * frame faults.
-             *
-             * Star doors are not level warps: bhvStarDoor simply slides the
-             * paired gate halves apart. Once the star requirement is met,
-             * disable its INTERACT_DOOR contribution and drive the exact
-             * vanilla bhvStarDoor animation through oInteractStatus instead.
-             *
-             * If the player does NOT have enough stars, leave oInteractType
-             * alone so vanilla interact_door() can still show the normal
-             * "need N more stars" dialog.
+             * Never let an unlocked star-required physical door enter Mario's
+             * hidden unlock cutscene. Persist the vanilla save flag and let its
+             * real bhvDoor/bhvStarDoor animation open on proximity.
              */
             {
                 const s16 required_stars = (s16)(object->oBehParams >> 24);
@@ -712,13 +823,6 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
                     const u32 save_flag = get_door_save_file_flag(object);
                     const u32 old_flags = save_file_get_flags();
 
-                    /*
-                     * This includes the 1-star WF/PSS doors and 3-star
-                     * JRB/CCM doors, which are plain bhvDoor objects rather
-                     * than bhvStarDoor. Suppress their INTERACT_DOOR path once
-                     * the requirement is met so hidden Mario can never enter
-                     * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR.
-                     */
                     object->oInteractType = 0;
 
                     if (save_flag != 0 && !(old_flags & save_flag)) {
@@ -739,20 +843,13 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
                 continue;
             }
 
-            dx = object->oPosX - request->pos[0];
-            dy = object->oPosY - request->pos[1];
-            dz = object->oPosZ - request->pos[2];
-
             if (dx * dx + dz * dz <= open_radius2 && dy > -220.0f && dy < 280.0f) {
-                /*
-                 * The stock door behavior consumes 0x10000/0x20000 as its
-                 * open request. Star doors accept either bit as well. Let the
-                 * original animation/collision code own opening and closing.
-                 */
                 object->oInteractStatus |= 0x00010000u;
             }
         }
     }
+
+    return 0;
 }
 
 static int native_runs_mario_action(void) {
@@ -2402,6 +2499,7 @@ IW4L_SM64_API int iw4l_sm64_init(
         set_mario_action(gMarioState, ACT_IDLE, 0);
     }
 
+    gIw4lDoorWarpCooldownTicks = 0;
     gIw4lInitialized = 1;
     gIw4lLastError[0] = '\0';
     gBridgeStage = "capture_initial_static_surfaces";
@@ -2492,7 +2590,12 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gBridgeStage = "apply_external_attack";
     apply_external_attack(&request);
     gBridgeStage = "auto_open_doors";
-    bridge_auto_open_nearby_doors(&request);
+    if (bridge_auto_open_nearby_doors(&request)) {
+        gIw4lBridgeButtonDown = 0;
+        gIw4lBridgeButtonPressed = 0;
+        gBridgeStage = "door_warp_snapshot";
+        return fill_snapshot_view();
+    }
 
     /*
      * If a star-door action was selected on the previous native frame, cancel
