@@ -55,7 +55,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 7u
+#define IW4L_SM64_ABI_VERSION 8u
 static volatile const char *gBridgeStage = "startup";
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -285,6 +285,8 @@ struct Iw4lSm64SnapshotView {
     uint32_t dialog_text_len;
     const struct Iw4lSm64Object *objects;
     uint32_t object_count;
+    const struct Iw4lSm64Triangle *static_surfaces;
+    uint32_t static_surface_count;
     const struct Iw4lSm64Triangle *dynamic_surfaces;
     uint32_t dynamic_surface_count;
     const struct Iw4lSm64RenderTriangle *render_triangles;
@@ -335,6 +337,10 @@ static uint32_t gIw4lPendingTransitionArea = 0;
 static uint32_t gIw4lPendingTransitionNode = 0;
 static uint32_t gIw4lPendingTransitionArg = 0;
 static struct Iw4lSm64Object gIw4lObjects[4096];
+#define IW4L_SM64_MAX_STATIC_SURFACES 16384u
+static struct Iw4lSm64Triangle gIw4lStaticSurfaces[IW4L_SM64_MAX_STATIC_SURFACES];
+static uint32_t gIw4lStaticSurfaceCount = 0;
+static int gIw4lStaticSurfaceArea = -1;
 static struct Iw4lSm64Triangle gIw4lDynamicSurfaces[8192];
 static struct Iw4lSm64SnapshotView gIw4lSnapshot;
 
@@ -1248,6 +1254,85 @@ static uint32_t collect_objects(const struct Object **objects, uint32_t capacity
     return count;
 }
 
+static void capture_static_surfaces(void) {
+    static const struct Surface *seen[IW4L_SM64_MAX_STATIC_SURFACES];
+    uint32_t seen_count = 0;
+    int z, x, partition;
+
+    if (gCurrentArea == NULL) {
+        gIw4lStaticSurfaceCount = 0;
+        gIw4lStaticSurfaceArea = -1;
+        return;
+    }
+    if (gIw4lStaticSurfaceArea == gCurrAreaIndex && gIw4lStaticSurfaceCount != 0) {
+        return;
+    }
+
+    for (z = 0; z < NUM_CELLS; ++z) {
+        for (x = 0; x < NUM_CELLS; ++x) {
+            for (partition = 0; partition < 3; ++partition) {
+                struct SurfaceNode *node =
+                    gStaticSurfacePartition[z][x][partition].next;
+                uint32_t guard = 0;
+
+                while (node != NULL) {
+                    const struct Surface *surface = node->surface;
+                    uint32_t i;
+                    int duplicate = 0;
+
+                    if (++guard > 16384) {
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-native: warning: static surface chain guard tripped at cell=(%d,%d) partition=%d\n",
+                            x, z, partition
+                        );
+                        break;
+                    }
+                    if (surface == NULL) {
+                        break;
+                    }
+
+                    for (i = 0; i < seen_count; ++i) {
+                        if (seen[i] == surface) {
+                            duplicate = 1;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+                        if (seen_count >= IW4L_SM64_MAX_STATIC_SURFACES) {
+                            fprintf(
+                                stderr,
+                                "iw4l-sm64-native: warning: static surface capture truncated at %u surfaces\n",
+                                (unsigned)seen_count
+                            );
+                            goto done;
+                        }
+                        seen[seen_count++] = surface;
+                    }
+                    node = node->next;
+                }
+            }
+        }
+    }
+
+done:
+    for (uint32_t i = 0; i < seen_count; ++i) {
+        const struct Surface *surface = seen[i];
+        float *v = gIw4lStaticSurfaces[i].vertices;
+        v[0] = (float)surface->vertex1[0];
+        v[1] = (float)surface->vertex1[1];
+        v[2] = (float)surface->vertex1[2];
+        v[3] = (float)surface->vertex2[0];
+        v[4] = (float)surface->vertex2[1];
+        v[5] = (float)surface->vertex2[2];
+        v[6] = (float)surface->vertex3[0];
+        v[7] = (float)surface->vertex3[1];
+        v[8] = (float)surface->vertex3[2];
+    }
+    gIw4lStaticSurfaceCount = seen_count;
+    gIw4lStaticSurfaceArea = gCurrAreaIndex;
+}
+
 static uint32_t collect_dynamic_surfaces(
     const struct Surface **out,
     uint32_t capacity
@@ -1448,6 +1533,8 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
 
     gBridgeStage = "collect_objects";
     count = collect_objects(objects, 4096);
+    gBridgeStage = "collect_static_surfaces";
+    capture_static_surfaces();
     gBridgeStage = "collect_dynamic_surfaces";
     dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
     print_native_census_once(objects, count, dynamic_count);
@@ -1514,6 +1601,8 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
     }
     gIw4lSnapshot.objects = gIw4lObjects;
     gIw4lSnapshot.object_count = count;
+    gIw4lSnapshot.static_surfaces = gIw4lStaticSurfaces;
+    gIw4lSnapshot.static_surface_count = gIw4lStaticSurfaceCount;
 
     for (i = 0; i < dynamic_count; ++i) {
         const struct Surface *surface = dynamic_surfaces[i];
@@ -1759,7 +1848,7 @@ IW4L_SM64_API int iw4l_sm64_init(
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
-        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) room=%d action=0x%08X\n",
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d preserve_native_spawn=%d pos=(%.1f,%.1f,%.1f) room=%d action=0x%08X static_surfaces=%u\n",
         level_name,
         area,
         act,
@@ -1769,7 +1858,8 @@ IW4L_SM64_API int iw4l_sm64_init(
         gMarioState->pos[1],
         gMarioState->pos[2],
         (int)gMarioCurrentRoom,
-        gMarioState->action
+        gMarioState->action,
+        (unsigned)gIw4lStaticSurfaceCount
     );
     fflush(stderr);
     return 1;
@@ -1856,6 +1946,8 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
         gIw4lRenderTriangleCount=0;
     }
     gIw4lInitialized = 0;
+    gIw4lStaticSurfaceCount = 0;
+    gIw4lStaticSurfaceArea = -1;
     gIw4lPreserveNativeSpawn = 0;
     gIw4lAudioFrameCount = 0;
     gIw4lAudioCadence = 0;
