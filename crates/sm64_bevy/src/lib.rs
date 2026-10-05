@@ -1990,8 +1990,10 @@ fn sync_native_render_frame(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,uvs)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR,colors);
 
-        if let Some(existing)=cache.batches.get(&key) {
-            if let Some(mut mesh)=meshes.get_mut(&existing.mesh) {
+        if let Some((existing_mesh,existing_material))=cache.batches.get(&key)
+            .map(|existing|(existing.mesh.clone(),existing.material.clone()))
+        {
+            if let Some(mut mesh)=meshes.get_mut(&existing_mesh) {
                 *mesh=mesh_data;
             }
 
@@ -2005,7 +2007,7 @@ fn sync_native_render_frame(
              * Refresh the material every native frame so late/reuploaded
              * textures are bound to the already-existing batch.
              */
-            if let Some(mut material)=materials.get_mut(&existing.material) {
+            if let Some(mut material)=materials.get_mut(&existing_material) {
                 material.base_color=Color::WHITE;
                 material.base_color_texture=if key.0==u32::MAX {
                     None
