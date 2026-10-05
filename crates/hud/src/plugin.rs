@@ -55,6 +55,7 @@ impl Plugin for HudPlugin {
             .init_resource::<crate::compass::CompassPingLatch>()
             .init_resource::<crate::surface::Hud2dSurface>()
             .init_resource::<HudPresentStamp>()
+            .init_resource::<frame::Sm64HudView>()
             .init_resource::<HudStageStamp>()
             .init_resource::<crate::expr_cache::MenuExprCache>()
             .init_resource::<crate::hudelem::HudElemSoundLatch>()
@@ -117,6 +118,7 @@ impl Plugin for HudPlugin {
                             update_mantle_hint,
                             crate::breath_hint::update,
                             crate::use_hint::update,
+                            crate::sm64_overlay::update,
                             update_hud_elems,
                             update_targetmap,
                             crate::menus::update_script_menus,
@@ -144,6 +146,7 @@ impl Plugin for HudPlugin {
                     flush_mantle_hint_tess,
                     flush_breath_hint_tess,
                     flush_use_hint_tess,
+                    flush_sm64_tess,
                     flush_hud_elems_tess,
                     flush_targetmap_tess,
                     flush_minecraft_tess,
@@ -339,6 +342,7 @@ fn ensure_hud_root(mut commands: Commands, existing: Query<Entity, With<HudRoot>
             spawn_mantle_hint(root);
             crate::font_overlay::spawn_overlay(root, crate::breath_hint::BreathHintRaster);
             crate::font_overlay::spawn_overlay(root, crate::use_hint::UseHintRaster);
+            crate::font_overlay::spawn_overlay(root, crate::sm64_overlay::Sm64HudRaster);
             spawn_hud_elems(root);
             spawn_targetmap(root);
             crate::menus::spawn_script_menus(root);
@@ -714,6 +718,35 @@ fn flush_scoreboard_tess(
     }
     let job = std::mem::take(&mut pass.scoreboard);
     if let Ok((_, mut host, mut latch)) = scoreboard.single_mut() {
+        gpu_list::apply_tess_job(
+            job,
+            &mut host,
+            &mut latch,
+            &mut hud_images,
+            &mut images,
+            &mut frame,
+            surface.width(),
+            surface.height(),
+        );
+    }
+}
+
+fn flush_sm64_tess(
+    surface: Res<crate::surface::Hud2dSurface>,
+    mut pass: ResMut<HudTessPass>,
+    mut hud_images: ResMut<HudImages>,
+    mut images: ResMut<Assets<Image>>,
+    mut raster: Query<
+        (Entity, &mut Node, &mut crate::gpu_list::GpuListLatch),
+        With<crate::sm64_overlay::Sm64HudRaster>,
+    >,
+) {
+    let _body = gpu_list::TessBody::open();
+    if !surface.is_ready() {
+        return;
+    }
+    let job = std::mem::take(&mut pass.sm64);
+    if let Ok((_, mut host, mut latch)) = raster.single_mut() {
         gpu_list::apply_tess_job(
             job,
             &mut host,
