@@ -348,6 +348,7 @@ static int gIw4lInitialized = 0;
  * frame while the destination is loading.
  */
 static int gIw4lPreserveNativeSpawn = 0;
+static uint32_t gIw4lDoorWarpCooldownTicks = 0;
 static float gIw4lPlatformDisplacement[3] = { 0.0f, 0.0f, 0.0f };
 static uint32_t gIw4lPlatformActive = 0;
 static struct Object *gIw4lLastPlatformObject = NULL;
@@ -359,10 +360,6 @@ void iw4l_sm64_platform_displacement_begin(void) {
     float dy;
     float dz;
     float distance2;
-
-    if (gIw4lDoorWarpCooldownTicks > 0) {
-        gIw4lDoorWarpCooldownTicks--;
-    }
 
     gIw4lPlatformActive = 0;
     gIw4lPlatformDisplacement[0] = 0.0f;
@@ -432,7 +429,6 @@ static char gIw4lPendingTransitionLevel[32];
 static uint32_t gIw4lPendingTransitionArea = 0;
 static uint32_t gIw4lPendingTransitionNode = 0;
 static uint32_t gIw4lPendingTransitionArg = 0;
-static uint32_t gIw4lDoorWarpCooldownTicks = 0;
 static struct Iw4lSm64Object gIw4lObjects[4096];
 #define IW4L_SM64_MAX_STATIC_SURFACES 16384u
 static struct Iw4lSm64Triangle gIw4lStaticSurfaces[IW4L_SM64_MAX_STATIC_SURFACES];
@@ -2542,6 +2538,10 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     if (!gIw4lInitialized || gIw4lLevelCommand == NULL || player == NULL) {
         snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime is not initialized");
         return NULL;
+    }
+
+    if (gIw4lDoorWarpCooldownTicks > 0) {
+        gIw4lDoorWarpCooldownTicks--;
     }
 
     if (gIw4lPreserveNativeSpawn && gMarioState != NULL) {
