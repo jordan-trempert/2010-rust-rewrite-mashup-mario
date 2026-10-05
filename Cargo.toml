@@ -218,9 +218,10 @@ strip = "symbols"
 # That link, not the game, is what `make play` was waiting on.
 #
 # `lto = false` keeps crate-local ThinLTO; `"off"` is not required.
-# Incremental is for workspace recompiles after the first fill of this
-# profile cache. Strip lives here, not in RUSTFLAGS: env RUSTFLAGS override
-# target rustflags and would split the play/release fingerprint.
+# Incremental stays disabled here: optimized incremental builds on MSVC can
+# leave cross-codegen-unit references stale after pull/edit cycles and fail at
+# link time with LNK2019/LNK1120. Strip lives here, not in RUSTFLAGS: env
+# RUSTFLAGS override target rustflags and would split the play/release fingerprint.
 #
 # Separate profile rather than a relaxed `[profile.release]`: the release
 # binary the published numbers describe has to stay buildable.
