@@ -54,6 +54,7 @@ if (Test-Path $armipsSource) {
 $backup = Join-Path $root "pc_main.iw4l-backup.txt"
 $builtModule = Join-Path $build "iw4l-sm64-native.dll"
 $output = $builtModule
+$legacyBridgeExe = Join-Path $build "iw4l-sm64-bridge.exe"
 $staleBackupSource = Join-Path $root "src\pc\pc_main.iw4l-backup.c"
 $staleBackupObject = Join-Path $build "src\pc\pc_main.iw4l-backup.o"
 $pcMainObject = Join-Path $build "src\pc\pc_main.o"
@@ -65,6 +66,7 @@ $pcMainObject = Join-Path $build "src\pc\pc_main.o"
 Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
 Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
+Remove-Item $legacyBridgeExe -Force -ErrorAction SilentlyContinue
 
 Write-Host "Building embedded native SM64 gameplay module from $root"
 Copy-Item $pcMain $backup -Force
@@ -262,7 +264,7 @@ try {
         )
         & make @makeArgs
         if ($LASTEXITCODE -ne 0) {
-            throw "sm64-port bridge build failed with exit code $LASTEXITCODE"
+            throw "sm64-port embedded module build failed with exit code $LASTEXITCODE"
         }
     }
     finally {
@@ -283,7 +285,7 @@ try {
     }
     if ($nm) {
         & $nm.Source -n $builtModule | Set-Content -Path $symbolMap -Encoding ASCII
-        Write-Host "Native symbol map: $symbolMap"
+        Write-Host "Embedded native symbol map: $symbolMap"
     }
     else {
         Write-Warning "nm was not found; crash symbol map was not generated."
