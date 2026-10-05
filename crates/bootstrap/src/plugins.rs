@@ -23,6 +23,7 @@ use ui::UiPlugin;
 #[derive(Resource, Debug, Default, Clone)]
 struct Sm64CodCollisionState {
     static_vertices: Vec<[f32;3]>,
+    area: u8,
     last_dynamic_tick: u32,
     last_dynamic_triangles: Vec<[[f32;3];3]>,
 }
@@ -37,6 +38,7 @@ struct Sm64CodSpawn {
 struct Sm64CodNativeState {
     last_sm64_health: Option<i32>,
     last_action: u32,
+    last_area: u32,
     last_weapon_shot_count: Option<i32>,
     last_attack_down: bool,
     last_use_down: bool,
@@ -90,15 +92,22 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
             arm_sm64_cod_external_presentation,
             launch_installed_sm64_cod_map,
             place_sm64_cod_player_on_life_started,
-            apply_sm64_cod_movement_abilities,
             sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
             apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
+            sync_sm64_cod_area_collision,
             publish_sm64_native_audio,
             publish_sm64_cod_hud,
             apply_sm64_dynamic_collision,
             suppress_sm64_player_view,
             clear_sm64_cod_on_return,
         ).chain());
+
+    app.add_systems(
+        FixedUpdate,
+        apply_sm64_cod_movement_abilities
+            .after(net::AuthoritySet::Gather)
+            .before(net::AuthoritySet::Step),
+    );
 
     app.edit_schedule(Update, |schedule| {
         schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
@@ -204,6 +213,7 @@ fn launch_installed_sm64_cod_map(
             }
         }
         collision_state.static_vertices=verts.clone();
+        collision_state.area=area;
         collision_state.last_dynamic_tick=0;
         collision_state.last_dynamic_triangles.clear();
         let mesh=sim::SimClipMesh::from_linear_triangles(verts);
@@ -317,19 +327,24 @@ fn place_sm64_cod_player_on_life_started(
     }
 }
 fn sm64_cod_native_owns_motion(action: u32) -> bool {
-    let group=action & sm64_core::ACT_GROUP_MASK;
+    /*
+     * Dialogs, stars and area transitions keep their native state machines,
+     * but they never suppress COD pmove. Only mechanics whose movement itself
+     * is the gameplay hand control of the player transform to native SM64.
+     */
     matches!(
-        group,
-        sm64_core::ACT_GROUP_OBJECT
-            | sm64_core::ACT_GROUP_AUTOMATIC
-            | sm64_core::ACT_GROUP_CUTSCENE
-    ) || matches!(
         action,
         sm64_core::ACT_SHOT_FROM_CANNON
             | sm64_core::ACT_TORNADO_TWIRLING
             | sm64_core::ACT_GRABBED
             | sm64_core::ACT_RIDING_HOOT
-            | sm64_core::ACT_WARP_DOOR_SPAWN
+    )
+}
+
+fn sm64_cod_native_reposition_action(action: u32) -> bool {
+    matches!(
+        action,
+        sm64_core::ACT_WARP_DOOR_SPAWN
             | sm64_core::ACT_EMERGE_FROM_PIPE
             | sm64_core::ACT_SPAWN_SPIN_AIRBORNE
             | sm64_core::ACT_SPAWN_NO_SPIN_AIRBORNE
@@ -343,7 +358,8 @@ fn sm64_cod_native_owns_motion(action: u32) -> bool {
 fn apply_sm64_cod_movement_abilities(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
-    dialog: Res<sm64_bevy::Sm64NativeDialogOutput>,
+    local: Option<Res<net::LocalPresentClient>>,
+    pending: Res<net::PendingAuthorityInput>,
     mut state: ResMut<Sm64CodMoveState>,
     mut external: ResMut<sm64_bevy::Sm64ExternalPlayer>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
@@ -362,39 +378,32 @@ fn apply_sm64_cod_movement_abilities(
         return;
     }
     let Some(authority)=authority.as_deref_mut() else {
-        *state=Sm64CodMoveState::default();
-        external.pending_ground_pound=false;
+        return;
+    };
+    let Some(input)=pending.0.as_ref() else {
         return;
     };
 
-    let mut first=None;
-    authority.0.visit_players(|id,player|{
-        if first.is_none() {
-            first=Some((id,*player));
-        }
-    });
-    let Some((id,player))=first else {
-        *state=Sm64CodMoveState::default();
-        external.pending_ground_pound=false;
+    let target=local
+        .as_ref()
+        .map(|id|id.0)
+        .or_else(||input.cmds.first().map(|(id,_)|*id));
+    let Some(id)=target else {return;};
+    let Some((_,cmd))=input.cmds.iter().rev().find(|(client,_)|*client==id) else {
         return;
     };
+    let Some(player)=authority.0.player(id).copied() else {return;};
 
-    let buttons=authority.0.command_buttons(id);
-    let jump_down=(buttons & BUTTON_JUMP)!=0;
-    let pound_down=(buttons & (BUTTON_PRONE | BUTTON_CROUCH))!=0;
+    let jump_down=(cmd.buttons & BUTTON_JUMP)!=0;
+    let pound_down=(cmd.buttons & (BUTTON_PRONE | BUTTON_CROUCH))!=0;
     let jump_pressed=jump_down && !state.last_jump_down;
     let pound_pressed=pound_down && !state.last_pound_down;
     let grounded=player.ground_entity_num!=ENTITYNUM_NONE;
     let just_left_ground=state.last_grounded && !grounded;
 
-    /*
-     * Cannons, warps, grabs and native cutscenes/dialogs own the player while
-     * active. Do not layer COD air abilities over those sequences.
-     */
-    if player.health<=0 ||
-        (output.active &&
-            (sm64_cod_native_owns_motion(output.action) || dialog.id>=0))
-    {
+    // Cannons/grabs/etc. truly own native motion. Dialogs, stars and warps do
+    // not block these abilities or ordinary COD movement.
+    if player.health<=0 || (output.active && sm64_cod_native_owns_motion(output.action)) {
         state.ground_pounding=false;
         state.jump_stage=0;
         state.last_jump_down=jump_down;
@@ -405,27 +414,20 @@ fn apply_sm64_cod_movement_abilities(
 
     if grounded {
         if state.ground_pounding {
-            /*
-             * The falling motion itself is COD-side. The landing pulse is sent
-             * to the native SM64 object system once so poundable enemies and
-             * bosses see an actual SM64 attack at the landing position.
-             */
             external.pending_ground_pound=true;
             diag::info!(World, "SM64 COD ground pound landed");
         }
         state.ground_pounding=false;
 
-        // A press that begins COD's ordinary first jump arms the combo. Keep
-        // stage 1 while the key is held until authority marks us airborne.
+        // Let COD's normal pmove perform jump #1. This only arms the chain.
         if jump_pressed {
             state.jump_stage=1;
         } else if !jump_down {
             state.jump_stage=0;
         }
     } else {
-        if just_left_ground {
-            // COD supplied jump #1 (or the player walked off an edge).
-            state.jump_stage=state.jump_stage.max(1);
+        if just_left_ground && state.jump_stage==0 {
+            state.jump_stage=1;
         }
 
         if pound_pressed && !state.ground_pounding {
@@ -437,8 +439,6 @@ fn apply_sm64_cod_movement_abilities(
             state.ground_pounding=true;
             diag::info!(World, "SM64 COD ground pound started");
         } else if state.ground_pounding {
-            // Keep the pound decisive even if normal COD air acceleration or
-            // gravity tries to soften it between fixed-authority ticks.
             let mut velocity=player.velocity;
             velocity[0]*=0.9;
             velocity[1]*=0.9;
@@ -457,8 +457,9 @@ fn apply_sm64_cod_movement_abilities(
                 state.jump_stage=next_stage;
                 diag::info!(
                     World,
-                    "SM64 COD {} jump",
-                    if next_stage==2 {"double"} else {"triple"}
+                    "SM64 COD {} jump vz={:.1}",
+                    if next_stage==2 {"double"} else {"triple"},
+                    velocity[2]
                 );
             }
         }
@@ -481,6 +482,7 @@ fn sync_cod_player_into_sm64(
         external.pending_use=false;
         external.pending_fire=false;
         external.pending_ground_pound=false;
+        bridge_state.last_area=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -492,6 +494,7 @@ fn sync_cod_player_into_sm64(
         external.pending_use=false;
         external.pending_fire=false;
         external.pending_ground_pound=false;
+        bridge_state.last_area=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -516,6 +519,7 @@ fn sync_cod_player_into_sm64(
         external.pending_use=false;
         external.pending_fire=false;
         external.pending_ground_pound=false;
+        bridge_state.last_area=0;
         bridge_state.last_weapon_shot_count=None;
         bridge_state.last_attack_down=false;
         bridge_state.last_use_down=false;
@@ -565,6 +569,67 @@ fn sync_cod_player_into_sm64(
     bridge_state.last_weapon_shot_count=Some(weapon_shot_count);
     external.health=health;
     external.active=true;
+}
+
+fn sync_sm64_cod_area_collision(
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    mut authority: Option<ResMut<net::AuthorityWorld>>,
+    mut collision_state: ResMut<Sm64CodCollisionState>,
+) {
+    let (Some(active),Some(authority))=(active,authority.as_deref_mut()) else {
+        return;
+    };
+    let Ok(area)=u8::try_from(output.area_index) else {return;};
+    if !output.active || area==0 || area==collision_state.area {
+        return;
+    }
+
+    let Some(root)=std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
+        diag::warn!(World, "SM64 COD area transition: SM64_DECOMP_ROOT is not configured");
+        return;
+    };
+    let parsed=match sm64_assets::load_level_collision(&root,&active.level,area) {
+        Ok(parsed)=>parsed,
+        Err(error)=>{
+            diag::warn!(
+                World,
+                "SM64 COD area transition: collision load failed for {} area {}: {}",
+                active.level,
+                area,
+                error
+            );
+            return;
+        }
+    };
+
+    let s=sm64_core::SM64_TO_IW4_SCALE;
+    let mut verts=Vec::with_capacity(parsed.world.surfaces.len()*3);
+    for surface in &parsed.world.surfaces {
+        for vertex in [surface.vertex1,surface.vertex3,surface.vertex2] {
+            verts.push([
+                vertex[0] as f32*s,
+                -(vertex[2] as f32)*s,
+                vertex[1] as f32*s,
+            ]);
+        }
+    }
+
+    collision_state.static_vertices=verts.clone();
+    collision_state.area=area;
+    collision_state.last_dynamic_tick=0;
+    collision_state.last_dynamic_triangles.clear();
+
+    let mesh=sim::SimClipMesh::from_linear_triangles(verts);
+    let content=authority.0.content().with_clip_mesh(mesh);
+    authority.0.install_content(content);
+    diag::info!(
+        World,
+        "SM64 COD area transition: installed {} static triangles for {} area {}",
+        parsed.world.surfaces.len(),
+        active.level,
+        area
+    );
 }
 
 fn apply_sm64_dynamic_collision(
@@ -621,6 +686,7 @@ fn apply_sm64_native_player_output(
     if active.is_none() {
         bridge_state.last_sm64_health=None;
         bridge_state.last_action=0;
+        bridge_state.last_area=0;
         return;
     }
     let Some(authority)=authority.as_deref_mut() else {return;};
@@ -637,6 +703,7 @@ fn apply_sm64_native_player_output(
         authority.0.set_external_motion(id,false);
         bridge_state.last_sm64_health=None;
         bridge_state.last_action=0;
+        bridge_state.last_area=0;
         return;
     }
 
@@ -688,28 +755,48 @@ fn apply_sm64_native_player_output(
     bridge_state.last_sm64_health=Some(output.health);
 
     let owns_motion=sm64_cod_native_owns_motion(output.action);
+    let area_changed=bridge_state.last_area!=0
+        && output.area_index!=0
+        && output.area_index!=bridge_state.last_area;
+    let s=sm64_core::SM64_TO_IW4_SCALE;
+    let native_origin=[
+        output.sm64_pos[0]*s,
+        -output.sm64_pos[2]*s,
+        output.sm64_pos[1]*s,
+    ];
 
     authority.0.set_external_motion(id,owns_motion);
     if owns_motion {
-        let s=sm64_core::SM64_TO_IW4_SCALE;
-        let origin=[
-            output.sm64_pos[0]*s,
-            -output.sm64_pos[2]*s,
-            output.sm64_pos[1]*s,
-        ];
         let velocity=[
             output.sm64_vel[0]*s*sm64_sim::SM64_TICK_HZ as f32,
             -output.sm64_vel[2]*s*sm64_sim::SM64_TICK_HZ as f32,
             output.sm64_vel[1]*s*sm64_sim::SM64_TICK_HZ as f32,
         ];
-        authority.0.set_origin(id,origin);
+        authority.0.set_origin(id,native_origin);
         authority.0.set_velocity(id,velocity);
 
         let sm64_yaw_degrees=output.sm64_yaw as u16 as f32*360.0/65536.0;
         let mut view=player.viewangles;
         view[1]=sm64_yaw_degrees-90.0;
         authority.0.set_viewangles(id,view);
+    } else if area_changed || sm64_cod_native_reposition_action(output.action) {
+        let dx=native_origin[0]-player.origin[0];
+        let dy=native_origin[1]-player.origin[1];
+        let dz=native_origin[2]-player.origin[2];
+        let distance2=dx*dx+dy*dy+dz*dz;
+        if area_changed || distance2>48.0*48.0 {
+            authority.0.teleport(id,native_origin);
+            diag::info!(
+                World,
+                "SM64 COD transition reposition area {} -> {} action=0x{:08x} origin={:?}",
+                bridge_state.last_area,
+                output.area_index,
+                output.action,
+                native_origin
+            );
+        }
     }
+    bridge_state.last_area=output.area_index;
 
     if output.action!=bridge_state.last_action {
         diag::info!(
