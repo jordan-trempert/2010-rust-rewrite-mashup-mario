@@ -918,10 +918,19 @@ fn apply_sm64_dynamic_collision(
     authority.0.install_content(content);
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Sm64TransitionFloorProbe {
+    hit: bool,
+    end: [f32; 3],
+    normal: [f32; 3],
+    startsolid: u8,
+    allsolid: u8,
+}
+
 fn sm64_safe_transition_origin(
     authority: &sim::SimWorld,
     native_origin: [f32; 3],
-) -> ([f32; 3], Option<trace_iw4::Trace>) {
+) -> ([f32; 3], Sm64TransitionFloorProbe) {
     /*
      * Native SM64 warp nodes often place Mario exactly on the floor plane.
      * IW4's imported triangle world is one-sided, so starting the COD capsule
@@ -952,18 +961,25 @@ fn sm64_safe_transition_origin(
         [0.0; 3],
         sim::MASK_PLAYER_SOLID,
     );
+    let summary = Sm64TransitionFloorProbe {
+        hit: probe.fraction < 1.0,
+        end: probe.endpos,
+        normal: probe.normal,
+        startsolid: probe.startsolid,
+        allsolid: probe.allsolid,
+    };
 
-    if probe.fraction < 1.0
-        && probe.startsolid == 0
-        && probe.allsolid == 0
-        && probe.normal[2] >= 0.5
-        && (native_origin[2] - probe.endpos[2]).abs() <= GROUNDED_TOLERANCE
+    if summary.hit
+        && summary.startsolid == 0
+        && summary.allsolid == 0
+        && summary.normal[2] >= 0.5
+        && (native_origin[2] - summary.end[2]).abs() <= GROUNDED_TOLERANCE
     {
         let mut safe = native_origin;
-        safe[2] = probe.endpos[2] + FLOOR_EPSILON;
-        (safe, Some(probe))
+        safe[2] = summary.end[2] + FLOOR_EPSILON;
+        (safe, summary)
     } else {
-        (native_origin, Some(probe))
+        (native_origin, summary)
     }
 }
 
@@ -1088,7 +1104,8 @@ fn apply_sm64_native_player_output(
         let distance2 = dx * dx + dy * dy + dz * dz;
         if bridge_state.force_native_reposition || area_changed || distance2 > 48.0 * 48.0 {
             let (teleport_origin, floor_probe) = if bridge_state.force_native_reposition {
-                sm64_safe_transition_origin(&authority.0, native_origin)
+                let (origin, probe) = sm64_safe_transition_origin(&authority.0, native_origin);
+                (origin, Some(probe))
             } else {
                 (native_origin, None)
             };
@@ -1109,8 +1126,8 @@ fn apply_sm64_native_player_output(
                         "SM64 COD transition floor probe native={:?} chosen={:?} hit={} end={:?} normal={:?} startsolid={} allsolid={}",
                         native_origin,
                         teleport_origin,
-                        probe.fraction < 1.0,
-                        probe.endpos,
+                        probe.hit,
+                        probe.end,
                         probe.normal,
                         probe.startsolid,
                         probe.allsolid
