@@ -394,7 +394,7 @@ fn launch_requested_sm64_map(
                 native.client=Some(client);
                 native.active=true;
                 info!(
-                    "SM64 COD map: native decomp gameplay runtime active for {level} area {area} act {selected_act}"
+                    "SM64 COD map: embedded native decomp runtime active in-process for {level} area {area} act {selected_act}"
                 );
             }
             Err(error)=>{
@@ -404,14 +404,14 @@ fn launch_requested_sm64_map(
                     enabled.0=false;
                     status.loaded=false;
                     status.message=format!(
-                        "SM64 COD map requires the native decomp gameplay bridge: {error}. Build tools/sm64_native_bridge/build.ps1 against sm64-port (or set SM64_NATIVE_BRIDGE)."
+                        "SM64 COD map requires the embedded native decomp module: {error}. Build tools/sm64_native_bridge/build.ps1 against sm64-port (or set SM64_NATIVE_MODULE)."
                     );
                     error!("{}",status.message);
                     commands.remove_resource::<Sm64LaunchRequest>();
                     return;
                 }
                 warn!(
-                    "SM64 COD map: native gameplay bridge unavailable ({error}); SM64_ALLOW_PARTIAL_FALLBACK is enabled, so only the incomplete Rust behavior subset will run."
+                    "SM64 COD map: embedded native module unavailable ({error}); SM64_ALLOW_PARTIAL_FALLBACK is enabled, so only the incomplete Rust behavior subset will run."
                 );
             }
         }
@@ -1613,7 +1613,7 @@ fn advance_sm64_runtime(
                     ));
                 }
                 Err(error)=>{
-                    error!("SM64 native gameplay bridge failed: {error}");
+                    error!("SM64 embedded native gameplay runtime failed: {error}");
                     native.client=None;
                     native.active=false;
                     native_output.active=false;
