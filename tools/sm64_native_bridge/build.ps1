@@ -716,6 +716,61 @@ $interactionText = $interactionText.Replace(
     $starDoorInteractionNeedle,
     $starDoorInteractionReplacement
 )
+
+# Key doors (basement/upstairs) have the same hidden-Mario cutscene problem as
+# first-time star doors. Once vanilla has already verified the corresponding
+# key is present, persist the unlocked flag immediately and continue through the
+# ordinary push/pull door action so WARP_OP_WARP_DOOR can change castle areas.
+$keyDoorUpstairsNeedle = @"
+            doorAction = ACT_UNLOCKING_KEY_DOOR;
+"@
+$keyDoorUpstairsReplacement = @"
+#ifdef IW4L_SM64_EMBEDDED
+            save_file_set_flags(SAVE_FLAG_UNLOCKED_UPSTAIRS_DOOR);
+            save_file_clear_flags(SAVE_FLAG_HAVE_KEY_2);
+            save_file_do_save(gCurrSaveFileNum - 1);
+            doorAction = 0;
+#else
+            doorAction = ACT_UNLOCKING_KEY_DOOR;
+#endif
+"@
+$firstKeyDoorIndex = $interactionText.IndexOf($keyDoorUpstairsNeedle)
+if ($firstKeyDoorIndex -lt 0) {
+    throw "Could not locate upstairs key-door unlock action in $interactionSource"
+}
+$interactionText = $interactionText.Remove(
+    $firstKeyDoorIndex,
+    $keyDoorUpstairsNeedle.Length
+).Insert(
+    $firstKeyDoorIndex,
+    $keyDoorUpstairsReplacement
+)
+
+$keyDoorBasementNeedle = @"
+            doorAction = ACT_UNLOCKING_KEY_DOOR;
+"@
+$keyDoorBasementReplacement = @"
+#ifdef IW4L_SM64_EMBEDDED
+            save_file_set_flags(SAVE_FLAG_UNLOCKED_BASEMENT_DOOR);
+            save_file_clear_flags(SAVE_FLAG_HAVE_KEY_1);
+            save_file_do_save(gCurrSaveFileNum - 1);
+            doorAction = 0;
+#else
+            doorAction = ACT_UNLOCKING_KEY_DOOR;
+#endif
+"@
+$secondKeyDoorIndex = $interactionText.IndexOf($keyDoorBasementNeedle, $firstKeyDoorIndex + $keyDoorUpstairsReplacement.Length)
+if ($secondKeyDoorIndex -lt 0) {
+    throw "Could not locate basement key-door unlock action in $interactionSource"
+}
+$interactionText = $interactionText.Remove(
+    $secondKeyDoorIndex,
+    $keyDoorBasementNeedle.Length
+).Insert(
+    $secondKeyDoorIndex,
+    $keyDoorBasementReplacement
+)
+
 Set-Content -Path $interactionSource -Value $interactionText -Encoding UTF8
 
 # Native rendering integration -------------------------------------------------
