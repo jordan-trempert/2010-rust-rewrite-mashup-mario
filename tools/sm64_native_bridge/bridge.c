@@ -43,9 +43,10 @@
 #define SNAPSHOT_MAGIC 0x31534D53u /* SMS1 */
 #define OP_STEP 1u
 #define OP_SHUTDOWN 2u
-#define BRIDGE_INPUT_ATTACK 0x00000001u
-#define BRIDGE_INPUT_USE    0x00000002u
+#define BRIDGE_INPUT_ATTACK       0x00000001u
+#define BRIDGE_INPUT_USE          0x00000002u
 #define BRIDGE_INPUT_ATTACK_PRESS 0x00000004u
+#define BRIDGE_INPUT_GROUND_POUND 0x00000008u
 
 #if defined(_WIN32) || defined(_WIN64)
 #define IW4L_SM64_API __declspec(dllexport)
@@ -537,10 +538,19 @@ static void apply_proxy(const struct Request *request) {
         gIw4lUseExternalCamera=1;
     }
 
-    /* COD Use is Mario B: starts native NPC/sign interactions and advances
-       dialogs. Fire is Mario A only in a cannon or while a dialog is open. */
+    /*
+     * COD Use is Mario B when no dialog is open so signs/NPCs enter their
+     * original interaction path. Once native text is on screen the SM64 menu
+     * state machine advances pages with A, so the same COD Use press feeds A
+     * as well. This keeps opening and advancing text on one familiar key.
+     * Fire remains A for cannon firing (and can also advance an already-open
+     * dialog for players who instinctively click through text).
+     */
     if (request->attack_flags & BRIDGE_INPUT_USE) {
         buttons |= B_BUTTON;
+        if (get_dialog_id() != DIALOG_NONE) {
+            buttons |= A_BUTTON;
+        }
     }
     if ((request->attack_flags & BRIDGE_INPUT_ATTACK_PRESS) &&
         (gMarioState->action == ACT_IN_CANNON || get_dialog_id() != DIALOG_NONE)) {
@@ -600,8 +610,83 @@ static int bridge_attackable_object(const struct Object *object) {
     return 1;
 }
 
+static int apply_external_boss_damage(struct Object *object, uint32_t attack_flags) {
+    int32_t model;
+
+    if (object == NULL ||
+        (attack_flags & (BRIDGE_INPUT_ATTACK_PRESS | BRIDGE_INPUT_GROUND_POUND)) == 0) {
+        return 0;
+    }
+
+    model = model_id_for_object(object);
+    switch (model) {
+        case MODEL_KING_BOBOMB:
+            /*
+             * Vanilla only removes King Bob-omb health after a successful
+             * throw/landing. A COD bullet cannot produce that held-object
+             * sequence, so translate a hitscan impact into the same damaged
+             * (action 6) / defeated (action 7) states. Action 0 repeatedly
+             * restores health while his intro is waiting, so require the
+             * native fight to have started first.
+             */
+            if (object->oAction > 0 && object->oAction < 7 && object->oHealth > 0) {
+                object->oHealth--;
+                object->oForwardVel = 0.0f;
+                object->oVelY = 0.0f;
+                object->oSubAction = 0;
+                object->oAction = object->oHealth > 0 ? 6 : 7;
+                return 1;
+            }
+            break;
+
+        case MODEL_WHOMP:
+            /*
+             * King Whomp normally loses health only while Mario ground-pounds
+             * his fallen platform. Direct COD shots (and the COD ground-pound
+             * pulse) decrement the same oHealth field; his native action 8
+             * still owns the death animation and star spawn.
+             */
+            if (object->oHealth > 0) {
+                object->oHealth--;
+                if (object->oHealth <= 0) {
+                    object->oSubAction = 0;
+                    object->oAction = 8;
+                }
+                return 1;
+            }
+            break;
+
+        case MODEL_BOWSER:
+            /*
+             * Bowser's vanilla damage path is tied to mine collisions. Reuse
+             * the exact reaction/death actions after a bullet rather than
+             * inventing a parallel boss lifecycle.
+             */
+            if (object->oHealth > 0 && object->oAction != BOWSER_ACT_DEAD) {
+                object->oHealth--;
+                object->oSubAction = 0;
+                object->oAction =
+                    object->oHealth <= 0 ? BOWSER_ACT_DEAD : BOWSER_ACT_HIT_MINE;
+                return 1;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    return 0;
+}
+
 static void apply_external_attack(const struct Request *request) {
-    if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0 || gObjectLists == NULL) {
+    const uint32_t attack_mask = BRIDGE_INPUT_ATTACK | BRIDGE_INPUT_GROUND_POUND;
+    const int ground_pound =
+        (request->attack_flags & BRIDGE_INPUT_GROUND_POUND) != 0;
+    struct Object *best = NULL;
+    float best_score = 1.0e30f;
+    int list_index;
+
+    if ((request->attack_flags & attack_mask) == 0 || gObjectLists == NULL) {
         return;
     }
     /* In a cannon, fire belongs to Mario's A-button cannon action. During
@@ -613,15 +698,10 @@ static void apply_external_attack(const struct Request *request) {
     }
 
     /*
-     * COD bullets are translated into the original SM64 object interaction
-     * protocol. Behaviors already know how to react to INT_STATUS_WAS_ATTACKED
-     * and the low-byte ATTACK_* value, so keep death/loot/state changes native.
+     * A COD ground pound is a one-shot spatial attack centered below the
+     * player. It no longer piggybacks on camera pitch, so looking down while
+     * firing cannot accidentally become a pound.
      */
-    const int ground_pound = request->pitch < -0x1800;
-    struct Object *best = NULL;
-    float best_score = 1.0e30f;
-    int list_index;
-
     if (ground_pound) {
         for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
             struct ObjectNode *head = &gObjectLists[list_index];
@@ -637,7 +717,8 @@ static void apply_external_attack(const struct Request *request) {
                     const float dz = object->oPosZ - request->pos[2];
                     const float down = request->pos[1] - object->oPosY;
                     const float horizontal2 = dx * dx + dz * dz;
-                    if (down >= -80.0f && down <= 650.0f && horizontal2 <= 260.0f * 260.0f) {
+                    if (down >= -80.0f && down <= 650.0f &&
+                        horizontal2 <= 260.0f * 260.0f) {
                         const float score = horizontal2 + down * down * 0.15f;
                         if (score < best_score) {
                             best_score = score;
@@ -648,14 +729,27 @@ static void apply_external_attack(const struct Request *request) {
             }
         }
         if (best != NULL) {
-            best->oInteractStatus |=
-                INT_STATUS_INTERACTED |
-                INT_STATUS_WAS_ATTACKED |
-                ATTACK_GROUND_POUND_OR_TWIRL;
+            if (!apply_external_boss_damage(best, request->attack_flags)) {
+                best->oInteractStatus |=
+                    INT_STATUS_INTERACTED |
+                    INT_STATUS_WAS_ATTACKED |
+                    ATTACK_GROUND_POUND_OR_TWIRL;
+            }
+            return;
+        }
+
+        /* A pure pound with nothing underneath is not also a hitscan shot. */
+        if ((request->attack_flags & BRIDGE_INPUT_ATTACK) == 0) {
             return;
         }
     }
 
+    /*
+     * COD bullets are ray-selected against native object hit volumes. Generic
+     * enemies receive the normal SM64 attacked status; bosses whose vanilla
+     * health is gated behind throw/mine/platform mechanics are translated by
+     * apply_external_boss_damage above.
+     */
     {
         const float yaw_s = sins(request->yaw);
         const float yaw_c = coss(request->yaw);
@@ -711,13 +805,14 @@ static void apply_external_attack(const struct Request *request) {
     }
 
     if (best != NULL) {
-        best->oInteractStatus |=
-            INT_STATUS_INTERACTED |
-            INT_STATUS_WAS_ATTACKED |
-            ATTACK_FAST_ATTACK;
+        if (!apply_external_boss_damage(best, request->attack_flags)) {
+            best->oInteractStatus |=
+                INT_STATUS_INTERACTED |
+                INT_STATUS_WAS_ATTACKED |
+                ATTACK_FAST_ATTACK;
+        }
     }
 }
-
 
 void iw4l_sm64_capture_begin_frame(void) {
     gIw4lRenderTriangleCount = 0;
