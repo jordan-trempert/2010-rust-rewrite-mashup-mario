@@ -79,7 +79,7 @@
 #define IW4L_SM64_API __attribute__((visibility("default")))
 #endif
 
-#define IW4L_SM64_ABI_VERSION 8u
+#define IW4L_SM64_ABI_VERSION 9u
 static volatile const char *gBridgeStage = "startup";
 OSMesg gMainReceivedMesg;
 OSMesgQueue gSIEventMesgQueue;
@@ -101,6 +101,7 @@ extern void thread5_game_loop(void *arg);
 extern void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3);
 extern void warp_area(void);
 extern s8 sWarpCheckpointActive;
+extern struct Object *gMarioPlatform;
 
 extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 
@@ -304,6 +305,8 @@ struct Iw4lSm64SnapshotView {
     uint16_t holding_object;
     float mario_pos[3];
     float mario_vel[3];
+    float platform_displacement[3];
+    uint32_t platform_active;
     int16_t mario_yaw;
     int16_t dialog_id;
     const char *dialog_text;
@@ -345,6 +348,56 @@ static int gIw4lInitialized = 0;
  * frame while the destination is loading.
  */
 static int gIw4lPreserveNativeSpawn = 0;
+static float gIw4lPlatformBefore[3] = { 0.0f, 0.0f, 0.0f };
+static float gIw4lPlatformDisplacement[3] = { 0.0f, 0.0f, 0.0f };
+static uint32_t gIw4lPlatformActive = 0;
+
+void iw4l_sm64_platform_displacement_begin(void) {
+    gIw4lPlatformActive = 0;
+    gIw4lPlatformDisplacement[0] = 0.0f;
+    gIw4lPlatformDisplacement[1] = 0.0f;
+    gIw4lPlatformDisplacement[2] = 0.0f;
+
+    if (gMarioState == NULL || gMarioPlatform == NULL) {
+        return;
+    }
+
+    gIw4lPlatformBefore[0] = gMarioState->pos[0];
+    gIw4lPlatformBefore[1] = gMarioState->pos[1];
+    gIw4lPlatformBefore[2] = gMarioState->pos[2];
+    gIw4lPlatformActive = 1;
+}
+
+void iw4l_sm64_platform_displacement_end(void) {
+    float dx;
+    float dy;
+    float dz;
+    float distance2;
+
+    if (!gIw4lPlatformActive || gMarioState == NULL) {
+        gIw4lPlatformActive = 0;
+        return;
+    }
+
+    dx = gMarioState->pos[0] - gIw4lPlatformBefore[0];
+    dy = gMarioState->pos[1] - gIw4lPlatformBefore[1];
+    dz = gMarioState->pos[2] - gIw4lPlatformBefore[2];
+    distance2 = dx * dx + dy * dy + dz * dz;
+
+    /*
+     * A legitimate SM64 platform step is small. If native state was replaced
+     * or a platform pointer changed during the object update, discard the
+     * impossible displacement rather than teleporting COD.
+     */
+    if (distance2 > 512.0f * 512.0f) {
+        gIw4lPlatformActive = 0;
+        dx = dy = dz = 0.0f;
+    }
+
+    gIw4lPlatformDisplacement[0] = dx;
+    gIw4lPlatformDisplacement[1] = dy;
+    gIw4lPlatformDisplacement[2] = dz;
+}
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
 int gIw4lRunMarioAction = 0;
@@ -1774,7 +1827,9 @@ static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
         for (i = 0; i < 3; ++i) {
             gIw4lSnapshot.mario_pos[i] = gMarioState->pos[i];
             gIw4lSnapshot.mario_vel[i] = gMarioState->vel[i];
+            gIw4lSnapshot.platform_displacement[i] = gIw4lPlatformDisplacement[i];
         }
+        gIw4lSnapshot.platform_active = gIw4lPlatformActive;
         gIw4lSnapshot.mario_yaw = gMarioState->faceAngle[1];
     }
     gIw4lSnapshot.dialog_id = dialog_id;
@@ -2099,7 +2154,16 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
         }
 
         gIw4lPreserveNativeSpawn = 0;
+    gIw4lPlatformActive = 0;
+    gIw4lPlatformDisplacement[0] = 0.0f;
+    gIw4lPlatformDisplacement[1] = 0.0f;
+    gIw4lPlatformDisplacement[2] = 0.0f;
     }
+
+    gIw4lPlatformActive = 0;
+    gIw4lPlatformDisplacement[0] = 0.0f;
+    gIw4lPlatformDisplacement[1] = 0.0f;
+    gIw4lPlatformDisplacement[2] = 0.0f;
 
     memset(&request, 0, sizeof(request));
     request.op = OP_STEP;
