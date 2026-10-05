@@ -70,6 +70,30 @@ void exec_display_list(UNUSED struct SPTask *spTask) {
 #undef DEFINE_LEVEL
 #undef STUB_LEVEL
 
+/*
+ * Vanilla never enters a course script directly. level_main_scripts_entry first
+ * loads the shared Mario/common model graph nodes, then dispatches to the chosen
+ * level through its normal EXECUTE path. Entering level_bob_entry directly can
+ * create valid gameplay objects whose sharedChild graph nodes are NULL; the
+ * render pass at the end of level_script_execute() then crashes.
+ *
+ * Give every course a tiny cold-start script that establishes a clean level
+ * state, seeds the script register with the requested level, and then jumps into
+ * the vanilla shared-level bootstrap. gDebugLevelSelect is enabled only for the
+ * first execute so level_main_menu_entry_2 skips the act-select screen.
+ */
+#define DEFINE_LEVEL(internal, level_enum, course_enum, folder, texture, acoustic, echo1, echo2, echo3, dyn, cam) \
+    static const LevelScript bridge_bootstrap_##folder[] = { \
+        INIT_LEVEL(), \
+        CLEAR_LEVEL(), \
+        SET_REG(level_enum), \
+        JUMP(level_main_scripts_entry), \
+    };
+#define STUB_LEVEL(internal, level_enum, course_enum, acoustic, echo1, echo2, echo3, dyn, cam)
+#include "levels/level_defines.h"
+#undef DEFINE_LEVEL
+#undef STUB_LEVEL
+
 struct LevelSpec {
     const char *name;
     s16 level;
@@ -79,7 +103,7 @@ struct LevelSpec {
 
 static const struct LevelSpec kLevels[] = {
 #define DEFINE_LEVEL(internal, level_enum, course_enum, folder, texture, acoustic, echo1, echo2, echo3, dyn, cam) \
-    { #folder, level_enum, course_enum, level_##folder##_entry },
+    { #folder, level_enum, course_enum, bridge_bootstrap_##folder },
 #define STUB_LEVEL(internal, level_enum, course_enum, acoustic, echo1, echo2, echo3, dyn, cam)
 #include "levels/level_defines.h"
 #undef DEFINE_LEVEL
@@ -582,12 +606,20 @@ static int bridge_main(int argc, char **argv) {
 
     level_command = (struct LevelCommand *)level->entry;
 
-    /* First execute loads the area and reaches its CALL_LOOP. */
+    /*
+     * Bypass only the act-select UI during the cold start. The normal main
+     * scripts still load all shared graph nodes and dispatch into the requested
+     * course. init_mario() remains responsible for Mario's native state.
+     */
+    gDebugLevelSelect = TRUE;
+
+    /* First execute loads shared assets, the area, and reaches its CALL_LOOP. */
     gBridgeStage = "initial_select_gfx_pool";
     select_gfx_pool();
     gBridgeStage = "initial_level_script_execute";
     level_command = level_script_execute(level_command);
     gGlobalTimer++;
+    gDebugLevelSelect = FALSE;
     gBridgeStage = "course_ready";
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
