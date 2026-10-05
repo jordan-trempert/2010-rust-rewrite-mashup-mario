@@ -464,8 +464,16 @@ fn sm64_cod_grounded(
     authority: &sim::SimWorld,
     ground_entity_num: i32,
     origin: [f32; 3],
+    vertical_velocity: f32,
 ) -> bool {
     const ENTITYNUM_NONE: i32 = 1023;
+
+    // set_velocity() happens after IW4 pmove for the Mario jump chain. The
+    // ground entity can therefore remain stale until the next pmove tick even
+    // though the player is already travelling upward.
+    if vertical_velocity > 40.0 {
+        return false;
+    }
 
     if ground_entity_num != ENTITYNUM_NONE {
         return true;
@@ -537,7 +545,12 @@ fn apply_sm64_cod_movement_abilities(
     let jump_pressed = jump_down && !state.last_jump_down;
     let pound_pressed = pound_down && !state.last_pound_down;
     let attack_pressed = attack_down && !state.last_attack_down;
-    let grounded = sm64_cod_grounded(&authority.0, player.ground_entity_num, player.origin);
+    let grounded = sm64_cod_grounded(
+        &authority.0,
+        player.ground_entity_num,
+        player.origin,
+        player.velocity[2],
+    );
     let just_landed = !state.last_grounded && grounded;
 
     let pitch = {
@@ -690,7 +703,12 @@ fn apply_sm64_cod_movement_post_step(
 
     if state.ground_pounding {
         let current = authority.0.player(id).copied().unwrap_or(player);
-        if !sm64_cod_grounded(&authority.0, current.ground_entity_num, current.origin) {
+        if !sm64_cod_grounded(
+            &authority.0,
+            current.ground_entity_num,
+            current.origin,
+            current.velocity[2],
+        ) {
             let mut velocity = current.velocity;
             velocity[0] *= 0.45;
             velocity[1] *= 0.45;
