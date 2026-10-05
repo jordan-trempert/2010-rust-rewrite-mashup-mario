@@ -681,7 +681,7 @@ fn spawn_hierarchical_object_geometry(
         let texture=batch.texture_symbol.as_ref().and_then(|symbol|{
             if let Some(handle)=texture_cache.get(symbol){return Some(handle.clone());}
             let path=texture_sources.get(symbol)?;
-            let handle=load_sm64_png(path,images).ok()?;
+            let handle=load_sm64_png_clamped(path,images).ok()?;
             texture_cache.insert(symbol.clone(),handle.clone());
             Some(handle)
         });
@@ -754,7 +754,7 @@ fn spawn_flat_object_geometry(
         let texture=batch.texture_symbol.as_ref().and_then(|symbol|{
             if let Some(handle)=texture_cache.get(symbol){return Some(handle.clone());}
             let path=texture_sources.get(symbol)?;
-            let handle=load_sm64_png(path,images).ok()?;
+            let handle=load_sm64_png_clamped(path,images).ok()?;
             texture_cache.insert(symbol.clone(),handle.clone());
             Some(handle)
         });
@@ -1220,6 +1220,33 @@ fn mario_batch_color(batch:&sm64_assets::RenderBatch)->Color {
     }
 }
 
+fn load_sm64_png_clamped(
+    path:&std::path::Path,
+    images:&mut Assets<Image>,
+)->Result<Handle<Image>,String>{
+    let decoded=image::open(path)
+        .map_err(|error|error.to_string())?
+        .into_rgba8();
+    let (width,height)=decoded.dimensions();
+    let mut image=Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers:1,
+        },
+        TextureDimension::D2,
+        decoded.into_raw(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let mut sampler=ImageSamplerDescriptor::nearest();
+    sampler.address_mode_u=ImageAddressMode::ClampToEdge;
+    sampler.address_mode_v=ImageAddressMode::ClampToEdge;
+    sampler.address_mode_w=ImageAddressMode::ClampToEdge;
+    image.sampler=ImageSampler::Descriptor(sampler);
+    Ok(images.add(image))
+}
+
 fn load_sm64_png(
     path:&std::path::Path,
     images:&mut Assets<Image>,
@@ -1511,6 +1538,7 @@ fn sync_mario_presentation(
 fn sync_object_presentations(
     mut commands:Commands,
     runtime:Res<Sm64Runtime>,
+    mut last_tick:Local<u64>,
     status:Res<Sm64LoadStatus>,
     mut meshes:ResMut<Assets<Mesh>>,
     mut materials:ResMut<Assets<StandardMaterial>>,
@@ -1518,6 +1546,10 @@ fn sync_object_presentations(
     mut query:Query<(Entity,&Sm64ObjectPresentation,&mut Transform,&mut Visibility)>,
 ) {
     let Some(snapshot)=runtime.latest.as_ref() else {return;};
+    if snapshot.tick==*last_tick {
+        return;
+    }
+    *last_tick=snapshot.tick;
     let by_id=snapshot.objects.iter()
         .map(|object|(object.id,object))
         .collect::<HashMap<_,_>>();
