@@ -820,6 +820,9 @@ static int native_owns_mario_motion(void) {
         case ACT_TORNADO_TWIRLING:
         case ACT_GRABBED:
         case ACT_RIDING_HOOT:
+        case ACT_PULLING_DOOR:
+        case ACT_PUSHING_DOOR:
+        case ACT_WARP_DOOR_SPAWN:
         /*
          * Course success/death warp nodes intentionally put Mario at the
          * painting/exit object and then launch him away from it. Native SM64
