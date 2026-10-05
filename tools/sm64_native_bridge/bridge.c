@@ -781,6 +781,7 @@ static int native_runs_mario_action(void) {
         case ACT_TELEPORT_FADE_IN:
         case ACT_EXIT_AIRBORNE:
         case ACT_DEATH_EXIT:
+        case ACT_FALLING_DEATH_EXIT:
         case ACT_UNUSED_DEATH_EXIT:
         case ACT_SPECIAL_EXIT_AIRBORNE:
         case ACT_SPECIAL_DEATH_EXIT:
@@ -814,6 +815,7 @@ static int native_owns_mario_motion(void) {
          */
         case ACT_EXIT_AIRBORNE:
         case ACT_DEATH_EXIT:
+        case ACT_FALLING_DEATH_EXIT:
         case ACT_UNUSED_DEATH_EXIT:
         case ACT_SPECIAL_EXIT_AIRBORNE:
         case ACT_SPECIAL_DEATH_EXIT:
