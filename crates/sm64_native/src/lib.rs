@@ -44,6 +44,9 @@ pub struct NativeRenderTriangle {
     pub rgba: [[u8;4];3],
     pub texture_id: Option<u32>,
     pub alpha: bool,
+    /// Native N64 tile wrap bits (G_TX_MIRROR=1, G_TX_CLAMP=2).
+    pub wrap_s: u8,
+    pub wrap_t: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -104,7 +107,8 @@ struct NativeRenderTriangleView {
     texture_id: u32,
     textured: u8,
     alpha: u8,
-    pad: [u8;2],
+    wrap_s: u8,
+    wrap_t: u8,
 }
 
 #[repr(C)]
@@ -437,6 +441,8 @@ impl NativeClient {
                 texture_id:(source.textured!=0 && source.texture_id!=u32::MAX)
                     .then_some(source.texture_id),
                 alpha:source.alpha!=0,
+                wrap_s:source.wrap_s,
+                wrap_t:source.wrap_t,
             }
         }).collect();
 
