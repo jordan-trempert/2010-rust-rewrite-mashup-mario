@@ -520,7 +520,7 @@ fn apply_sm64_cod_movement_abilities(
     const DOUBLE_JUMP_VELOCITY: f32 = 440.0;
     const TRIPLE_JUMP_VELOCITY: f32 = 570.0;
     const JUMP_CHAIN_GRACE_TICKS: u8 = 18;
-    const GROUND_POUND_AIM_DEGREES: f32 = 50.0;
+    const GROUND_POUND_AIM_DEGREES: f32 = 45.0;
     const WING_ASCENT_VELOCITY: f32 = 220.0;
     const WING_GLIDE_FALL_VELOCITY: f32 = -110.0;
 
@@ -577,8 +577,13 @@ fn apply_sm64_cod_movement_abilities(
         }
         pitch
     };
+    /*
+     * Ground pound is a held control, not a single-frame edge. This makes the
+     * requested "look straight down and shoot" input reliable even if the shot
+     * event and the airborne state land on adjacent fixed ticks.
+     */
     let shoot_down_pound =
-        (attack_pressed || weapon_shot) && pitch >= GROUND_POUND_AIM_DEGREES;
+        attack_down && pitch >= GROUND_POUND_AIM_DEGREES;
 
     if player.health <= 0 || (output.active && sm64_cod_native_owns_motion(output.action)) {
         state.ground_pounding = false;
@@ -674,6 +679,7 @@ fn apply_sm64_cod_movement_post_step(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     local: Option<Res<net::LocalPresentClient>>,
     mut state: ResMut<Sm64CodMoveState>,
+    mut external: ResMut<sm64_bevy::Sm64ExternalPlayer>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
     mut pending_step: ResMut<net::PendingStepResult>,
 ) {
@@ -727,12 +733,23 @@ fn apply_sm64_cod_movement_post_step(
 
     if state.ground_pounding {
         let current = authority.0.player(id).copied().unwrap_or(player);
-        if !sm64_cod_grounded(
+        let landed = sm64_cod_grounded(
             &authority.0,
             current.ground_entity_num,
             current.origin,
             current.velocity[2],
-        ) {
+        );
+
+        if landed {
+            /*
+             * Latch the impact here, after IW4 pmove has resolved the landing,
+             * rather than waiting for the next pre-step tick. This guarantees
+             * the 30 Hz native bridge sees the pound even on very short drops.
+             */
+            external.pending_ground_pound = true;
+            state.ground_pounding = false;
+            diag::info!(World, "SM64 COD ground pound landed (post-step pulse)");
+        } else {
             let mut velocity = current.velocity;
             velocity[0] *= 0.45;
             velocity[1] *= 0.45;
