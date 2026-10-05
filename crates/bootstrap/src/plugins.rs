@@ -336,11 +336,11 @@ fn sync_cod_player_into_sm64(
     // IW4 pitch is positive downward; SM64 cannon pitch is positive upward.
     external.sm64_pitch=((-viewangles[0]/360.0)*65536.0) as i32 as i16;
     let command_buttons=authority.0.command_buttons(id);
-    let attack_down=(command_buttons & playerstate_iw4::buttons::ATTACK)!=0;
+    let attack_down=(command_buttons & 0x1)!=0;
     let weapon_fired=bridge_state
         .last_weapon_shot_count
         .is_some_and(|previous|weapon_shot_count!=previous);
-    let use_down=(command_buttons & playerstate_iw4::buttons::USE)!=0;
+    let use_down=(command_buttons & 0x8)!=0;
     let use_pressed=use_down && !bridge_state.last_use_down;
 
     // Bit 0: external weapon/ground-pound attack. Keep it asserted while fire
