@@ -46,6 +46,7 @@ pub(crate) fn schedule() -> Schedule {
                 apply_actions_system,
                 crate::script::sync_players,
                 crate::script::sync_presence,
+                apply_external_damage_system,
                 run_players_system,
                 record_collision_state_system,
                 run_entity_types_system,
@@ -251,6 +252,30 @@ fn apply_actions_system(world: &mut World) {
 
     frame.enter_kernel_phase(crate::gentity::KernelPhase::ApplyActions);
     apply_actions(&mut frame, tick, &actions);
+}
+
+
+fn apply_external_damage_system(world: &mut World) {
+    let queued = {
+        let mut pending = world.resource_mut::<crate::carrier::PendingExternalDamage>();
+        std::mem::take(&mut pending.0)
+    };
+    if queued.is_empty() {
+        return;
+    }
+
+    let tick = world.resource::<StepRequest>().tick;
+    let mut frame = frame_world(world);
+    for (id, amount) in queued {
+        if amount <= 0
+            || !frame
+                .client_meta(id)
+                .is_some_and(|meta| meta.lifecycle == ClientLifecycle::Alive)
+        {
+            continue;
+        }
+        crate::script_player::debug_damage(&mut frame, tick, id, amount);
+    }
 }
 
 fn run_players_system(ecs: &mut World) {
