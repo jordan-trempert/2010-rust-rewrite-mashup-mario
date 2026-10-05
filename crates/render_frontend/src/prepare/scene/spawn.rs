@@ -215,36 +215,14 @@ pub(crate) fn spawn_world(
     let external_world = external_world.is_some_and(|external| external.0);
 
     /*
-     * SM64 COD uses the IW4 donor only for gameplay/session/weapon content.
-     * Never materialize the donor GfxWorld when an external presentation owns
-     * the frame. Besides briefly showing Rust before BOB, thousands of donor
-     * draw entities/pipelines continued rendering underneath SM64 and crushed
-     * frame rate.
+     * External presentation modes still need the donor material/program
+     * generation. FPV hands/weapons are prepared against that exact
+     * RuntimeMaterialCatalog, so bailing out here used to leave TessMaterials
+     * at its default catalog and made spawn_pending_fpv requeue forever.
+     *
+     * We now run Programs + Admit normally, then stop before donor world
+     * plan/geometry materialization below.
      */
-    if external_world && job.phase != WorldSpawnPhase::Done {
-        /*
-         * Keep the normal IW4 first-person camera host/lens, because player
-         * view/weapon presentation and all external Bevy meshes render through
-         * that Camera3d. Skip every donor-world geometry/model/material entity.
-         */
-        let pose=scene.intermission_view.unwrap_or_else(||{
-            crate::prepare::scene::camera::WorldCameraPose {
-                origin:scene.center.to_array(),
-                angles:[0.0,0.0,0.0],
-            }
-        });
-        super::world_occupancy::place_external_camera(
-            &mut commands,
-            pose.origin,
-            pose.angles,
-        );
-        finish_world_spawn(&mut scene, &mut job, &mut commands);
-        diag::info!(
-            World,
-            "world spawn: external presentation active; camera only, donor IW4 render scene skipped"
-        );
-        return;
-    }
 
     // Pacing belongs to the load that is still running, not to the screen that
     // happens to be drawing it: a run without an overlay must spawn the world
@@ -747,6 +725,31 @@ pub(crate) fn spawn_world(
         if deadline.is_some_and(|end| std::time::Instant::now() >= end) {
             return;
         }
+    }
+
+    if external_world && job.phase == WorldSpawnPhase::Images {
+        /*
+         * Programs/Admit have now published TessMaterials and the donor model
+         * catalogs needed by the normal IW4 first-person viewmodel. Do not go
+         * on to build the donor map itself: SM64 owns world presentation.
+         */
+        let pose=scene.intermission_view.unwrap_or_else(||{
+            crate::prepare::scene::camera::WorldCameraPose {
+                origin:scene.center.to_array(),
+                angles:[0.0,0.0,0.0],
+            }
+        });
+        super::world_occupancy::place_external_camera(
+            &mut commands,
+            pose.origin,
+            pose.angles,
+        );
+        finish_world_spawn(&mut scene, &mut job, &mut commands);
+        diag::info!(
+            World,
+            "world spawn: external presentation active; donor material generation kept for FPV, donor map geometry skipped"
+        );
+        return;
     }
 
     if job.phase == WorldSpawnPhase::Images {
