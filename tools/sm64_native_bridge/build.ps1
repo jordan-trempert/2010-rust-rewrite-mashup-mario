@@ -107,6 +107,8 @@ $areaSource = Join-Path $root "src\game\area.c"
 $areaBackup = Join-Path $root "area.iw4l-backup.txt"
 $objectProcessorSource = Join-Path $root "src\game\object_list_processor.c"
 $objectProcessorBackup = Join-Path $root "object_list_processor.iw4l-backup.txt"
+$interactionSource = Join-Path $root "src\game\interaction.c"
+$interactionBackup = Join-Path $root "interaction.iw4l-backup.txt"
 $renderGraphSource = Join-Path $root "src\game\rendering_graph_node.c"
 $renderGraphBackup = Join-Path $root "rendering_graph_node.iw4l-backup.txt"
 $gfxPcSource = Join-Path $root "src\pc\gfx\gfx_pc.c"
@@ -145,6 +147,7 @@ Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\game_init.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\area.o") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\game\interaction.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\game\rendering_graph_node.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_pc.o") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $build "src\pc\gfx\gfx_dummy.o") -Force -ErrorAction SilentlyContinue
@@ -160,6 +163,7 @@ $recoveryPairs = @(
     @($gameInitBackup, $gameInitSource),
     @($areaBackup, $areaSource),
     @($objectProcessorBackup, $objectProcessorSource),
+    @($interactionBackup, $interactionSource),
     @($renderGraphBackup, $renderGraphSource),
     @($gfxPcBackup, $gfxPcSource),
     @($gfxDummyBackup, $gfxDummySource)
@@ -631,6 +635,80 @@ $objectProcessorText = $objectProcessorText.Replace(
 )
 
 Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
+
+# Star-requirement castle doors ------------------------------------------------
+# The 1-star WF/PSS and 3-star JRB/CCM doors are ordinary bhvDoor objects, not
+# bhvStarDoor. Vanilla interact_door() starts ACT_UNLOCKING_STAR_DOOR on the
+# first successful entry, which is unsafe for the hidden embedded Mario. Patch
+# the interaction itself so that action is never selected during the same
+# native frame: persist the vanilla unlock flag, request the actual door
+# animation, and leave locomotion to COD.
+Copy-Item $interactionSource $interactionBackup -Force
+$interactionText = Get-Content $interactionSource -Raw
+$starDoorInteractionNeedle = @"
+            doorSaveFileFlag = get_door_save_file_flag(o);
+            m->interactObj = o;
+            m->usedObj = o;
+
+            if (o->oInteractionSubtype & INT_SUBTYPE_STAR_DOOR) {
+                enterDoorAction = ACT_ENTERING_STAR_DOOR;
+            }
+
+            if (doorSaveFileFlag != 0 && !(save_file_get_flags() & doorSaveFileFlag)) {
+                enterDoorAction = ACT_UNLOCKING_STAR_DOOR;
+            }
+
+            return set_mario_action(m, enterDoorAction, actionArg);
+"@
+$starDoorInteractionReplacement = @"
+            doorSaveFileFlag = get_door_save_file_flag(o);
+            m->interactObj = o;
+            m->usedObj = o;
+
+#ifdef IW4L_SM64_EMBEDDED
+            /*
+             * COD owns movement through castle doors. Any door with a positive
+             * star requirement is safe to open here because this branch is
+             * already inside numStars >= requiredNumStars. Do not ever enter
+             * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR in embedded
+             * mode: those hidden-Mario cutscenes can fault before bridge.c gets
+             * its post-frame guard.
+             */
+            if (requiredNumStars > 0) {
+                if (doorSaveFileFlag != 0 && !(save_file_get_flags() & doorSaveFileFlag)) {
+                    save_file_set_flags(doorSaveFileFlag);
+                }
+
+                if (actionArg & 0x00000001) {
+                    o->oInteractStatus |= INT_STATUS_UNK16;
+                } else {
+                    o->oInteractStatus |= INT_STATUS_UNK17;
+                }
+
+                m->interactObj = NULL;
+                m->usedObj = NULL;
+                return TRUE;
+            }
+#endif
+
+            if (o->oInteractionSubtype & INT_SUBTYPE_STAR_DOOR) {
+                enterDoorAction = ACT_ENTERING_STAR_DOOR;
+            }
+
+            if (doorSaveFileFlag != 0 && !(save_file_get_flags() & doorSaveFileFlag)) {
+                enterDoorAction = ACT_UNLOCKING_STAR_DOOR;
+            }
+
+            return set_mario_action(m, enterDoorAction, actionArg);
+"@
+if (-not $interactionText.Contains($starDoorInteractionNeedle)) {
+    throw "Could not locate star-door interaction block in $interactionSource"
+}
+$interactionText = $interactionText.Replace(
+    $starDoorInteractionNeedle,
+    $starDoorInteractionReplacement
+)
+Set-Content -Path $interactionSource -Value $interactionText -Encoding UTF8
 
 # Native rendering integration -------------------------------------------------
 # Keep the original HUD and dialog state machine as well as the 3D scene.
@@ -1247,6 +1325,10 @@ finally {
     if (Test-Path $objectProcessorBackup) {
         Copy-Item $objectProcessorBackup $objectProcessorSource -Force
         Remove-Item $objectProcessorBackup -Force
+    }
+    if (Test-Path $interactionBackup) {
+        Copy-Item $interactionBackup $interactionSource -Force
+        Remove-Item $interactionBackup -Force
     }
     if (Test-Path $renderGraphBackup) {
         Copy-Item $renderGraphBackup $renderGraphSource -Force
