@@ -769,7 +769,13 @@ fn spawn_hierarchical_object_geometry(
             Transform {
                 translation:sm64_render_vec3(part.spec.translation),
                 rotation:sm64_render_rotation(part.spec.rotation_deg),
-                scale:Vec3::splat(part.spec.scale),
+                scale:Vec3::splat(
+                    if matches!(model.actor_name.as_str(),"star"|"transparent_star") {
+                        0.25
+                    } else {
+                        part.spec.scale
+                    }
+                ),
             },
             ChildOf(parent),
             Sm64DebugWorld,
@@ -998,12 +1004,15 @@ fn sm64_upright_actor(model:&str)->bool {
 #[inline]
 fn sm64_presentation_rotation(model:&str,angle:[i16;3])->Quat {
     if sm64_upright_actor(model) {
-        // These actors are authored upright. Their native graphics node may
-        // carry transient pitch/roll from animation/ground alignment that we
-        // cannot reproduce correctly until the full skeletal channel evaluator
-        // is present. Preserve native yaw while keeping the presentation
-        // upright instead of laying Goombas/Bob-ombs on their side.
-        sm64_object_rotation([0,angle[1],0])
+        /*
+         * Goomba and Bob-omb animation tables carry a constant 0x3FFF
+         * (~+90°) root-Y channel. We do not yet evaluate skeletal animation
+         * channels, so without this root channel the whole actor is presented
+         * sideways. Apply that authored root yaw here while keeping transient
+         * pitch/roll out of the rigid presentation.
+         */
+        let yaw=(angle[1] as u16).wrapping_add(0x4000) as i16;
+        sm64_object_rotation([0,yaw,0])
     } else {
         sm64_object_rotation(angle)
     }
