@@ -1438,6 +1438,10 @@ fn native_snapshot_to_sm64(
             source.face_angle,
         );
         object.scale=source.scale;
+        object.render_flags=source.render_flags;
+        object.anim_id=source.anim_id;
+        object.anim_frame=source.anim_frame;
+        object.anim_state=source.anim_state;
         object.interact_status=source.interact_status;
         object.damage_or_coin_value=source.damage_or_coin_value;
         object.active=source.active_flags!=0;
