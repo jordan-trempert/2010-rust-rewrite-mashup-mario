@@ -729,25 +729,43 @@ pub(crate) fn spawn_world(
 
     if external_world && job.phase == WorldSpawnPhase::Images {
         /*
-         * Programs/Admit have now published TessMaterials and the donor model
-         * catalogs needed by the normal IW4 first-person viewmodel. Do not go
-         * on to build the donor map itself: SM64 owns world presentation.
+         * Do not leave Images early. FPV composition requires the decoded
+         * exact-material handles, and model lighting requires an atlas. We wait
+         * for the donor image job only; donor world geometry is still never
+         * materialized.
          */
-        let pose=scene.intermission_view.unwrap_or_else(||{
-            crate::prepare::scene::camera::WorldCameraPose {
-                origin:scene.center.to_array(),
-                angles:[0.0,0.0,0.0],
-            }
-        });
-        super::world_occupancy::place_external_camera(
+        if !images_finished {
+            return;
+        }
+
+        let exact = job.images.exact_handles().to_vec();
+        let probes = job.images.probe_handles().to_vec();
+        let lightmaps = job.images.lightmap_handles().to_vec();
+
+        super::world_plan::install(
             &mut commands,
-            pose.origin,
-            pose.angles,
+            &scene,
+            &images,
+            exact.clone(),
+            probes.clone(),
+            lightmaps.clone(),
+            tracers.as_deref(),
+            fx_catalog.as_deref(),
         );
+        tess.material_images = std::sync::Arc::new(exact.clone());
+        super::world_occupancy::place_external_presentation_support(
+            &mut commands,
+            &mut scene,
+            &mut images,
+            exact,
+            probes,
+            lightmaps,
+        );
+
         finish_world_spawn(&mut scene, &mut job, &mut commands);
         diag::info!(
             World,
-            "world spawn: external presentation active; donor material generation kept for FPV, donor map geometry skipped"
+            "world spawn: external presentation active; FPV images/lighting installed, donor map geometry skipped"
         );
         return;
     }
