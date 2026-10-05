@@ -135,11 +135,17 @@ enum NativeTextureAlphaClass {
     Blend,
 }
 
+#[derive(Debug,Clone,Copy,PartialEq,Eq,Hash)]
+enum NativePrimitiveClass {
+    Normal,
+    Shadow,
+}
+
 #[derive(Resource, Default)]
 struct Sm64NativeRenderCache {
     textures:HashMap<u32,Handle<Image>>,
     texture_alpha:HashMap<u32,NativeTextureAlphaClass>,
-    batches:HashMap<(u32,NativeTextureAlphaClass),NativeRenderBatchHandles>,
+    batches:HashMap<(u32,NativeTextureAlphaClass,NativePrimitiveClass),NativeRenderBatchHandles>,
 }
 
 struct NativeRenderBatchHandles {
@@ -1586,6 +1592,11 @@ fn spawn_sm64_skybox(
             base_color_texture:Some(texture),
             unlit:true,
             cull_mode:None,
+            depth_bias:if key.2==NativePrimitiveClass::Shadow {
+                2.0
+            } else {
+                0.0
+            },
             ..default()
         })),
         Transform::IDENTITY,
@@ -1847,7 +1858,10 @@ fn sync_native_render_frame(
         }
     }
 
-    let mut groups=HashMap::<(u32,NativeTextureAlphaClass),Vec<&sm64_native::NativeRenderTriangle>>::new();
+    let mut groups=HashMap::<
+        (u32,NativeTextureAlphaClass,NativePrimitiveClass),
+        Vec<&sm64_native::NativeRenderTriangle>
+    >::new();
     for triangle in &frame.triangles {
         let texture_id=triangle.texture_id.unwrap_or(u32::MAX);
         let alpha_class=if texture_id==u32::MAX {
@@ -1862,7 +1876,24 @@ fn sync_native_render_frame(
                 .copied()
                 .unwrap_or(NativeTextureAlphaClass::Opaque)
         };
-        groups.entry((texture_id,alpha_class)).or_default().push(triangle);
+
+        // SM64 blob/circle shadows are untextured translucent near-black
+        // triangles. Keep them distinct so we can add a tiny depth bias and
+        // avoid floor z-fighting without affecting water/particles.
+        let primitive_class=if texture_id==u32::MAX
+            && alpha_class==NativeTextureAlphaClass::Blend
+            && triangle.rgba.iter().all(|rgba|{
+                rgba[0]<=40 && rgba[1]<=40 && rgba[2]<=40
+            })
+        {
+            NativePrimitiveClass::Shadow
+        } else {
+            NativePrimitiveClass::Normal
+        };
+
+        groups.entry((texture_id,alpha_class,primitive_class))
+            .or_default()
+            .push(triangle);
     }
 
     let active_keys=groups.keys().copied().collect::<std::collections::HashSet<_>>();
@@ -1957,6 +1988,11 @@ fn sync_native_render_frame(
                     NativeTextureAlphaClass::Blend=>AlphaMode::Blend,
                 };
                 material.cull_mode=None;
+                material.depth_bias=if key.2==NativePrimitiveClass::Shadow {
+                    2.0
+                } else {
+                    0.0
+                };
             }
 
             continue;
@@ -1981,7 +2017,10 @@ fn sync_native_render_frame(
         });
         let mesh=meshes.add(mesh_data);
         let entity=commands.spawn((
-            Name::new(format!("SM64 native render batch tex={} alpha={:?}",key.0,key.1)),
+            Name::new(format!(
+                "SM64 native render batch tex={} alpha={:?} primitive={:?}",
+                key.0,key.1,key.2
+            )),
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
             Transform::IDENTITY,
@@ -2064,7 +2103,7 @@ fn sync_sm64_hud_overlay(
             ..default()
         },
         BackgroundColor(Color::srgba(0.0,0.0,0.0,0.42)),
-        GlobalZIndex(100_000),
+        GlobalZIndex(1_000_000),
     )).with_children(|parent|{
         parent.spawn((
             Sm64HudText,
@@ -2114,7 +2153,7 @@ fn sync_sm64_dialog_overlay(
             ..default()
         },
         BackgroundColor(Color::srgba(0.02,0.02,0.03,0.88)),
-        GlobalZIndex(50_000),
+        GlobalZIndex(1_000_001),
     )).with_children(|parent|{
         parent.spawn((
             Sm64DialogText,
