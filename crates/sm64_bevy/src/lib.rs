@@ -43,11 +43,32 @@ impl Default for Sm64Enabled {
 pub struct Sm64LaunchRequest {
     pub level: String,
     pub area: u8,
+    pub warp_node: Option<u8>,
+    pub warp_arg: u32,
 }
 
 impl Sm64LaunchRequest {
     pub fn new(level: impl Into<String>, area: u8) -> Self {
-        Self { level: level.into(), area: area.max(1) }
+        Self {
+            level: level.into(),
+            area: area.max(1),
+            warp_node: None,
+            warp_arg: 0,
+        }
+    }
+
+    pub fn with_warp(
+        level: impl Into<String>,
+        area: u8,
+        warp_node: u8,
+        warp_arg: u32,
+    ) -> Self {
+        Self {
+            level: level.into(),
+            area: area.max(1),
+            warp_node: Some(warp_node),
+            warp_arg,
+        }
     }
 
     pub fn from_map_key(map: &str) -> Option<Self> {
@@ -214,6 +235,11 @@ pub struct Sm64NativePlayerOutput {
 }
 
 #[derive(Resource, Default, Debug, Clone)]
+pub struct Sm64NativeTransitionOutput {
+    pub pending: Option<sm64_native::NativeTransition>,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
 pub struct Sm64NativeDialogOutput {
     pub id: i16,
     pub text: String,
@@ -322,6 +348,7 @@ impl Plugin for Sm64Plugin {
             .init_resource::<Sm64ControllerInput>()
             .init_resource::<Sm64ExternalPlayer>()
             .init_resource::<Sm64NativePlayerOutput>()
+            .init_resource::<Sm64NativeTransitionOutput>()
             .init_resource::<Sm64NativeDialogOutput>()
             .init_resource::<Sm64NativeDynamicCollision>()
             .init_resource::<Sm64NativeAudioFrame>()
@@ -538,14 +565,22 @@ fn launch_requested_sm64_map(
                 warn!("SM64 native model-id mapping failed: {error}");
                 HashMap::new()
             });
-        match sm64_native::NativeClient::launch(&root,&level,area,selected_act) {
+        match sm64_native::NativeClient::launch_at(
+            &root,
+            &level,
+            area,
+            selected_act,
+            request.warp_node,
+            request.warp_arg,
+        ) {
             Ok(client)=>{
                 let loaded_path=client.module_path().to_path_buf();
                 native.client=Some(client);
                 native.active=true;
                 info!(
-                    "SM64 COD map: EMBEDDED DLL LOADED in-process: {} | level={level} area={area} act={selected_act}",
-                    loaded_path.display()
+                    "SM64 COD map: EMBEDDED DLL LOADED in-process: {} | level={level} area={area} act={selected_act} warp_node={:?}",
+                    loaded_path.display(),
+                    request.warp_node
                 );
             }
             Err(error)=>{
@@ -1757,6 +1792,7 @@ fn advance_sm64_runtime(
     mut external: ResMut<Sm64ExternalPlayer>,
     mut native: NonSendMut<Sm64NativeRuntime>,
     mut native_output: ResMut<Sm64NativePlayerOutput>,
+    mut native_transition: ResMut<Sm64NativeTransitionOutput>,
     mut native_dialog: ResMut<Sm64NativeDialogOutput>,
     mut native_collision: ResMut<Sm64NativeDynamicCollision>,
     mut native_audio: ResMut<Sm64NativeAudioFrame>,
@@ -1821,6 +1857,16 @@ fn advance_sm64_runtime(
                     external.pending_use=false;
                     external.pending_fire=false;
                     external.pending_ground_pound=false;
+                    if let Some(transition)=snapshot.transition.take() {
+                        info!(
+                            "SM64 COD native transition -> {} area={} node={} arg={}",
+                            transition.level,
+                            transition.area,
+                            transition.node,
+                            transition.arg
+                        );
+                        native_transition.pending=Some(transition);
+                    }
                     let native_object_count=snapshot.objects.len();
                     native_audio.tick=snapshot.tick;
                     native_audio.sample_rate=snapshot.audio_sample_rate;
@@ -1869,6 +1915,7 @@ fn advance_sm64_runtime(
                     native_audio.tick=0;
                     native_render.triangles.clear();
                     native_render.texture_updates.clear();
+                    native_transition.pending=None;
                     runtime.latest=None;
                 }
             }
