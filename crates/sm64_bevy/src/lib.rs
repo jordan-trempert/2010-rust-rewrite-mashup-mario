@@ -367,16 +367,23 @@ fn launch_requested_sm64_map(
             warn!("SM64 Mario texture resolution failed: {error}");
             HashMap::new()
         });
-    let object_spawns=sm64_assets::load_level_object_spawns(&root,&level,area)
-        .unwrap_or_else(|error|{
-            warn!("SM64 object spawn load failed: {error}");
-            sm64_assets::ParsedObjectSpawns::default()
-        });
-    let behavior_lists=sm64_assets::load_behavior_object_lists(&root)
-        .unwrap_or_else(|error|{
-            warn!("SM64 behavior list load failed: {error}");
-            HashMap::new()
-        });
+    let (object_spawns,behavior_lists)=if cod_active.is_none() {
+        (
+            sm64_assets::load_level_object_spawns(&root,&level,area)
+                .unwrap_or_else(|error|{
+                    warn!("SM64 object spawn load failed: {error}");
+                    sm64_assets::ParsedObjectSpawns::default()
+                }),
+            sm64_assets::load_behavior_object_lists(&root)
+                .unwrap_or_else(|error|{
+                    warn!("SM64 behavior list load failed: {error}");
+                    HashMap::new()
+                }),
+        )
+    } else {
+        // sm64cod:* never constructs the old Rust gameplay object world.
+        (sm64_assets::ParsedObjectSpawns::default(),HashMap::new())
+    };
     let selected_act=std::env::var("SM64_ACT")
         .ok()
         .and_then(|value|value.parse::<u8>().ok())
@@ -452,43 +459,73 @@ fn launch_requested_sm64_map(
     }
 
     runtime.world=Sm64World::new();
-    runtime.world.collision=parsed.world;
-    runtime.world.spawn_mario(
-        [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
-        spawn.yaw_sm64(),
-    );
-    runtime.world.mario.terrain_type=area_settings.terrain_type;
-    runtime.world.clear_objects();
-    populate_sm64_objects(
-        &mut runtime.world,
-        &object_spawns,
-        &behavior_lists,
-        selected_act,
-    );
-    if (debug_view.0 || cod_active.is_some()) && !native.active {
-        spawn_runtime_object_presentations(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut images,
-            &root,
-            &level,
-            &runtime.world.objects,
-            &mut presentation_cache,
-        );
-    }
     runtime.accumulator=0.0;
-    runtime.latest=Some(runtime.world.snapshot());
+    runtime.latest=None;
+
+    if cod_active.is_some() {
+        /*
+         * Native-only gameplay path. Keep only a tiny Mario carrier so the
+         * presentation adapter has a previous frame to clone before the first
+         * DLL snapshot arrives. No Rust SM64 collision/object simulation is
+         * installed or stepped for sm64cod:*.
+         */
+        runtime.world.mario.pos=[
+            spawn.pos[0] as f32,
+            spawn.pos[1] as f32,
+            spawn.pos[2] as f32,
+        ];
+        runtime.world.mario.face_angle[1]=spawn.yaw_sm64();
+        runtime.world.mario.terrain_type=area_settings.terrain_type;
+
+        info!(
+            "SM64 COD map: NATIVE-ONLY GAMEPLAY enabled; Rust Sm64World objects=0, Rust fallback simulation=disabled"
+        );
+    } else {
+        // Standalone/debug sm64:* mode keeps the Rust simulation.
+        runtime.world.collision=parsed.world;
+        runtime.world.spawn_mario(
+            [spawn.pos[0] as f32,spawn.pos[1] as f32,spawn.pos[2] as f32],
+            spawn.yaw_sm64(),
+        );
+        runtime.world.mario.terrain_type=area_settings.terrain_type;
+        runtime.world.clear_objects();
+        populate_sm64_objects(
+            &mut runtime.world,
+            &object_spawns,
+            &behavior_lists,
+            selected_act,
+        );
+        if debug_view.0 {
+            spawn_runtime_object_presentations(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut images,
+                &root,
+                &level,
+                &runtime.world.objects,
+                &mut presentation_cache,
+            );
+        }
+        runtime.latest=Some(runtime.world.snapshot());
+    }
+
     enabled.0=std::env::var("SM64_ENABLED")
         .map(|v|v!="0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
 
     status.loaded=true;
-    status.message=format!(
-        "SM64 {level} area {area} act {selected_act}: {surface_count} collision surfaces, {special_count} special collision objects, {render_triangles} render triangles in {render_batches} batches, {} runtime objects, Mario at {:?}",
-        runtime.world.objects.len(),
-        spawn.pos
-    );
+    status.message=if cod_active.is_some() {
+        format!(
+            "SM64 {level} area {area} act {selected_act}: native DLL gameplay only; {surface_count} static collision surfaces, {render_triangles} presentation triangles in {render_batches} batches; Rust gameplay objects=0"
+        )
+    } else {
+        format!(
+            "SM64 {level} area {area} act {selected_act}: {surface_count} collision surfaces, {special_count} special collision objects, {render_triangles} render triangles in {render_batches} batches, {} Rust runtime objects, Mario at {:?}",
+            runtime.world.objects.len(),
+            spawn.pos
+        )
+    };
     info!("{}",status.message);
     commands.remove_resource::<Sm64LaunchRequest>();
 }
@@ -1569,6 +1606,7 @@ fn advance_sm64_runtime(
     time: Res<Time>,
     enabled: Res<Sm64Enabled>,
     input: Res<Sm64ControllerInput>,
+    cod_active: Option<Res<Sm64CodActive>>,
     external: Res<Sm64ExternalPlayer>,
     mut native: NonSendMut<Sm64NativeRuntime>,
     mut native_output: ResMut<Sm64NativePlayerOutput>,
@@ -1581,11 +1619,32 @@ fn advance_sm64_runtime(
     let mut steps=0;
     while runtime.accumulator >= SM64_TICK_SECONDS && steps < 8 {
         runtime.accumulator -= SM64_TICK_SECONDS;
-        if external.active && native.active {
+        if cod_active.is_some() {
+            // sm64cod:* is strictly native DLL gameplay. Never execute the old
+            // Rust Sm64World as a fallback, even while waiting for the COD
+            // player to spawn.
+            if !native.active {
+                native_output.active=false;
+                native_dialog.id=-1;
+                native_dialog.text.clear();
+                native_collision.triangles.clear();
+                steps += 1;
+                continue;
+            }
+            if !external.active {
+                native_output.active=false;
+                steps += 1;
+                continue;
+            }
+
             let Some(client)=native.client.as_mut() else {
+                error!("SM64 native-only mode lost its loaded DLL client; refusing Rust fallback");
                 native.active=false;
+                native_output.active=false;
+                steps += 1;
                 continue;
             };
+
             match client.step(sm64_native::NativePlayerProxy {
                 pos:external.sm64_pos,
                 vel:external.sm64_vel,
@@ -1595,6 +1654,7 @@ fn advance_sm64_runtime(
                 attack_flags:external.attack_flags,
             }) {
                 Ok(snapshot)=>{
+                    let native_object_count=snapshot.objects.len();
                     native_dialog.id=snapshot.dialog_id;
                     native_dialog.text=snapshot.dialog_text.clone();
                     native_collision.tick=snapshot.tick;
@@ -1611,6 +1671,13 @@ fn advance_sm64_runtime(
                         &runtime.world.mario,
                         &native.model_symbols,
                     ));
+                    if runtime.latest.as_ref().is_some_and(|snapshot|snapshot.tick<=3 || snapshot.tick%300==0) {
+                        info!(
+                            "SM64 COD native DLL snapshot tick={} objects={} (Rust gameplay objects=0)",
+                            runtime.latest.as_ref().map_or(0,|snapshot|snapshot.tick),
+                            native_object_count
+                        );
+                    }
                 }
                 Err(error)=>{
                     error!("SM64 embedded native gameplay runtime failed: {error}");
@@ -1620,22 +1687,16 @@ fn advance_sm64_runtime(
                     native_dialog.id=-1;
                     native_dialog.text.clear();
                     native_collision.triangles.clear();
+                    runtime.latest=None;
                 }
             }
         } else {
+            // Standalone/debug sm64:* mode only.
             native_output.active=false;
             native_dialog.id=-1;
             native_dialog.text.clear();
             native_collision.triangles.clear();
-            runtime.latest=Some(if external.active {
-                runtime.world.step_external_player(
-                    external.sm64_pos,
-                    external.sm64_vel,
-                    external.sm64_yaw,
-                )
-            } else {
-                runtime.world.step(input.0)
-            });
+            runtime.latest=Some(runtime.world.step(input.0));
         }
         steps += 1;
     }
