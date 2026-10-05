@@ -28,6 +28,7 @@ struct Sm64CodCollisionState {
     vanish_active: bool,
     level: String,
     area: u8,
+    last_native_static_tick: u32,
     last_dynamic_tick: u32,
     last_dynamic_triangles: Vec<[[f32; 3]; 3]>,
 }
@@ -101,6 +102,24 @@ fn sm64_static_collision_vertices(
     verts
 }
 
+fn sm64_native_collision_vertices(
+    triangles: &[[[f32; 3]; 3]],
+) -> Vec<[f32; 3]> {
+    let s = sm64_core::SM64_TO_IW4_SCALE;
+    let mut verts = Vec::with_capacity(triangles.len() * 6);
+    for tri in triangles {
+        let v0 = [tri[0][0] * s, -tri[0][2] * s, tri[0][1] * s];
+        let v1 = [tri[1][0] * s, -tri[1][2] * s, tri[1][1] * s];
+        let v2 = [tri[2][0] * s, -tri[2][2] * s, tri[2][1] * s];
+
+        // Match the handedness expected by clipmap_iw4, then duplicate the
+        // reverse face so room walls/floors are solid from either side.
+        verts.extend_from_slice(&[v0, v2, v1]);
+        verts.extend_from_slice(&[v0, v1, v2]);
+    }
+    verts
+}
+
 fn install_sm64_cod_collision(
     authority: &mut sim::SimWorld,
     collision_state: &mut Sm64CodCollisionState,
@@ -119,6 +138,7 @@ fn install_sm64_cod_collision(
     collision_state.level.clear();
     collision_state.level.push_str(level);
     collision_state.area = area;
+    collision_state.last_native_static_tick = 0;
     collision_state.last_dynamic_tick = 0;
     collision_state.last_dynamic_triangles.clear();
 
@@ -164,8 +184,8 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
                 launch_installed_sm64_cod_map,
                 place_sm64_cod_player_on_life_started,
                 sync_cod_player_into_sm64.before(sm64_bevy::Sm64RuntimeStep),
+                sync_sm64_cod_area_collision.after(sm64_bevy::Sm64RuntimeStep),
                 apply_sm64_native_player_output.after(sm64_bevy::Sm64RuntimeStep),
-                sync_sm64_cod_area_collision,
                 sync_sm64_cap_collision,
                 apply_sm64_dynamic_collision,
                 handle_sm64_cod_level_transition,
@@ -669,6 +689,7 @@ fn handle_sm64_cod_level_transition(
     mut bridge_state: ResMut<Sm64CodNativeState>,
     mut move_state: ResMut<Sm64CodMoveState>,
     mut collision_state: ResMut<Sm64CodCollisionState>,
+    mut native_static: ResMut<sm64_bevy::Sm64NativeStaticCollision>,
     mut native_dynamic: ResMut<sm64_bevy::Sm64NativeDynamicCollision>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
     mut commands: Commands,
@@ -684,47 +705,26 @@ fn handle_sm64_cod_level_transition(
     }
 
     let area = target.area.max(1);
-    let Some(root) = std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
-        diag::warn!(
-            World,
-            "SM64 COD level transition {} -> {} refused: SM64_DECOMP_ROOT is not configured",
-            current.level,
-            target.level
-        );
-        return;
-    };
+    native_static.tick = 0;
+    native_static.triangles.clear();
+    native_dynamic.tick = 0;
+    native_dynamic.triangles.clear();
 
-    let parsed = match sm64_assets::load_level_collision(&root, &target.level, area) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            diag::warn!(
-                World,
-                "SM64 COD level transition {} -> {} area {} collision failed: {}",
-                current.level,
-                target.level,
-                area,
-                error
-            );
-            return;
-        }
-    };
+    /*
+     * Do not install a source-parsed approximation of the destination here.
+     * The fresh native DLL will export the exact static surfaces SM64 actually
+     * loaded for the destination area on its first snapshot. Keep COD frozen
+     * until that snapshot arrives; sync_sm64_cod_area_collision installs those
+     * exact native surfaces before apply_sm64_native_player_output teleports the
+     * player to Mario's resolved warp-node position.
+     */
+    collision_state.level.clear();
+    collision_state.area = 0;
+    collision_state.last_native_static_tick = 0;
+    collision_state.last_dynamic_tick = 0;
+    collision_state.last_dynamic_triangles.clear();
 
     if let Some(authority) = authority.as_deref_mut() {
-        let installed_triangles = install_sm64_cod_collision(
-            &mut authority.0,
-            &mut collision_state,
-            &target.level,
-            area,
-            &parsed,
-        );
-        native_dynamic.tick = 0;
-        native_dynamic.triangles.clear();
-
-        /*
-         * Freeze COD while the native destination DLL resolves its warp node.
-         * Do not invent a MARIO_POS fallback here. The first destination
-         * snapshot is the sole authority for where the player appears.
-         */
         let mut first = None;
         authority.0.visit_players(|id, _| {
             if first.is_none() {
@@ -735,15 +735,6 @@ fn handle_sm64_cod_level_transition(
             authority.0.set_external_motion(id, true);
             authority.0.set_velocity(id, [0.0; 3]);
         }
-
-        diag::info!(
-            World,
-            "SM64 COD level transition: installed destination exactly like initial map: {} triangles for {} area {}; awaiting native Mario spawn node {}",
-            installed_triangles,
-            target.level,
-            area,
-            target.node
-        );
     }
 
     bridge_state.last_sm64_health = None;
@@ -765,7 +756,7 @@ fn handle_sm64_cod_level_transition(
 
     diag::info!(
         World,
-        "SM64 COD host transition: {} -> {} area={} node={} arg={}",
+        "SM64 COD host transition: {} -> {} area={} node={} arg={} (waiting for native static collision + Mario spawn)",
         current.level,
         target.level,
         area,
@@ -777,6 +768,7 @@ fn handle_sm64_cod_level_transition(
 fn sync_sm64_cod_area_collision(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
+    native_static: Res<sm64_bevy::Sm64NativeStaticCollision>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
     mut collision_state: ResMut<Sm64CodCollisionState>,
 ) {
@@ -788,53 +780,46 @@ fn sync_sm64_cod_area_collision(
     };
     if !output.active
         || area == 0
-        || (active.level == collision_state.level && area == collision_state.area)
+        || native_static.tick == 0
+        || native_static.triangles.is_empty()
     {
         return;
     }
 
-    let Some(root) = std::env::var_os("SM64_DECOMP_ROOT").map(std::path::PathBuf::from) else {
-        diag::warn!(
-            World,
-            "SM64 COD area transition: SM64_DECOMP_ROOT is not configured"
-        );
+    let level_or_area_changed =
+        collision_state.level != active.level || collision_state.area != area;
+    if !level_or_area_changed && collision_state.last_native_static_tick != 0 {
         return;
-    };
-    let parsed = match sm64_assets::load_level_collision(&root, &active.level, area) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            diag::warn!(
-                World,
-                "SM64 COD area transition: collision load failed for {} area {}: {}",
-                active.level,
-                area,
-                error
-            );
-            return;
-        }
-    };
+    }
 
-    let verts = sm64_static_collision_vertices(&parsed, false);
-    let vanish_verts = sm64_static_collision_vertices(&parsed, true);
+    let verts = sm64_native_collision_vertices(&native_static.triangles);
+    let triangle_count = verts.len() / 3;
 
     collision_state.static_vertices = verts.clone();
     collision_state.normal_static_vertices = verts.clone();
-    collision_state.vanish_static_vertices = vanish_verts;
+    // Native snapshot currently exports exact geometry but not surface types.
+    // Keep the exact geometry for vanish mode too rather than restoring stale
+    // parser collision from another level/area.
+    collision_state.vanish_static_vertices = verts.clone();
     collision_state.vanish_active = false;
     collision_state.level = active.level.clone();
     collision_state.area = area;
+    collision_state.last_native_static_tick = native_static.tick;
     collision_state.last_dynamic_tick = 0;
     collision_state.last_dynamic_triangles.clear();
 
     let mesh = sim::SimClipMesh::from_linear_triangles(verts);
     let content = authority.0.content().with_clip_mesh(mesh);
     authority.0.install_content(content);
+
     diag::info!(
         World,
-        "SM64 COD area transition: installed {} static triangles for {} area {}",
-        parsed.world.surfaces.len(),
+        "SM64 COD native collision installed: level={} area={} native_surfaces={} IW4_triangles={} tick={}",
         active.level,
-        area
+        area,
+        native_static.triangles.len(),
+        triangle_count,
+        native_static.tick
     );
 }
 
