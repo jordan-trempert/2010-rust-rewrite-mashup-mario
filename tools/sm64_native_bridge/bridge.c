@@ -42,6 +42,14 @@
 #define OP_SHUTDOWN 2u
 #define BRIDGE_INPUT_ATTACK 0x00000001u
 #define BRIDGE_INPUT_USE    0x00000002u
+
+#if defined(_WIN32) || defined(_WIN64)
+#define IW4L_SM64_API __declspec(dllexport)
+#else
+#define IW4L_SM64_API __attribute__((visibility("default")))
+#endif
+
+#define IW4L_SM64_ABI_VERSION 1u
 static volatile const char *gBridgeStage = "startup";
 static int gBridgeDialogPendingReset = 0;
 
@@ -135,6 +143,60 @@ struct Request {
     int32_t health;
     uint32_t attack_flags;
 };
+
+struct Iw4lSm64PlayerProxy {
+    float pos[3];
+    float vel[3];
+    int16_t yaw;
+    int16_t pitch;
+    int32_t health;
+    uint32_t attack_flags;
+};
+
+struct Iw4lSm64Object {
+    uint32_t id;
+    int32_t model_id;
+    float pos[3];
+    int16_t face_angle[3];
+    float scale[3];
+    uint16_t active_flags;
+    uint16_t render_flags;
+    int16_t anim_id;
+    int16_t anim_frame;
+    int32_t anim_state;
+    uint32_t interact_status;
+    int32_t damage_or_coin_value;
+};
+
+struct Iw4lSm64Triangle {
+    float vertices[9];
+};
+
+struct Iw4lSm64SnapshotView {
+    uint32_t abi_version;
+    uint32_t tick;
+    int32_t mario_health;
+    int32_t coins;
+    uint32_t mario_action;
+    float mario_pos[3];
+    float mario_vel[3];
+    int16_t mario_yaw;
+    int16_t dialog_id;
+    const char *dialog_text;
+    uint32_t dialog_text_len;
+    const struct Iw4lSm64Object *objects;
+    uint32_t object_count;
+    const struct Iw4lSm64Triangle *dynamic_surfaces;
+    uint32_t dynamic_surface_count;
+};
+
+static struct LevelCommand *gIw4lLevelCommand = NULL;
+static int gIw4lInitialized = 0;
+static char gIw4lLastError[512];
+static char gIw4lDialogText[4096];
+static struct Iw4lSm64Object gIw4lObjects[4096];
+static struct Iw4lSm64Triangle gIw4lDynamicSurfaces[8192];
+static struct Iw4lSm64SnapshotView gIw4lSnapshot;
 
 static uint32_t object_id(const struct Object *object) {
     /*
@@ -755,6 +817,85 @@ static uint16_t bridge_dialog_text(char *out, uint16_t capacity, int16_t *dialog
     return n;
 }
 
+static const struct Iw4lSm64SnapshotView *fill_snapshot_view(void) {
+    const struct Object *objects[4096];
+    const struct Surface *dynamic_surfaces[8192];
+    uint32_t count;
+    uint32_t dynamic_count;
+    uint32_t i;
+    int16_t dialog_id = DIALOG_NONE;
+    uint16_t dialog_text_len;
+
+    gBridgeStage = "collect_objects";
+    count = collect_objects(objects, 4096);
+    gBridgeStage = "collect_dynamic_surfaces";
+    dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
+    print_native_census_once(objects, count, dynamic_count);
+
+    dialog_text_len = bridge_dialog_text(
+        gIw4lDialogText,
+        (uint16_t)sizeof(gIw4lDialogText),
+        &dialog_id
+    );
+
+    memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
+    gIw4lSnapshot.abi_version = IW4L_SM64_ABI_VERSION;
+    gIw4lSnapshot.tick = gGlobalTimer;
+    gIw4lSnapshot.mario_health = gMarioState != NULL ? gMarioState->health : 0;
+    gIw4lSnapshot.coins = gMarioState != NULL ? gMarioState->numCoins : 0;
+    gIw4lSnapshot.mario_action = gMarioState != NULL ? gMarioState->action : 0;
+    if (gMarioState != NULL) {
+        for (i = 0; i < 3; ++i) {
+            gIw4lSnapshot.mario_pos[i] = gMarioState->pos[i];
+            gIw4lSnapshot.mario_vel[i] = gMarioState->vel[i];
+        }
+        gIw4lSnapshot.mario_yaw = gMarioState->faceAngle[1];
+    }
+    gIw4lSnapshot.dialog_id = dialog_id;
+    gIw4lSnapshot.dialog_text = gIw4lDialogText;
+    gIw4lSnapshot.dialog_text_len = dialog_text_len;
+
+    for (i = 0; i < count; ++i) {
+        const struct Object *object = objects[i];
+        struct Iw4lSm64Object *out = &gIw4lObjects[i];
+        uint32_t axis;
+        memset(out, 0, sizeof(*out));
+        out->id = object_id(object);
+        out->model_id = model_id_for_object(object);
+        for (axis = 0; axis < 3; ++axis) {
+            out->pos[axis] = object->header.gfx.pos[axis];
+            out->face_angle[axis] = object->header.gfx.angle[axis];
+            out->scale[axis] = object->header.gfx.scale[axis];
+        }
+        out->active_flags = (uint16_t)object->activeFlags;
+        out->render_flags = (uint16_t)object->header.gfx.node.flags;
+        out->anim_id = object->header.gfx.animInfo.animID;
+        out->anim_frame = object->header.gfx.animInfo.animFrame;
+        out->anim_state = (int32_t)object->oAnimState;
+        out->interact_status = (uint32_t)object->oInteractStatus;
+        out->damage_or_coin_value = (int32_t)object->oDamageOrCoinValue;
+    }
+    gIw4lSnapshot.objects = gIw4lObjects;
+    gIw4lSnapshot.object_count = count;
+
+    for (i = 0; i < dynamic_count; ++i) {
+        const struct Surface *surface = dynamic_surfaces[i];
+        float *v = gIw4lDynamicSurfaces[i].vertices;
+        v[0] = (float)surface->vertex1[0];
+        v[1] = (float)surface->vertex1[1];
+        v[2] = (float)surface->vertex1[2];
+        v[3] = (float)surface->vertex2[0];
+        v[4] = (float)surface->vertex2[1];
+        v[5] = (float)surface->vertex2[2];
+        v[6] = (float)surface->vertex3[0];
+        v[7] = (float)surface->vertex3[1];
+        v[8] = (float)surface->vertex3[2];
+    }
+    gIw4lSnapshot.dynamic_surfaces = gIw4lDynamicSurfaces;
+    gIw4lSnapshot.dynamic_surface_count = dynamic_count;
+    return &gIw4lSnapshot;
+}
+
 static void write_snapshot(void) {
     const struct Object *objects[4096];
     const struct Surface *dynamic_surfaces[8192];
@@ -858,6 +999,143 @@ static void write_snapshot(void) {
     fflush(stdout);
 }
 
+IW4L_SM64_API uint32_t iw4l_sm64_abi_version(void) {
+    return IW4L_SM64_ABI_VERSION;
+}
+
+IW4L_SM64_API const char *iw4l_sm64_last_error(void) {
+    return gIw4lLastError;
+}
+
+IW4L_SM64_API int iw4l_sm64_init(const char *level_name, int area, int act) {
+    const struct LevelSpec *level;
+
+    if (gIw4lInitialized) {
+        snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime already initialized");
+        return 0;
+    }
+    if (level_name == NULL || level_name[0] == '\0') {
+        level_name = "bob";
+    }
+
+    level = find_level(level_name);
+    if (level == NULL) {
+        snprintf(gIw4lLastError, sizeof(gIw4lLastError), "unknown level '%s'", level_name);
+        return 0;
+    }
+
+#ifdef USE_SYSTEM_MALLOC
+    gBridgeStage = "main_pool_init";
+    main_pool_init();
+    gGfxAllocOnlyPool = alloc_only_pool_init();
+#else
+    {
+        static u64 pool[0x165000/8 / 4 * sizeof(void *)];
+        main_pool_init(pool, pool + sizeof(pool) / sizeof(pool[0]));
+    }
+#endif
+    gEffectsMemoryPool = mem_pool_init(0x4000, MEMORY_POOL_LEFT);
+
+    gfx_init(
+        &gfx_dummy_wm_api,
+        &gfx_dummy_renderer_api,
+        "IW4L Embedded SM64",
+        0
+    );
+    gBridgeStage = "audio_init";
+    audio_init();
+    gBridgeStage = "sound_init";
+    sound_init();
+    gBridgeStage = "thread5_game_loop";
+    thread5_game_loop(NULL);
+
+    gCurrSaveFileNum = 1;
+    gCurrActNum = (s16)act;
+    gCurrLevelNum = level->level;
+    gCurrCourseNum = level->course;
+    save_file_set_flags(SAVE_FLAG_FILE_EXISTS);
+
+    gIw4lLevelCommand = (struct LevelCommand *)level->entry;
+    gDebugLevelSelect = TRUE;
+    gBridgeStage = "initial_select_gfx_pool";
+    select_gfx_pool();
+    gBridgeStage = "initial_level_script_execute";
+    gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
+    gGlobalTimer++;
+    gDebugLevelSelect = FALSE;
+
+    if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
+        snprintf(
+            gIw4lLastError,
+            sizeof(gIw4lLastError),
+            "level '%s' did not initialize area/player (area=%d act=%d)",
+            level_name,
+            area,
+            act
+        );
+        gIw4lLevelCommand = NULL;
+        return 0;
+    }
+
+    if ((gMarioState->action & ACT_GROUP_MASK) == ACT_GROUP_CUTSCENE) {
+        set_mario_action(gMarioState, ACT_IDLE, 0);
+    }
+
+    gIw4lInitialized = 1;
+    gIw4lLastError[0] = '\0';
+    gBridgeStage = "course_ready";
+    fprintf(
+        stderr,
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d action=0x%08X\n",
+        level_name,
+        area,
+        act,
+        gMarioState->action
+    );
+    fflush(stderr);
+    return 1;
+}
+
+IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
+    const struct Iw4lSm64PlayerProxy *player
+) {
+    struct Request request;
+
+    if (!gIw4lInitialized || gIw4lLevelCommand == NULL || player == NULL) {
+        snprintf(gIw4lLastError, sizeof(gIw4lLastError), "SM64 runtime is not initialized");
+        return NULL;
+    }
+
+    memset(&request, 0, sizeof(request));
+    request.op = OP_STEP;
+    memcpy(request.pos, player->pos, sizeof(request.pos));
+    memcpy(request.vel, player->vel, sizeof(request.vel));
+    request.yaw = player->yaw;
+    request.pitch = player->pitch;
+    request.health = player->health;
+    request.attack_flags = player->attack_flags;
+
+    gBridgeStage = "apply_proxy";
+    apply_proxy(&request);
+    gBridgeStage = "apply_external_attack";
+    apply_external_attack(&request);
+    gBridgeStage = "select_gfx_pool";
+    select_gfx_pool();
+    gBridgeStage = "level_script_execute";
+    gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
+    gGlobalTimer++;
+    gBridgeStage = "snapshot";
+    return fill_snapshot_view();
+}
+
+IW4L_SM64_API void iw4l_sm64_shutdown(void) {
+    gIw4lInitialized = 0;
+    gIw4lLevelCommand = NULL;
+    gBridgeDialogPendingReset = 0;
+    memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
+    gBridgeStage = "shutdown";
+}
+
 #ifdef _WIN32
 static LONG WINAPI bridge_exception_filter(EXCEPTION_POINTERS *info) {
     DWORD code = info != NULL && info->ExceptionRecord != NULL
@@ -880,6 +1158,7 @@ static LONG WINAPI bridge_exception_filter(EXCEPTION_POINTERS *info) {
 }
 #endif
 
+#ifndef IW4L_SM64_EMBEDDED
 static int bridge_main(int argc, char **argv) {
 #ifdef _WIN32
     SetUnhandledExceptionFilter(bridge_exception_filter);
@@ -1070,3 +1349,4 @@ int main(int argc, char **argv) {
     return bridge_main(argc, argv);
 }
 #endif
+#endif /* !IW4L_SM64_EMBEDDED */
