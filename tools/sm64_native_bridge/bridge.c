@@ -682,22 +682,36 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
              * alone so vanilla interact_door() can still show the normal
              * "need N more stars" dialog.
              */
-            if (behavior == segmented_to_virtual(bhvStarDoor) &&
-                bridge_door_is_unlocked(object)) {
-                const u32 save_flag = get_door_save_file_flag(object);
-                const u32 old_flags = save_file_get_flags();
+            {
+                const s16 required_stars = (s16)(object->oBehParams >> 24);
+                const int star_locked_door =
+                    behavior == segmented_to_virtual(bhvStarDoor) ||
+                    (behavior == segmented_to_virtual(bhvDoor) && required_stars > 0);
 
-                object->oInteractType = 0;
+                if (star_locked_door && bridge_door_is_unlocked(object)) {
+                    const u32 save_flag = get_door_save_file_flag(object);
+                    const u32 old_flags = save_file_get_flags();
 
-                if (save_flag != 0 && !(old_flags & save_flag)) {
-                    save_file_set_flags(save_flag);
-                    fprintf(
-                        stderr,
-                        "iw4l-sm64-native: star door pre-unlocked safely flag=0x%08X required=%d\n",
-                        (unsigned)save_flag,
-                        (int)((s16)(object->oBehParams >> 24))
-                    );
-                    fflush(stderr);
+                    /*
+                     * This includes the 1-star WF/PSS doors and 3-star
+                     * JRB/CCM doors, which are plain bhvDoor objects rather
+                     * than bhvStarDoor. Suppress their INTERACT_DOOR path once
+                     * the requirement is met so hidden Mario can never enter
+                     * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR.
+                     */
+                    object->oInteractType = 0;
+
+                    if (save_flag != 0 && !(old_flags & save_flag)) {
+                        save_file_set_flags(save_flag);
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-native: star-required door pre-unlocked safely flag=0x%08X required=%d behavior=%s\n",
+                            (unsigned)save_flag,
+                            (int)required_stars,
+                            behavior == segmented_to_virtual(bhvStarDoor) ? "star" : "door"
+                        );
+                        fflush(stderr);
+                    }
                 }
             }
 
@@ -2240,6 +2254,14 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     apply_external_attack(&request);
     gBridgeStage = "auto_open_doors";
     bridge_auto_open_nearby_doors(&request);
+
+    /*
+     * If a star-door action was selected on the previous native frame, cancel
+     * it BEFORE level_script_execute() gets a chance to run the cutscene.
+     */
+    gBridgeStage = "star_door_pre_execute_guard";
+    bridge_bypass_star_door_unlock_cutscene();
+
     gBridgeStage = "select_gfx_pool";
     select_gfx_pool();
     gBridgeStage = "level_script_execute";
