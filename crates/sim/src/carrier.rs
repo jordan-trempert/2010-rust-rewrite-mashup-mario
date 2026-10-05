@@ -1,7 +1,7 @@
 use core::fmt;
 use core::ops::{Deref, DerefMut};
 
-use bevy_ecs::prelude::{Entity, World};
+use bevy_ecs::prelude::{Entity, Resource, World};
 use playerstate_iw4::PlayerState;
 
 use crate::frame::{
@@ -20,6 +20,9 @@ pub struct SimWorld {
     schedule: bevy_ecs::schedule::Schedule,
 }
 
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingExternalDamage(pub(crate) Vec<(ClientId, i32)>);
+
 impl Default for SimWorld {
     fn default() -> Self {
         let mut ecs = World::new();
@@ -29,6 +32,7 @@ impl Default for SimWorld {
         ecs.insert_resource(crate::script::Runtime::default());
         ecs.insert_resource(crate::script::Mechanics::default());
         ecs.insert_resource(crate::script::NativeRegistry::default());
+        ecs.insert_resource(PendingExternalDamage::default());
         Self {
             ecs,
             state_entity,
@@ -51,6 +55,7 @@ impl Clone for SimWorld {
             collect_dropped_items(&self.ecs),
         );
         crate::script::copy_state(&self.ecs, &mut ecs);
+        ecs.insert_resource(PendingExternalDamage::default());
         Self {
             ecs,
             state_entity,
@@ -290,13 +295,18 @@ impl SimWorld {
         self.frame().set_health(id, health)
     }
 
-    /// Route damage from an external gameplay runtime through the same script
-    /// callbacks, damage feedback and death lifecycle as ordinary world damage.
+    /// Queue damage from an external gameplay runtime for the next authority
+    /// simulation tick. GSC damage callbacks depend on the transient StepRequest
+    /// resource, so executing them directly from Bevy Update can panic between
+    /// simulation ticks.
     pub fn damage_from_environment(&mut self, id: ClientId, amount: i32) {
-        if amount <= 0 { return; }
-        let mut world = self.frame();
-        let tick = Tick(world.entity_kernel().level_time_ms().max(0) as u32 / crate::MATCH_TICK_MS);
-        crate::script_player::debug_damage(&mut world, tick, id, amount);
+        if amount <= 0 {
+            return;
+        }
+        self.ecs
+            .resource_mut::<PendingExternalDamage>()
+            .0
+            .push((id, amount));
     }
 
 
