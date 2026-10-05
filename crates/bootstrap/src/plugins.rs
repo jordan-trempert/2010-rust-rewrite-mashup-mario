@@ -247,6 +247,10 @@ fn launch_installed_sm64_cod_map(
         level: level.clone(),
         area,
     });
+    // SM64/Bevy is the visible world for this mode. Tell session admission not
+    // to wait forever for the hidden donor IW4 WorldScene's GPU quiet frames.
+    // clear_sm64_cod_on_return removes this resource when leaving the map.
+    commands.insert_resource(frame::ExternalWorldPresentation(true));
     commands.remove_resource::<sm64_bevy::Sm64CodMapRequest>();
     diag::info!(World, "SM64 COD map: attaching `{level}` area {area} to installed IW4 proxy match");
 }
