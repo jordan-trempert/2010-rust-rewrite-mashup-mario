@@ -15,6 +15,7 @@
 #include "object_constants.h"
 #include "model_ids.h"
 #include "level_commands.h"
+#include "dialog_ids.h"
 #include "levels/scripts.h"
 #include "game/area.h"
 #include "game/game_init.h"
