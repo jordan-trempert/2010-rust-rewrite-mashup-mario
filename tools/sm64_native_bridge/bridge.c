@@ -192,6 +192,9 @@ struct Iw4lSm64SnapshotView {
 
 static struct LevelCommand *gIw4lLevelCommand = NULL;
 static int gIw4lInitialized = 0;
+/* Read by the temporarily patched bhv_mario_update() in the embedded build.
+ * Normal COD locomotion keeps this false; native mechanics set it true. */
+int gIw4lRunMarioAction = 0;
 static char gIw4lLastError[512];
 static char gIw4lDialogText[4096];
 static struct Iw4lSm64Object gIw4lObjects[4096];
@@ -368,6 +371,7 @@ static void apply_proxy(const struct Request *request) {
 
     bridge_update_headless_dialog(request);
     native_owns = native_owns_mario_motion();
+    gIw4lRunMarioAction = native_owns;
 
     if (!native_owns) {
         /*
@@ -1130,6 +1134,7 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
 
 IW4L_SM64_API void iw4l_sm64_shutdown(void) {
     gIw4lInitialized = 0;
+    gIw4lRunMarioAction = 0;
     gIw4lLevelCommand = NULL;
     gBridgeDialogPendingReset = 0;
     memset(&gIw4lSnapshot, 0, sizeof(gIw4lSnapshot));
