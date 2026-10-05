@@ -27,24 +27,70 @@ if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
     throw "make is not on PATH. Run this from an MSYS2/MinGW environment that can build sm64-port."
 }
 
-# sm64-port's Makefile defaults to PYTHON=python3, but a normal Windows
-# installation often exposes only `python` or the `py` launcher. Resolve it
-# here and pass the exact command into make so asset extraction works from
-# PowerShell/cmd as well as MSYS2.
+# sm64-port recipes execute under MSYS /bin/sh. PowerShell's
+# Get-Command can see Windows App Execution Aliases such as python3.exe even
+# when MSYS cannot resolve the bare command name. Pass an absolute executable
+# path to make instead of trusting the PowerShell command name.
 $pythonMake = $null
-if (Get-Command python3 -ErrorAction SilentlyContinue) {
-    $pythonMake = "python3"
+$pythonDisplay = $null
+
+$pythonCandidates = @()
+foreach ($name in @("python", "python3")) {
+    $commands = @(Get-Command $name -All -ErrorAction SilentlyContinue)
+    foreach ($command in $commands) {
+        if ($command.CommandType -eq "Application" -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+            $pythonCandidates += $command.Source
+        }
+    }
 }
-elseif (Get-Command python -ErrorAction SilentlyContinue) {
-    $pythonMake = "python"
+
+# Prefer a real installation over the Microsoft Store/WindowsApps alias.
+$pythonCandidates = @(
+    $pythonCandidates |
+        Sort-Object -Unique |
+        Sort-Object @{ Expression = { if ($_ -match "\\WindowsApps\\") { 1 } else { 0 } } }
+)
+
+foreach ($candidate in $pythonCandidates) {
+    try {
+        & $candidate --version *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $normalized = $candidate -replace "\\", "/"
+            $pythonMake = '"' + $normalized + '"'
+            $pythonDisplay = $candidate
+            break
+        }
+    }
+    catch {
+        # Try the next executable candidate.
+    }
 }
-elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    $pythonMake = "py -3"
-}
+
 if ([string]::IsNullOrWhiteSpace($pythonMake)) {
-    throw "Python 3 was not found. Install Python 3 or add python/python3/py to PATH."
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py -and $py.CommandType -eq "Application") {
+        try {
+            & $py.Source -3 --version *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $normalized = $py.Source -replace "\\", "/"
+                $pythonMake = '"' + $normalized + '" -3'
+                $pythonDisplay = "$($py.Source) -3"
+            }
+        }
+        catch {
+        }
+    }
 }
-Write-Host "Using Python for sm64-port: $pythonMake"
+
+if ([string]::IsNullOrWhiteSpace($pythonMake)) {
+    throw @"
+Python 3 was not found as a usable Windows executable.
+Install Python 3 from python.org (recommended), make sure "Add Python to PATH"
+is enabled, then rerun this script.
+"@
+}
+
+Write-Host "Using Python for sm64-port: $pythonDisplay"
 
 $buildRel = "build/us_bridge"
 $build = Join-Path $root "build\us_bridge"
