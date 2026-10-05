@@ -655,7 +655,7 @@ static uint32_t collect_dynamic_surfaces(
                     if (++guard > 4096) {
                         fprintf(
                             stderr,
-                            "iw4l-sm64-bridge: warning: dynamic surface chain guard tripped at cell=(%d,%d) partition=%d\n",
+                            "iw4l-sm64-native: warning: dynamic surface chain guard tripped at cell=(%d,%d) partition=%d\n",
                             x, z, partition
                         );
                         break;
@@ -665,7 +665,7 @@ static uint32_t collect_dynamic_surfaces(
                     if (surface == NULL) {
                         fprintf(
                             stderr,
-                            "iw4l-sm64-bridge: warning: null dynamic surface at cell=(%d,%d) partition=%d\n",
+                            "iw4l-sm64-native: warning: null dynamic surface at cell=(%d,%d) partition=%d\n",
                             x, z, partition
                         );
                         break;
@@ -681,7 +681,7 @@ static uint32_t collect_dynamic_surfaces(
                         surface >= sSurfacePool + sSurfacePoolSize) {
                         fprintf(
                             stderr,
-                            "iw4l-sm64-bridge: warning: dynamic surface pointer outside pool at cell=(%d,%d) partition=%d\n",
+                            "iw4l-sm64-native: warning: dynamic surface pointer outside pool at cell=(%d,%d) partition=%d\n",
                             x, z, partition
                         );
                         break;
@@ -745,7 +745,7 @@ static void print_native_census_once(
 
     fprintf(
         stderr,
-        "iw4l-sm64-bridge: census objects=%u trees=%u yellow_coins=%u red_coins=%u cannons=%u stars=%u goombas=%u dynamic_surfaces=%u\n",
+        "iw4l-sm64-native: census objects=%u trees=%u yellow_coins=%u red_coins=%u cannons=%u stars=%u goombas=%u dynamic_surfaces=%u\n",
         count,
         trees,
         yellow_coins,
@@ -914,14 +914,14 @@ static void write_snapshot(void) {
     snapshot_number++;
 
     if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
-        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u collecting objects\n", snapshot_number);
+        fprintf(stderr, "iw4l-sm64-native: snapshot %u collecting objects\n", snapshot_number);
         fflush(stderr);
     }
     gBridgeStage = "collect_objects";
     count = collect_objects(objects, 4096);
 
     if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
-        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u objects=%u; collecting dynamic surfaces\n",
+        fprintf(stderr, "iw4l-sm64-native: snapshot %u objects=%u; collecting dynamic surfaces\n",
                 snapshot_number, count);
         fflush(stderr);
     }
@@ -929,7 +929,7 @@ static void write_snapshot(void) {
     dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
 
     if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
-        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u dynamic_surfaces=%u\n",
+        fprintf(stderr, "iw4l-sm64-native: snapshot %u dynamic_surfaces=%u\n",
                 snapshot_number, dynamic_count);
         fflush(stderr);
     }
@@ -1152,7 +1152,7 @@ static LONG WINAPI bridge_exception_filter(EXCEPTION_POINTERS *info) {
 
     fprintf(
         stderr,
-        "iw4l-sm64-bridge: FATAL native exception code=0x%08lX address=%p globalTimer=%u stage=%s\n",
+        "iw4l-sm64-native: FATAL native exception code=0x%08lX address=%p globalTimer=%u stage=%s\n",
         (unsigned long)code,
         address,
         (unsigned)gGlobalTimer,
@@ -1192,7 +1192,7 @@ static int bridge_main(int argc, char **argv) {
 
     level = find_level(level_name);
     if (level == NULL) {
-        fprintf(stderr, "iw4l-sm64-bridge: unknown level '%s'\n", level_name);
+        fprintf(stderr, "iw4l-sm64-native: unknown level '%s'\n", level_name);
         return 2;
     }
 
@@ -1259,7 +1259,7 @@ static int bridge_main(int argc, char **argv) {
 
     if (gCurrentArea == NULL || gMarioState == NULL || gMarioObject == NULL) {
         fprintf(stderr,
-                "iw4l-sm64-bridge: level '%s' did not initialize area/player (area=%d act=%d)\n",
+                "iw4l-sm64-native: level '%s' did not initialize area/player (area=%d act=%d)\n",
                 level_name, area, act);
         return 3;
     }
@@ -1267,14 +1267,14 @@ static int bridge_main(int argc, char **argv) {
     if ((gMarioState->action & ACT_GROUP_MASK) == ACT_GROUP_CUTSCENE) {
         fprintf(
             stderr,
-            "iw4l-sm64-bridge: normalizing unexpected startup cutscene action 0x%08X to ACT_IDLE\n",
+            "iw4l-sm64-native: normalizing unexpected startup cutscene action 0x%08X to ACT_IDLE\n",
             gMarioState->action
         );
         set_mario_action(gMarioState, ACT_IDLE, 0);
     }
 
     fprintf(stderr,
-            "iw4l-sm64-bridge: native decomp gameplay ready: level=%s area=%d act=%d action=0x%08X\n",
+            "iw4l-sm64-native: native decomp gameplay ready: level=%s area=%d act=%d action=0x%08X\n",
             level_name, area, act, gMarioState->action);
 
     for (;;) {
@@ -1295,7 +1295,7 @@ static int bridge_main(int argc, char **argv) {
             bridge_step++;
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
-                fprintf(stderr, "iw4l-sm64-bridge: step %u begin\n", bridge_step);
+                fprintf(stderr, "iw4l-sm64-native: step %u begin\n", bridge_step);
                 fflush(stderr);
             }
 
@@ -1305,7 +1305,7 @@ static int bridge_main(int argc, char **argv) {
             apply_external_attack(&request);
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
-                fprintf(stderr, "iw4l-sm64-bridge: step %u proxy applied\n", bridge_step);
+                fprintf(stderr, "iw4l-sm64-native: step %u proxy applied\n", bridge_step);
                 fflush(stderr);
             }
 
@@ -1316,7 +1316,7 @@ static int bridge_main(int argc, char **argv) {
             gGlobalTimer++;
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
-                fprintf(stderr, "iw4l-sm64-bridge: step %u decomp update complete\n", bridge_step);
+                fprintf(stderr, "iw4l-sm64-native: step %u decomp update complete\n", bridge_step);
                 fflush(stderr);
             }
 
@@ -1327,7 +1327,7 @@ static int bridge_main(int argc, char **argv) {
             write_snapshot();
 
             if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
-                fprintf(stderr, "iw4l-sm64-bridge: step %u snapshot complete\n", bridge_step);
+                fprintf(stderr, "iw4l-sm64-native: step %u snapshot complete\n", bridge_step);
                 fflush(stderr);
             }
             gBridgeStage = "waiting_request";
