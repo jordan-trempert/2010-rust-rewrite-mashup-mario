@@ -1040,10 +1040,11 @@ fn carry_cod_players_with_sm64_platforms(
                 continue;
             }
 
-            if best
-                .as_ref()
-                .is_none_or(|(distance, _)| support_distance < *distance)
-            {
+            let replace_best = match best.as_ref() {
+                Some((distance, _)) => support_distance < *distance,
+                None => true,
+            };
+            if replace_best {
                 best = Some((support_distance, delta));
             }
         }
