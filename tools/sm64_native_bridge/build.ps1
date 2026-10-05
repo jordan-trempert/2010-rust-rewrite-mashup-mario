@@ -395,9 +395,6 @@ $paintingNeedle = @"
                 play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
 "@
 $paintingReplacement = @"
-                initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
-                check_if_should_set_warp_checkpoint(&warpNode);
-
 #ifdef IW4L_SM64_EMBEDDED
                 {
                     extern void iw4l_sm64_capture_level_warp(
@@ -406,28 +403,28 @@ $paintingReplacement = @"
                         u32 node,
                         u32 arg
                     );
-                    iw4l_sm64_capture_level_warp(
-                        sWarpDest.levelNum,
-                        sWarpDest.areaIdx,
-                        sWarpDest.nodeId,
-                        sWarpDest.arg
-                    );
 
                     /*
-                     * The Rust host now owns the actual unload/reload. Do not
-                     * enter ACT_DISAPPEARED or the native painting fade while
-                     * this source course is still embedded in the IW4L process.
+                     * IW4L owns the cross-level swap. Publish the painting
+                     * destination directly from the local WarpNode and return
+                     * before initiate_warp() mutates the source level's native
+                     * transition state. bridge.c normally intercepts this one
+                     * step earlier; keep this as a second native-side guard.
                      */
-                    sWarpDest.type = WARP_TYPE_NOT_WARPING;
-                    sDelayedWarpOp = WARP_OP_NONE;
-                    sTransitionTimer = 0;
-                    sTransitionUpdate = NULL;
-                    set_play_mode(PLAY_MODE_NORMAL);
+                    iw4l_sm64_capture_level_warp(
+                        warpNode.destLevel & 0x7F,
+                        warpNode.destArea,
+                        warpNode.destNode,
+                        0
+                    );
                     return;
                 }
-#endif
+#else
+                initiate_warp(warpNode.destLevel & 0x7F, warpNode.destArea, warpNode.destNode, 0);
+                check_if_should_set_warp_checkpoint(&warpNode);
 
                 play_transition_after_delay(WARP_TRANSITION_FADE_INTO_COLOR, 30, 255, 255, 255, 45);
+#endif
 "@
 if (-not $levelUpdateText.Contains($paintingNeedle)) {
     throw "Could not locate initiate_painting_warp transition in $levelUpdateSource"
