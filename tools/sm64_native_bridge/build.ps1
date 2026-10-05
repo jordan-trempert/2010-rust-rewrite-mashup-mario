@@ -467,6 +467,30 @@ if (-not $renderGraphText.Contains($cameraNeedle)) {
 }
 $renderGraphText = $renderGraphText.Replace($cameraNeedle, $cameraReplacement)
 
+$objectNeedle = @"
+static void geo_process_object(struct Object *node) {
+    Mat4 mtxf;
+"@
+$objectReplacement = @"
+static void geo_process_object(struct Object *node) {
+#ifdef IW4L_SM64_EMBEDDED
+    /*
+     * COD owns the first-person player presentation. Preserve gMarioObject for
+     * native gameplay/interaction state but never render Mario or his child
+     * shadow in sm64cod:*.
+     */
+    extern struct Object *gMarioObject;
+    if (node == gMarioObject) {
+        return;
+    }
+#endif
+    Mat4 mtxf;
+"@
+if (-not $renderGraphText.Contains($objectNeedle)) {
+    throw "Could not locate geo_process_object in $renderGraphSource"
+}
+$renderGraphText = $renderGraphText.Replace($objectNeedle, $objectReplacement)
+
 $objCullNeedle = @"
 static s32 obj_is_in_view(struct GraphNodeObject *node, Mat4 matrix) {
     s16 cullingRadius;
@@ -536,23 +560,34 @@ $vertexTransformReplacement = @"
 
 #ifdef IW4L_SM64_EMBEDDED
         {
+            extern float gIw4lNativeCameraMatrix[4][4];
+            extern float gIw4lRenderCameraPos[3];
             const float (*mv)[4] = rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
 
+            float cx = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0]
+                     + v->ob[2] * mv[2][0] + mv[3][0];
+            float cy = v->ob[0] * mv[0][1] + v->ob[1] * mv[1][1]
+                     + v->ob[2] * mv[2][1] + mv[3][1];
+            float cz = v->ob[0] * mv[0][2] + v->ob[1] * mv[1][2]
+                     + v->ob[2] * mv[2][2] + mv[3][2];
+
             /*
-             * Export the exact native camera-space position after SM64 has
-             * applied its GeoLayout, animation hierarchy and billboard math.
-             * Rust re-applies the live COD camera transform. This is both
-             * simpler and more accurate than trying to algebraically remove
-             * SM64's view matrix here; the old inverse path distorted
-             * camera-facing trees and animated multipart actors such as
-             * Goombas.
+             * Exact inverse of the SAME rigid mtxf_lookat() used for this
+             * native frame. This produces stable world-space vertices while
+             * keeping billboard/animation results baked by SM64.
              */
-            d->world_x = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0]
-                       + v->ob[2] * mv[2][0] + mv[3][0];
-            d->world_y = v->ob[0] * mv[0][1] + v->ob[1] * mv[1][1]
-                       + v->ob[2] * mv[2][1] + mv[3][1];
-            d->world_z = v->ob[0] * mv[0][2] + v->ob[1] * mv[1][2]
-                       + v->ob[2] * mv[2][2] + mv[3][2];
+            d->world_x = gIw4lRenderCameraPos[0]
+                       + cx * gIw4lNativeCameraMatrix[0][0]
+                       + cy * gIw4lNativeCameraMatrix[0][1]
+                       + cz * gIw4lNativeCameraMatrix[0][2];
+            d->world_y = gIw4lRenderCameraPos[1]
+                       + cx * gIw4lNativeCameraMatrix[1][0]
+                       + cy * gIw4lNativeCameraMatrix[1][1]
+                       + cz * gIw4lNativeCameraMatrix[1][2];
+            d->world_z = gIw4lRenderCameraPos[2]
+                       + cx * gIw4lNativeCameraMatrix[2][0]
+                       + cy * gIw4lNativeCameraMatrix[2][1]
+                       + cz * gIw4lNativeCameraMatrix[2][2];
         }
 #endif
         
