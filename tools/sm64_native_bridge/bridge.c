@@ -666,6 +666,16 @@ static void bridge_auto_open_nearby_doors(const struct Request *request) {
             }
 
             /*
+             * Warp doors must not be opened merely because COD is nearby.
+             * Their normal Mario push/pull action is what schedules
+             * WARP_OP_WARP_DOOR. If we remove their collision early, COD can
+             * walk into an unloaded castle area before warp_area() runs.
+             */
+            if (behavior == segmented_to_virtual(bhvDoorWarp)) {
+                continue;
+            }
+
+            /*
              * Never let an unlocked star door enter Mario's native
              * ACT_UNLOCKING_STAR_DOOR / ACT_ENTERING_STAR_DOOR path in the
              * embedded host. Those actions dereference and animate hidden
@@ -773,6 +783,9 @@ static int native_runs_mario_action(void) {
         case ACT_TORNADO_TWIRLING:
         case ACT_GRABBED:
         case ACT_RIDING_HOOT:
+        case ACT_PULLING_DOOR:
+        case ACT_PUSHING_DOOR:
+        case ACT_WARP_DOOR_SPAWN:
         case ACT_WARP_DOOR_SPAWN:
         case ACT_EMERGE_FROM_PIPE:
         case ACT_SPAWN_SPIN_AIRBORNE:
