@@ -92,30 +92,15 @@ struct Request {
     uint32_t attack_flags;
 };
 
-struct ObjectRef {
-    const struct Object *ptr;
-    uint32_t id;
-};
-
-static struct ObjectRef sObjectIds[8192];
-static size_t sObjectIdCount = 0;
-static uint32_t sNextObjectId = 1;
-
 static uint32_t object_id(const struct Object *object) {
-    size_t i;
-    for (i = 0; i < sObjectIdCount; ++i) {
-        if (sObjectIds[i].ptr == object) {
-            return sObjectIds[i].id;
-        }
-    }
-    if (sObjectIdCount < sizeof(sObjectIds) / sizeof(sObjectIds[0])) {
-        uint32_t id = sNextObjectId++;
-        sObjectIds[sObjectIdCount].ptr = object;
-        sObjectIds[sObjectIdCount].id = id;
-        ++sObjectIdCount;
-        return id;
-    }
-    return (uint32_t)((uintptr_t)object);
+    /*
+     * The native SM64 object pool is fixed-size and object addresses are reused.
+     * Use the object's address relative to the pool when possible rather than
+     * retaining raw pointers forever in a side table. The low bits remain
+     * deterministic for a pool slot and are sufficient for presentation IDs.
+     */
+    uintptr_t value=(uintptr_t)object;
+    return (uint32_t)((value >> 4) ^ (value >> 20));
 }
 
 static int32_t model_id_for_object(const struct Object *object) {
@@ -265,14 +250,21 @@ static uint32_t collect_dynamic_surfaces(
                     gDynamicSurfacePartition[z][x][partition].next;
                 uint32_t guard = 0;
 
-                while (node != NULL && guard++ < 16384) {
-                    const struct Surface *surface = node->surface;
+                while (node != NULL) {
+                    const struct Surface *surface;
                     uint32_t i;
                     int duplicate = 0;
 
-                    /* A dynamic partition node with no surface is invalid.
-                       Stop this chain rather than dereferencing bad bridge
-                       state and killing the child process. */
+                    if (++guard > 4096) {
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-bridge: warning: dynamic surface chain guard tripped at cell=(%d,%d) partition=%d\n",
+                            x, z, partition
+                        );
+                        break;
+                    }
+
+                    surface=node->surface;
                     if (surface == NULL) {
                         fprintf(
                             stderr,
@@ -281,6 +273,23 @@ static uint32_t collect_dynamic_surfaces(
                         );
                         break;
                     }
+
+#ifndef USE_SYSTEM_MALLOC
+                    /*
+                     * With the original fixed pools, reject corrupted pointers
+                     * before dereferencing their vertices. Dynamic surfaces
+                     * must live inside sSurfacePool.
+                     */
+                    if (surface < sSurfacePool ||
+                        surface >= sSurfacePool + sSurfacePoolSize) {
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-bridge: warning: dynamic surface pointer outside pool at cell=(%d,%d) partition=%d\n",
+                            x, z, partition
+                        );
+                        break;
+                    }
+#endif
 
                     for (i = 0; i < seen_count; ++i) {
                         if (seen[i] == surface) {
@@ -291,25 +300,12 @@ static uint32_t collect_dynamic_surfaces(
 
                     if (!duplicate) {
                         if (seen_count >= capacity) {
-                            fprintf(
-                                stderr,
-                                "iw4l-sm64-bridge: warning: dynamic surface export truncated at %u surfaces\n",
-                                capacity
-                            );
                             return seen_count;
                         }
                         seen[seen_count++] = surface;
                     }
 
-                    node = node->next;
-                }
-
-                if (guard >= 16384) {
-                    fprintf(
-                        stderr,
-                        "iw4l-sm64-bridge: warning: dynamic surface chain guard tripped at cell=(%d,%d) partition=%d\n",
-                        x, z, partition
-                    );
+                    node=node->next;
                 }
             }
         }
@@ -374,20 +370,20 @@ static void write_snapshot(void) {
 
     snapshot_number++;
 
-    if (snapshot_number <= 3) {
+    if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
         fprintf(stderr, "iw4l-sm64-bridge: snapshot %u collecting objects\n", snapshot_number);
         fflush(stderr);
     }
     count = collect_objects(objects, 4096);
 
-    if (snapshot_number <= 3) {
+    if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
         fprintf(stderr, "iw4l-sm64-bridge: snapshot %u objects=%u; collecting dynamic surfaces\n",
                 snapshot_number, count);
         fflush(stderr);
     }
     dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
 
-    if (snapshot_number <= 3) {
+    if (snapshot_number <= 3 || (snapshot_number % 30u) == 0u) {
         fprintf(stderr, "iw4l-sm64-bridge: snapshot %u dynamic_surfaces=%u\n",
                 snapshot_number, dynamic_count);
         fflush(stderr);
@@ -546,14 +542,14 @@ static int bridge_main(int argc, char **argv) {
             static uint32_t bridge_step = 0;
             bridge_step++;
 
-            if (bridge_step <= 3) {
+            if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u begin\n", bridge_step);
                 fflush(stderr);
             }
 
             apply_proxy(&request);
 
-            if (bridge_step <= 3) {
+            if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u proxy applied\n", bridge_step);
                 fflush(stderr);
             }
@@ -562,7 +558,7 @@ static int bridge_main(int argc, char **argv) {
             level_command = level_script_execute(level_command);
             gGlobalTimer++;
 
-            if (bridge_step <= 3) {
+            if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u decomp update complete\n", bridge_step);
                 fflush(stderr);
             }
@@ -572,7 +568,7 @@ static int bridge_main(int argc, char **argv) {
                platforms, warps and knockback are handed back to COD. */
             write_snapshot();
 
-            if (bridge_step <= 3) {
+            if (bridge_step <= 3 || (bridge_step % 30u) == 0u) {
                 fprintf(stderr, "iw4l-sm64-bridge: step %u snapshot complete\n", bridge_step);
                 fflush(stderr);
             }
