@@ -450,11 +450,20 @@ pub(crate) fn spawn_world(
             programs,
             exact_shaders,
         );
-        commands.insert_resource(render_scene::TessMaterials {
+        /*
+         * Update the live resource immediately. A deferred insert here leaves
+         * this system's ResMut pointing at the previous generation. The
+         * external-world path later fills material_images through that ResMut
+         * and finishes in the same system invocation; when Commands are
+         * applied, the deferred empty resource used to overwrite those FPV
+         * image handles again. prepare_fpv_compositions() then returned forever
+         * at material_images.is_empty().
+         */
+        *tess = render_scene::TessMaterials {
             catalog: std::sync::Arc::clone(&generation.catalog),
             prepared: std::sync::Arc::clone(&generation.prepared),
             material_images: std::sync::Arc::new(Vec::new()),
-        });
+        };
         commands.insert_resource(scene.map_xmodel_scene_assets.clone());
         match &generation.postfx {
             crate::assemble::drawsurf::RuntimePostFxResources::Ready(film) => diag::info!(
