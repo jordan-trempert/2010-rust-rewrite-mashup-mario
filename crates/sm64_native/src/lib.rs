@@ -383,7 +383,7 @@ fn symbolize_from_map(bridge:&Path,address:u64)->Option<String>{
         }
         let Ok(symbol_addr)=u64::from_str_radix(addr_text,16) else {continue;};
         let symbol_rva=symbol_addr.checked_sub(image_base).unwrap_or(symbol_addr);
-        if symbol_rva<=rva && best.as_ref().is_none_or(|(best_addr,_)|symbol_rva>*best_addr) {
+        if symbol_rva<=rva && best.as_ref().map_or(true,|(best_addr,_)|symbol_rva>*best_addr) {
             best=Some((symbol_rva,name.to_owned()));
         }
     }
