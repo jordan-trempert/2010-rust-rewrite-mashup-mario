@@ -38,6 +38,7 @@ struct Sm64CodNativeState {
     last_sm64_health: Option<i32>,
     last_action: u32,
     last_weapon_shot_count: Option<i32>,
+    last_attack_down: bool,
 }
 
 
@@ -284,18 +285,21 @@ fn sync_cod_player_into_sm64(
         external.active=false;
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
+        bridge_state.last_attack_down=false;
         return;
     }
     let Some(authority)=authority else {
         external.active=false;
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
+        bridge_state.last_attack_down=false;
         return;
     };
     let mut first=None;
-    authority.0.visit_players(|_,player|{
+    authority.0.visit_players(|id,player|{
         if first.is_none() {
             first=Some((
+                id,
                 player.origin,
                 player.velocity,
                 player.viewangles,
@@ -304,10 +308,11 @@ fn sync_cod_player_into_sm64(
             ));
         }
     });
-    let Some((origin,velocity,viewangles,health,weapon_shot_count))=first else {
+    let Some((id,origin,velocity,viewangles,health,weapon_shot_count))=first else {
         external.active=false;
         external.attack_flags=0;
         bridge_state.last_weapon_shot_count=None;
+        bridge_state.last_attack_down=false;
         return;
     };
     let inv_scale=1.0/sm64_core::SM64_TO_IW4_SCALE;
@@ -326,14 +331,13 @@ fn sync_cod_player_into_sm64(
     external.sm64_yaw=((sm64_yaw_degrees/360.0)*65536.0) as i32 as i16;
     // IW4 pitch is positive downward; SM64 cannon pitch is positive upward.
     external.sm64_pitch=((-viewangles[0]/360.0)*65536.0) as i32 as i16;
-    external.attack_flags=if bridge_state
+    let attack_down=(authority.0.command_buttons(id) & 0x1)!=0;
+    let attack_pressed=attack_down && !bridge_state.last_attack_down;
+    let weapon_fired=bridge_state
         .last_weapon_shot_count
-        .is_some_and(|previous|weapon_shot_count!=previous)
-    {
-        1
-    } else {
-        0
-    };
+        .is_some_and(|previous|weapon_shot_count!=previous);
+    external.attack_flags=if weapon_fired || attack_pressed {1} else {0};
+    bridge_state.last_attack_down=attack_down;
     bridge_state.last_weapon_shot_count=Some(weapon_shot_count);
     external.health=health;
     external.active=true;
