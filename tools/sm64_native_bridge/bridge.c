@@ -758,7 +758,8 @@ static void apply_external_attack(const struct Request *request) {
         const float dir_x = yaw_s * pitch_c;
         const float dir_y = pitch_s;
         const float dir_z = yaw_c * pitch_c;
-        const float max_range = 2600.0f;
+        const float eye_y = request->pos[1] + 150.0f;
+        const float max_range = 6000.0f;
 
         for (list_index = 0; list_index < NUM_OBJ_LISTS; ++list_index) {
             struct ObjectNode *head = &gObjectLists[list_index];
@@ -771,8 +772,10 @@ static void apply_external_attack(const struct Request *request) {
                 }
 
                 {
+                    const float object_height =
+                        object->hitboxHeight > 1.0f ? object->hitboxHeight : 160.0f;
                     const float dx = object->oPosX - request->pos[0];
-                    const float dy = (object->oPosY + 80.0f) - request->pos[1];
+                    const float dy = (object->oPosY + object_height * 0.5f) - eye_y;
                     const float dz = object->oPosZ - request->pos[2];
                     const float along = dx * dir_x + dy * dir_y + dz * dir_z;
                     float radius;
@@ -789,8 +792,14 @@ static void apply_external_attack(const struct Request *request) {
                     py = dy - dir_y * along;
                     pz = dz - dir_z * along;
                     perp2 = px * px + py * py + pz * pz;
-                    radius = object->hitboxRadius > 1.0f ? object->hitboxRadius : 120.0f;
-                    radius += 55.0f;
+                    radius = object->hitboxRadius;
+                    if (object->hurtboxRadius > radius) {
+                        radius = object->hurtboxRadius;
+                    }
+                    if (radius <= 1.0f) {
+                        radius = 120.0f;
+                    }
+                    radius += 70.0f;
 
                     if (perp2 <= radius * radius) {
                         const float score = along + perp2 * 0.002f;
