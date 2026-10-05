@@ -101,6 +101,34 @@ fn sm64_static_collision_vertices(
     verts
 }
 
+fn install_sm64_cod_collision(
+    authority: &mut sim::SimWorld,
+    collision_state: &mut Sm64CodCollisionState,
+    level: &str,
+    area: u8,
+    parsed: &sm64_assets::ParsedCollision,
+) -> usize {
+    let verts = sm64_static_collision_vertices(parsed, false);
+    let vanish_verts = sm64_static_collision_vertices(parsed, true);
+    let triangle_count = verts.len() / 3;
+
+    collision_state.static_vertices = verts.clone();
+    collision_state.normal_static_vertices = verts.clone();
+    collision_state.vanish_static_vertices = vanish_verts;
+    collision_state.vanish_active = false;
+    collision_state.level.clear();
+    collision_state.level.push_str(level);
+    collision_state.area = area;
+    collision_state.last_dynamic_tick = 0;
+    collision_state.last_dynamic_triangles.clear();
+
+    let mesh = sim::SimClipMesh::from_linear_triangles(verts);
+    let content = authority.content().with_clip_mesh(mesh);
+    authority.install_content(content);
+
+    triangle_count
+}
+
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -251,19 +279,13 @@ fn launch_installed_sm64_cod_map(
     };
 
     if let Some(authority) = authority.as_deref_mut() {
-        let verts = sm64_static_collision_vertices(&parsed, false);
-        let vanish_verts = sm64_static_collision_vertices(&parsed, true);
-        collision_state.static_vertices = verts.clone();
-        collision_state.normal_static_vertices = verts.clone();
-        collision_state.vanish_static_vertices = vanish_verts;
-        collision_state.vanish_active = false;
-        collision_state.level = level.clone();
-        collision_state.area = area;
-        collision_state.last_dynamic_tick = 0;
-        collision_state.last_dynamic_triangles.clear();
-        let mesh = sim::SimClipMesh::from_linear_triangles(verts);
-        let content = authority.0.content().with_clip_mesh(mesh);
-        authority.0.install_content(content);
+        let installed_triangles = install_sm64_cod_collision(
+            &mut authority.0,
+            &mut collision_state,
+            &level,
+            area,
+            &parsed,
+        );
 
         // with_clip_mesh intentionally removes the donor BSP brushes. The
         // imported SM64 triangle mesh is already complete at this point, so
@@ -324,7 +346,7 @@ fn launch_installed_sm64_cod_map(
         diag::info!(
             World,
             "SM64 COD map: installed {} collision triangles; detected floor_y={:.1}; COD spawn armed at {:?} (+{:.0} above floor)",
-            parsed.world.surfaces.len(),
+            installed_triangles,
             floor_y,
             spawn_cod,
             SM64_COD_SPAWN_CLEARANCE
@@ -686,56 +708,23 @@ fn handle_sm64_cod_level_transition(
             return;
         }
     };
-    let spawn = sm64_assets::load_mario_spawn(&root, &target.level, area).ok();
 
     if let Some(authority) = authority.as_deref_mut() {
-        let s = sm64_core::SM64_TO_IW4_SCALE;
-        let verts = sm64_static_collision_vertices(&parsed, false);
-        let vanish_verts = sm64_static_collision_vertices(&parsed, true);
-        collision_state.static_vertices = verts.clone();
-        collision_state.normal_static_vertices = verts.clone();
-        collision_state.vanish_static_vertices = vanish_verts;
-        collision_state.vanish_active = false;
-        collision_state.level = target.level.clone();
-        collision_state.area = area;
-        collision_state.last_dynamic_tick = 0;
-        collision_state.last_dynamic_triangles.clear();
+        let installed_triangles = install_sm64_cod_collision(
+            &mut authority.0,
+            &mut collision_state,
+            &target.level,
+            area,
+            &parsed,
+        );
         native_dynamic.tick = 0;
         native_dynamic.triangles.clear();
 
-        let static_triangle_count = verts.len() / 3;
-        let mesh = sim::SimClipMesh::from_linear_triangles(verts);
-        let content = authority.0.content().with_clip_mesh(mesh);
-        authority.0.install_content(content);
-        diag::info!(
-            World,
-            "SM64 COD level transition collision: installed {} static triangles for {} area {}",
-            static_triangle_count,
-            target.level,
-            area
-        );
-
-        let fallback_spawn = spawn.as_ref().map(|spawn| {
-            let floor_y = parsed
-                .world
-                .find_floor(spawn.pos[0] as f32, 30_000.0, spawn.pos[2] as f32)
-                .map(|hit| hit.height)
-                .unwrap_or(spawn.pos[1] as f32);
-            let spawn_cod = [
-                spawn.pos[0] as f32 * s,
-                -(spawn.pos[2] as f32) * s,
-                floor_y * s + 128.0,
-            ];
-            let sm64_yaw = spawn.yaw_sm64() as u16 as f32 * 360.0 / 65536.0;
-            Sm64CodSpawn {
-                origin: spawn_cod,
-                view: [0.0, sm64_yaw - 90.0, 0.0],
-            }
-        });
-        if let Some(fallback) = fallback_spawn {
-            commands.insert_resource(fallback);
-        }
-
+        /*
+         * Freeze COD while the native destination DLL resolves its warp node.
+         * Do not invent a MARIO_POS fallback here. The first destination
+         * snapshot is the sole authority for where the player appears.
+         */
         let mut first = None;
         authority.0.visit_players(|id, _| {
             if first.is_none() {
@@ -743,16 +732,18 @@ fn handle_sm64_cod_level_transition(
             }
         });
         if let Some(id) = first {
-            /*
-             * Do not move the player to the level's generic MARIO_POS here.
-             * Cross-level doors and paintings have their own destination warp
-             * nodes, and the native DLL has already resolved the exact spawn.
-             * Hold COD movement for the handoff frame; the first native
-             * snapshot will reposition us to that exact point.
-             */
             authority.0.set_external_motion(id, true);
             authority.0.set_velocity(id, [0.0; 3]);
         }
+
+        diag::info!(
+            World,
+            "SM64 COD level transition: installed destination exactly like initial map: {} triangles for {} area {}; awaiting native Mario spawn node {}",
+            installed_triangles,
+            target.level,
+            area,
+            target.node
+        );
     }
 
     bridge_state.last_sm64_health = None;
@@ -936,71 +927,6 @@ fn apply_sm64_dynamic_collision(
     authority.0.install_content(content);
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Sm64TransitionFloorProbe {
-    hit: bool,
-    end: [f32; 3],
-    normal: [f32; 3],
-    startsolid: u8,
-    allsolid: u8,
-}
-
-fn sm64_safe_transition_origin(
-    authority: &sim::SimWorld,
-    native_origin: [f32; 3],
-) -> ([f32; 3], Sm64TransitionFloorProbe) {
-    /*
-     * Native SM64 warp nodes often place Mario exactly on the floor plane.
-     * IW4's imported triangle world is one-sided, so starting the COD capsule
-     * exactly on (or a tiny float-rounding amount below) that plane can let the
-     * first gravity step pass through it. Probe downward from safely above the
-     * native point and only snap when the discovered floor is already very
-     * close to the native Y. Airborne painting/course spawns stay untouched.
-     */
-    const PROBE_UP: f32 = 48.0;
-    const PROBE_DOWN: f32 = 96.0;
-    const GROUNDED_TOLERANCE: f32 = 24.0;
-    const FLOOR_EPSILON: f32 = 1.0;
-
-    let start = [
-        native_origin[0],
-        native_origin[1],
-        native_origin[2] + PROBE_UP,
-    ];
-    let end = [
-        native_origin[0],
-        native_origin[1],
-        native_origin[2] - PROBE_DOWN,
-    ];
-    let probe = authority.trace_world(
-        start,
-        end,
-        [0.0; 3],
-        [0.0; 3],
-        sim::MASK_PLAYER_SOLID,
-    );
-    let summary = Sm64TransitionFloorProbe {
-        hit: probe.fraction < 1.0,
-        end: probe.endpos,
-        normal: probe.normal,
-        startsolid: probe.startsolid,
-        allsolid: probe.allsolid,
-    };
-
-    if summary.hit
-        && summary.startsolid == 0
-        && summary.allsolid == 0
-        && summary.normal[2] >= 0.5
-        && (native_origin[2] - summary.end[2]).abs() <= GROUNDED_TOLERANCE
-    {
-        let mut safe = native_origin;
-        safe[2] = summary.end[2] + FLOOR_EPSILON;
-        (safe, summary)
-    } else {
-        (native_origin, summary)
-    }
-}
-
 fn apply_sm64_native_player_output(
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
@@ -1098,7 +1024,9 @@ fn apply_sm64_native_player_output(
         output.sm64_pos[1] * s,
     ];
 
-    authority.0.set_external_motion(id, owns_motion);
+    authority
+        .0
+        .set_external_motion(id, owns_motion || bridge_state.force_native_reposition);
     if owns_motion {
         let velocity = [
             output.sm64_vel[0] * s * sm64_sim::SM64_TICK_HZ as f32,
@@ -1121,47 +1049,30 @@ fn apply_sm64_native_player_output(
         let dz = native_origin[2] - player.origin[2];
         let distance2 = dx * dx + dy * dy + dz * dz;
         if bridge_state.force_native_reposition || area_changed || distance2 > 48.0 * 48.0 {
-            let (teleport_origin, floor_probe) = if bridge_state.force_native_reposition {
-                let (origin, probe) = sm64_safe_transition_origin(&authority.0, native_origin);
-                (origin, Some(probe))
-            } else {
-                (native_origin, None)
-            };
-            authority.0.teleport(id, teleport_origin);
+            /*
+             * A cross-level door/painting has one authoritative spawn: Mario's
+             * position from the freshly loaded native destination. Put COD
+             * there exactly. No generic level spawn, no floor probe, no offset.
+             */
+            authority.0.teleport(id, native_origin);
             authority.0.set_velocity(id, [0.0; 3]);
 
             if bridge_state.force_native_reposition {
                 let sm64_yaw_degrees =
                     output.sm64_yaw as u16 as f32 * 360.0 / 65536.0;
                 if let Some(spawn) = spawn.as_deref_mut() {
-                    spawn.origin = teleport_origin;
+                    spawn.origin = native_origin;
                     spawn.view = [0.0, sm64_yaw_degrees - 90.0, 0.0];
-                }
-
-                if let Some(probe) = floor_probe {
-                    diag::info!(
-                        World,
-                        "SM64 COD transition floor probe native={:?} chosen={:?} hit={} end={:?} normal={:?} startsolid={} allsolid={}",
-                        native_origin,
-                        teleport_origin,
-                        probe.hit,
-                        probe.end,
-                        probe.normal,
-                        probe.startsolid,
-                        probe.allsolid
-                    );
                 }
             }
 
             bridge_state.force_native_reposition = false;
             diag::info!(
                 World,
-                "SM64 COD transition reposition area {} -> {} action=0x{:08x} native={:?} origin={:?}",
-                bridge_state.last_area,
+                "SM64 COD transition: COD placed exactly at native Mario position area={} action=0x{:08x} origin={:?}",
                 output.area_index,
                 output.action,
-                native_origin,
-                teleport_origin
+                native_origin
             );
         }
     }
