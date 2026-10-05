@@ -57,16 +57,39 @@ impl Default for Accum {
 }
 
 pub fn parse_geo_render_parts(source:&str,geo_symbol:&str)->Result<Vec<GeoRenderPart>,CollisionParseError>{
+    parse_geo_render_parts_with_switch(source,geo_symbol,0)
+}
+
+pub fn parse_geo_render_parts_with_switch(
+    source:&str,
+    geo_symbol:&str,
+    switch_case:i32,
+)->Result<Vec<GeoRenderPart>,CollisionParseError>{
     let layouts=extract_geo_layout_bodies(source);
     let mut out=Vec::new();
     let mut visiting=Vec::new();
-    flatten_layout(&layouts,geo_symbol,Accum::default(),&mut visiting,&mut out)?;
+    flatten_layout(
+        &layouts,
+        geo_symbol,
+        Accum::default(),
+        switch_case,
+        &mut visiting,
+        &mut out,
+    )?;
     Ok(out)
 }
 
 pub fn resolve_geo_model_parts(
     decomp_root:impl AsRef<Path>,
     geo_symbol:&str,
+)->Result<ResolvedGeoModel,CollisionParseError>{
+    resolve_geo_model_parts_with_switch(decomp_root,geo_symbol,0)
+}
+
+pub fn resolve_geo_model_parts_with_switch(
+    decomp_root:impl AsRef<Path>,
+    geo_symbol:&str,
+    switch_case:i32,
 )->Result<ResolvedGeoModel,CollisionParseError>{
     let root=decomp_root.as_ref();
     let actors=root.join("actors");
@@ -79,7 +102,7 @@ pub fn resolve_geo_model_parts(
         let Ok(source)=fs::read_to_string(&geo_path) else {continue;};
         if !source.contains(&format!("{geo_symbol}[]")){continue;}
 
-        let specs=parse_geo_render_parts(&source,geo_symbol)?;
+        let specs=parse_geo_render_parts_with_switch(&source,geo_symbol,switch_case)?;
         let model_path=dir.join("model.inc.c");
         let relative=model_path.strip_prefix(root)
             .map_err(|_|CollisionParseError::new(format!("{} is outside decomp root",model_path.display())))?
@@ -118,10 +141,19 @@ pub fn resolve_geo_model_parts_for_level(
     level:&str,
     geo_symbol:&str,
 )->Result<ResolvedGeoModel,CollisionParseError>{
+    resolve_geo_model_parts_for_level_state(decomp_root,level,geo_symbol,0)
+}
+
+pub fn resolve_geo_model_parts_for_level_state(
+    decomp_root:impl AsRef<Path>,
+    level:&str,
+    geo_symbol:&str,
+    switch_case:i32,
+)->Result<ResolvedGeoModel,CollisionParseError>{
     let root=decomp_root.as_ref();
 
     // Shared actor geometry first.
-    if let Ok(model)=resolve_geo_model_parts(root,geo_symbol) {
+    if let Ok(model)=resolve_geo_model_parts_with_switch(root,geo_symbol,switch_case) {
         return Ok(model);
     }
 
@@ -137,7 +169,7 @@ pub fn resolve_geo_model_parts_for_level(
         let Ok(source)=fs::read_to_string(&geo_path) else {continue;};
         if !source.contains(geo_symbol) {continue;}
 
-        let specs=parse_geo_render_parts(&source,geo_symbol)?;
+        let specs=parse_geo_render_parts_with_switch(&source,geo_symbol,switch_case)?;
         let mut parts=Vec::new();
 
         // Most level-local object geos have a sibling model.inc.c. Area
@@ -193,6 +225,7 @@ fn flatten_layout(
     layouts:&HashMap<String,String>,
     symbol:&str,
     inherited:Accum,
+    switch_case:i32,
     visiting:&mut Vec<String>,
     out:&mut Vec<GeoRenderPart>,
 )->Result<(),CollisionParseError>{
@@ -205,7 +238,7 @@ fn flatten_layout(
 
     let (nodes,roots)=parse_raw_tree(body);
     for root in roots {
-        flatten_node(&nodes,root,inherited,layouts,visiting,out)?;
+        flatten_node(&nodes,root,inherited,layouts,switch_case,visiting,out)?;
     }
 
     visiting.pop();
@@ -217,6 +250,7 @@ fn flatten_node(
     index:usize,
     inherited:Accum,
     layouts:&HashMap<String,String>,
+    switch_case:i32,
     visiting:&mut Vec<String>,
     out:&mut Vec<GeoRenderPart>,
 )->Result<(),CollisionParseError>{
@@ -259,19 +293,26 @@ fn flatten_node(
 
     if let Some(branch)=&node.branch {
         if layouts.contains_key(branch) {
-            flatten_layout(layouts,branch,accum,visiting,out)?;
+            flatten_layout(layouts,branch,accum,switch_case,visiting,out)?;
         }
     }
 
     if node.switch {
-        // Render state zero. Animation/object state can choose another branch
-        // later; this matches SM64's initial animState for most actors.
-        if let Some(first)=node.children.first().copied() {
-            flatten_node(nodes,first,accum,layouts,visiting,out)?;
+        if !node.children.is_empty() {
+            let selected=switch_case.rem_euclid(node.children.len() as i32) as usize;
+            flatten_node(
+                nodes,
+                node.children[selected],
+                accum,
+                layouts,
+                switch_case,
+                visiting,
+                out,
+            )?;
         }
     }else{
         for child in &node.children {
-            flatten_node(nodes,*child,accum,layouts,visiting,out)?;
+            flatten_node(nodes,*child,accum,layouts,switch_case,visiting,out)?;
         }
     }
 
