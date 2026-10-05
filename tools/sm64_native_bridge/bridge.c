@@ -263,20 +263,53 @@ static uint32_t collect_dynamic_surfaces(
             for (partition = 0; partition < 3; ++partition) {
                 struct SurfaceNode *node =
                     gDynamicSurfacePartition[z][x][partition].next;
-                while (node != NULL) {
+                uint32_t guard = 0;
+
+                while (node != NULL && guard++ < 16384) {
                     const struct Surface *surface = node->surface;
                     uint32_t i;
                     int duplicate = 0;
+
+                    /* A dynamic partition node with no surface is invalid.
+                       Stop this chain rather than dereferencing bad bridge
+                       state and killing the child process. */
+                    if (surface == NULL) {
+                        fprintf(
+                            stderr,
+                            "iw4l-sm64-bridge: warning: null dynamic surface at cell=(%d,%d) partition=%d\n",
+                            x, z, partition
+                        );
+                        break;
+                    }
+
                     for (i = 0; i < seen_count; ++i) {
                         if (seen[i] == surface) {
                             duplicate = 1;
                             break;
                         }
                     }
-                    if (!duplicate && seen_count < capacity) {
+
+                    if (!duplicate) {
+                        if (seen_count >= capacity) {
+                            fprintf(
+                                stderr,
+                                "iw4l-sm64-bridge: warning: dynamic surface export truncated at %u surfaces\n",
+                                capacity
+                            );
+                            return seen_count;
+                        }
                         seen[seen_count++] = surface;
                     }
+
                     node = node->next;
+                }
+
+                if (guard >= 16384) {
+                    fprintf(
+                        stderr,
+                        "iw4l-sm64-bridge: warning: dynamic surface chain guard tripped at cell=(%d,%d) partition=%d\n",
+                        x, z, partition
+                    );
                 }
             }
         }
@@ -334,9 +367,31 @@ static void print_native_census_once(
 static void write_snapshot(void) {
     const struct Object *objects[4096];
     const struct Surface *dynamic_surfaces[8192];
-    uint32_t count = collect_objects(objects, 4096);
-    uint32_t dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
+    uint32_t count;
+    uint32_t dynamic_count;
     uint32_t i;
+    static uint32_t snapshot_number = 0;
+
+    snapshot_number++;
+
+    if (snapshot_number <= 3) {
+        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u collecting objects\n", snapshot_number);
+        fflush(stderr);
+    }
+    count = collect_objects(objects, 4096);
+
+    if (snapshot_number <= 3) {
+        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u objects=%u; collecting dynamic surfaces\n",
+                snapshot_number, count);
+        fflush(stderr);
+    }
+    dynamic_count = collect_dynamic_surfaces(dynamic_surfaces, 8192);
+
+    if (snapshot_number <= 3) {
+        fprintf(stderr, "iw4l-sm64-bridge: snapshot %u dynamic_surfaces=%u\n",
+                snapshot_number, dynamic_count);
+        fflush(stderr);
+    }
 
     print_native_census_once(objects, count, dynamic_count);
 
@@ -487,14 +542,41 @@ static int bridge_main(int argc, char **argv) {
             continue;
         }
 
-        apply_proxy(&request);
-        select_gfx_pool();
-        level_command = level_script_execute(level_command);
-        gGlobalTimer++;
-        /* Serialize the decomp's resulting Mario state before the next
-           external-player write. This is how cannon launches, moving
-           platforms, warps and knockback are handed back to COD. */
-        write_snapshot();
+        {
+            static uint32_t bridge_step = 0;
+            bridge_step++;
+
+            if (bridge_step <= 3) {
+                fprintf(stderr, "iw4l-sm64-bridge: step %u begin\n", bridge_step);
+                fflush(stderr);
+            }
+
+            apply_proxy(&request);
+
+            if (bridge_step <= 3) {
+                fprintf(stderr, "iw4l-sm64-bridge: step %u proxy applied\n", bridge_step);
+                fflush(stderr);
+            }
+
+            select_gfx_pool();
+            level_command = level_script_execute(level_command);
+            gGlobalTimer++;
+
+            if (bridge_step <= 3) {
+                fprintf(stderr, "iw4l-sm64-bridge: step %u decomp update complete\n", bridge_step);
+                fflush(stderr);
+            }
+
+            /* Serialize the decomp's resulting Mario state before the next
+               external-player write. This is how cannon launches, moving
+               platforms, warps and knockback are handed back to COD. */
+            write_snapshot();
+
+            if (bridge_step <= 3) {
+                fprintf(stderr, "iw4l-sm64-bridge: step %u snapshot complete\n", bridge_step);
+                fflush(stderr);
+            }
+        }
     }
 
     return 0;
