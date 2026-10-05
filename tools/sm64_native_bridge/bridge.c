@@ -731,14 +731,14 @@ static void write_snapshot(void) {
         write_i32(model_id_for_object(object));
 
         /*
-         * Use gameplay-space oPos for the presentation root. This is the
-         * coordinate that matches level-script/macro-object placement and
-         * collision. header.gfx.pos may contain behavior-specific visual
-         * offsets and is therefore not a stable world-space anchor.
+         * Presentation must follow the native graphics node, not the gameplay
+         * hitbox origin. SM64 behaviors intentionally offset gfx.pos for moving
+         * platforms, bosses and multipart objects. External attacks still use
+         * oPos/hitbox fields directly above in the bridge.
          */
-        write_f32(object->oPosX);
-        write_f32(object->oPosY);
-        write_f32(object->oPosZ);
+        write_f32(object->header.gfx.pos[0]);
+        write_f32(object->header.gfx.pos[1]);
+        write_f32(object->header.gfx.pos[2]);
         write_i16(object->header.gfx.angle[0]);
         write_i16(object->header.gfx.angle[1]);
         write_i16(object->header.gfx.angle[2]);
