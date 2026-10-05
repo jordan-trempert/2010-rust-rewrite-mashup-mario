@@ -76,6 +76,7 @@ extern void thread5_game_loop(void *arg);
  */
 extern void initiate_warp(s16 destLevel, s16 destArea, s16 destWarpNode, s32 arg3);
 extern void warp_area(void);
+extern s8 sWarpCheckpointActive;
 
 extern void create_next_audio_buffer(s16 *samples, u32 num_samples);
 
