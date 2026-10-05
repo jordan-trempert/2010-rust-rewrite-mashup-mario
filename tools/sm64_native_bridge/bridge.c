@@ -21,6 +21,7 @@
 #include "game/mario.h"
 #include "game/memory.h"
 #include "game/object_list_processor.h"
+#include "game/platform_displacement.h"
 #include "game/save_file.h"
 #include "audio/external.h"
 #include "gfx/gfx_pc.h"
@@ -160,6 +161,33 @@ static void apply_proxy(const struct Request *request) {
     if (gMarioState == NULL || gMarioObject == NULL) {
         return;
     }
+
+    /*
+     * COD is authoritative for ordinary locomotion. The decomp is authoritative
+     * for object/automatic/cutscene actions such as cannons, poles, warps and
+     * grabs. Do not allow stale walking/airborne state from a previous native
+     * frame to survive after COD teleports the hidden Mario proxy.
+     */
+    switch (gMarioState->action & ACT_GROUP_MASK) {
+        case ACT_GROUP_OBJECT:
+        case ACT_GROUP_AUTOMATIC:
+        case ACT_GROUP_CUTSCENE:
+            break;
+        default:
+            if (gMarioState->action != ACT_IDLE) {
+                set_mario_action(gMarioState, ACT_IDLE, 0);
+            }
+            break;
+    }
+
+    /*
+     * update_objects() applies last frame's gMarioPlatform displacement before
+     * Mario's action refreshes collision. Since COD replaces Mario's position
+     * every bridge tick, that platform reference is stale by definition and
+     * can point at an object state unrelated to the new external position.
+     */
+    clear_mario_platform();
+    gMarioObject->platform = NULL;
 
     gMarioState->pos[0] = request->pos[0];
     gMarioState->pos[1] = request->pos[1];
