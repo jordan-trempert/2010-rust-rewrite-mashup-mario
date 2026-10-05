@@ -443,6 +443,12 @@ fn sm64_cod_native_owns_motion(action: u32) -> bool {
             | sm64_core::ACT_TORNADO_TWIRLING
             | sm64_core::ACT_GRABBED
             | sm64_core::ACT_RIDING_HOOT
+            | sm64_core::ACT_EXIT_AIRBORNE
+            | sm64_core::ACT_DEATH_EXIT
+            | sm64_core::ACT_UNUSED_DEATH_EXIT
+            | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
+            | sm64_core::ACT_SPECIAL_DEATH_EXIT
+            | sm64_core::ACT_FALLING_EXIT_AIRBORNE
     )
 }
 
@@ -456,7 +462,11 @@ fn sm64_cod_native_reposition_action(action: u32) -> bool {
             | sm64_core::ACT_TELEPORT_FADE_OUT
             | sm64_core::ACT_TELEPORT_FADE_IN
             | sm64_core::ACT_EXIT_AIRBORNE
+            | sm64_core::ACT_DEATH_EXIT
+            | sm64_core::ACT_UNUSED_DEATH_EXIT
             | sm64_core::ACT_SPECIAL_EXIT_AIRBORNE
+            | sm64_core::ACT_SPECIAL_DEATH_EXIT
+            | sm64_core::ACT_FALLING_EXIT_AIRBORNE
     )
 }
 
@@ -508,7 +518,7 @@ fn apply_sm64_cod_movement_abilities(
     const DOUBLE_JUMP_VELOCITY: f32 = 440.0;
     const TRIPLE_JUMP_VELOCITY: f32 = 570.0;
     const JUMP_CHAIN_GRACE_TICKS: u8 = 18;
-    const GROUND_POUND_AIM_DEGREES: f32 = 60.0;
+    const GROUND_POUND_AIM_DEGREES: f32 = 50.0;
     const WING_ASCENT_VELOCITY: f32 = 220.0;
     const WING_GLIDE_FALL_VELOCITY: f32 = -110.0;
 
@@ -545,6 +555,9 @@ fn apply_sm64_cod_movement_abilities(
     let jump_pressed = jump_down && !state.last_jump_down;
     let pound_pressed = pound_down && !state.last_pound_down;
     let attack_pressed = attack_down && !state.last_attack_down;
+    let weapon_shot = state
+        .last_weapon_shot_count
+        .is_some_and(|previous| player.weapon_shot_count != previous);
     let grounded = sm64_cod_grounded(
         &authority.0,
         player.ground_entity_num,
@@ -562,7 +575,8 @@ fn apply_sm64_cod_movement_abilities(
         }
         pitch
     };
-    let shoot_down_pound = attack_pressed && pitch >= GROUND_POUND_AIM_DEGREES;
+    let shoot_down_pound =
+        (attack_pressed || weapon_shot) && pitch >= GROUND_POUND_AIM_DEGREES;
 
     if player.health <= 0 || (output.active && sm64_cod_native_owns_motion(output.action)) {
         state.ground_pounding = false;
