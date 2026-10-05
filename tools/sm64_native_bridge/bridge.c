@@ -362,41 +362,26 @@ void iw4l_sm64_platform_displacement_begin(void) {
         return;
     }
 
-    gIw4lPlatformBefore[0] = gMarioState->pos[0];
-    gIw4lPlatformBefore[1] = gMarioState->pos[1];
-    gIw4lPlatformBefore[2] = gMarioState->pos[2];
+    /*
+     * Do NOT mirror apply_platform_displacement()'s rotational orbit into COD.
+     * That rotation is correct for native Mario, but with COD independently
+     * walking on the platform it can move the host player tens/hundreds of
+     * units around the platform axis in one native tick and looks like a
+     * teleport. Only inherit the platform object's linear per-tick motion.
+     *
+     * This is enough to keep elevators/translating platforms under the player;
+     * rotating platforms are handled by their updated collision geometry while
+     * COD remains free to walk on them.
+     */
+    gIw4lPlatformDisplacement[0] = gMarioPlatform->oVelX;
+    gIw4lPlatformDisplacement[1] = gMarioPlatform->oVelY;
+    gIw4lPlatformDisplacement[2] = gMarioPlatform->oVelZ;
     gIw4lPlatformActive = 1;
 }
 
 void iw4l_sm64_platform_displacement_end(void) {
-    float dx;
-    float dy;
-    float dz;
-    float distance2;
-
-    if (!gIw4lPlatformActive || gMarioState == NULL) {
-        gIw4lPlatformActive = 0;
-        return;
-    }
-
-    dx = gMarioState->pos[0] - gIw4lPlatformBefore[0];
-    dy = gMarioState->pos[1] - gIw4lPlatformBefore[1];
-    dz = gMarioState->pos[2] - gIw4lPlatformBefore[2];
-    distance2 = dx * dx + dy * dy + dz * dz;
-
-    /*
-     * A legitimate SM64 platform step is small. If native state was replaced
-     * or a platform pointer changed during the object update, discard the
-     * impossible displacement rather than teleporting COD.
-     */
-    if (distance2 > 512.0f * 512.0f) {
-        gIw4lPlatformActive = 0;
-        dx = dy = dz = 0.0f;
-    }
-
-    gIw4lPlatformDisplacement[0] = dx;
-    gIw4lPlatformDisplacement[1] = dy;
-    gIw4lPlatformDisplacement[2] = dz;
+    /* The linear carry vector is captured before vanilla applies its own
+       translation/rotation to hidden Mario. Nothing else to derive here. */
 }
 /* Read by the temporarily patched bhv_mario_update() in the embedded build.
  * Normal COD locomotion keeps this false; native mechanics set it true. */
@@ -2200,6 +2185,28 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gIw4lBridgeButtonDown = 0;
     gIw4lBridgeButtonPressed = 0;
+
+    /*
+     * In normal SM64 the knockback action eventually establishes the 30-frame
+     * post-hit invulnerability window. COD owns ordinary locomotion here, so
+     * those knockback actions can be collapsed back to the proxy before they
+     * reach that point. Establish the same protection explicitly on the first
+     * native damage drain from a hit.
+     */
+    if (gMarioState != NULL
+        && gMarioState->health < health_before
+        && gMarioState->hurtCounter > 0
+        && gMarioState->invincTimer < 30) {
+        gMarioState->invincTimer = 30;
+        fprintf(
+            stderr,
+            "iw4l-sm64-native: hit i-frames armed health=%d hurtCounter=%u invincTimer=%d\n",
+            (int)gMarioState->health,
+            (unsigned)gMarioState->hurtCounter,
+            (int)gMarioState->invincTimer
+        );
+        fflush(stderr);
+    }
 
     /*
      * Do this immediately after the frame that first selected
