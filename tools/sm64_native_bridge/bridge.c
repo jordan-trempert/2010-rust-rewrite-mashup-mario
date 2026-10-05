@@ -810,8 +810,12 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
             float object_top;
             float dx;
             float dz;
+            float gfx_dx;
+            float gfx_dz;
             float radius;
             float distance2;
+            float gfx_distance2;
+            float object_y;
 
             node = node->next;
             {
@@ -822,7 +826,7 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
 
                 if (object == gMarioObject ||
                     (object->activeFlags & ACTIVE_FLAG_ACTIVE) == 0 ||
-                    object->oIntangibleTimer != 0 ||
+                    (!known_enemy && object->oIntangibleTimer != 0) ||
                     (!known_enemy && (object->oInteractType & harmful) == 0) ||
                     (!known_enemy && object->oDamageOrCoinValue <= 0)) {
                     continue;
@@ -836,22 +840,37 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
                  * walking into a Goomba cannot become harmless.
                  */
                 mario_radius = gMarioObject->hitboxRadius;
-                if (mario_radius <= 1.0f) mario_radius = 50.0f;
+                if (mario_radius < 60.0f) mario_radius = 60.0f;
                 object_radius = object->hitboxRadius;
                 if (object->hurtboxRadius > object_radius) {
                     object_radius = object->hurtboxRadius;
                 }
-                if (known_enemy && object_radius <= 1.0f) {
-                    object_radius = 100.0f;
+                if (known_enemy && object_radius < 120.0f) {
+                    object_radius = 120.0f;
                 }
                 radius = mario_radius + object_radius;
                 if (radius <= 0.0f) {
                     continue;
                 }
             }
+            /*
+             * Behaviors are allowed to offset header.gfx.pos from oPos. The
+             * player sees and walks into the graphics node, so use whichever
+             * native position is closer to the externally controlled Mario.
+             * This also covers the first update where one of the two positions
+             * is still stale.
+             */
             dx = gMarioObject->oPosX - object->oPosX;
             dz = gMarioObject->oPosZ - object->oPosZ;
             distance2 = dx * dx + dz * dz;
+            gfx_dx = gMarioObject->oPosX - object->header.gfx.pos[0];
+            gfx_dz = gMarioObject->oPosZ - object->header.gfx.pos[2];
+            gfx_distance2 = gfx_dx * gfx_dx + gfx_dz * gfx_dz;
+            object_y = object->oPosY;
+            if (gfx_distance2 < distance2) {
+                distance2 = gfx_distance2;
+                object_y = object->header.gfx.pos[1];
+            }
             if (distance2 >= radius * radius) {
                 continue;
             }
@@ -859,7 +878,7 @@ static void bridge_contact_damage_fallback(int32_t health_before) {
             mario_bottom = gMarioObject->oPosY - gMarioObject->hitboxDownOffset;
             mario_top = mario_bottom +
                 (gMarioObject->hitboxHeight > 1.0f ? gMarioObject->hitboxHeight : 160.0f);
-            object_bottom = object->oPosY - object->hitboxDownOffset;
+            object_bottom = object_y - object->hitboxDownOffset;
             object_top = object_bottom +
                 (object->hitboxHeight > 1.0f ? object->hitboxHeight :
                     (model_id_for_object(object) == MODEL_GOOMBA ? 160.0f : 0.0f));
