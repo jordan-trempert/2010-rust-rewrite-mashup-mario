@@ -832,6 +832,79 @@ static void apply_proxy(const struct Request *request) {
     }
 }
 
+static int bridge_capture_authored_warp_node(u8 source_node, const char *reason) {
+    struct ObjectWarpNode *warp;
+
+    if (gCurrentArea == NULL || gIw4lPendingTransitionLevel[0] != '\0') {
+        return gIw4lPendingTransitionLevel[0] != '\0';
+    }
+
+    warp = area_get_warp_node(source_node);
+    if (warp == NULL) {
+        fprintf(
+            stderr,
+            "iw4l-sm64-native: %s warp node 0x%02X is missing in level=%d area=%d\n",
+            reason != NULL ? reason : "authored",
+            (unsigned)source_node,
+            (int)gCurrLevelNum,
+            (int)gCurrAreaIndex
+        );
+        fflush(stderr);
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "iw4l-sm64-native: %s warp intercepted source=0x%02X -> level=%u area=%u node=%u\n",
+        reason != NULL ? reason : "authored",
+        (unsigned)source_node,
+        (unsigned)(warp->node.destLevel & 0x7F),
+        (unsigned)warp->node.destArea,
+        (unsigned)warp->node.destNode
+    );
+    fflush(stderr);
+
+    iw4l_sm64_capture_level_warp(
+        warp->node.destLevel & 0x7F,
+        warp->node.destArea,
+        warp->node.destNode,
+        0
+    );
+    return gIw4lPendingTransitionLevel[0] != '\0';
+}
+
+static int bridge_capture_star_or_death_exit(void) {
+    if (gMarioState == NULL || gCurrentArea == NULL) {
+        return 0;
+    }
+
+    /*
+     * Non-exit stars set actionArg bit 0. Exit stars use the course's authored
+     * WARP_NODE_SUCCESS, which already points at the correct painting/room in
+     * Peach's Castle (or courtyard/grounds for the courses that belong there).
+     * Capture at vanilla's timer-80 exit point instead of letting the embedded
+     * source DLL begin a delayed level change that the Rust host must replace.
+     */
+    if ((gMarioState->action == ACT_STAR_DANCE_EXIT
+         || gMarioState->action == ACT_STAR_DANCE_WATER)
+        && (gMarioState->actionArg & 1) == 0
+        && gMarioState->actionTimer >= 80) {
+        return bridge_capture_authored_warp_node(WARP_NODE_SUCCESS, "star exit");
+    }
+
+    /*
+     * Native death actions and hazards ultimately use WARP_NODE_DEATH. Do the
+     * same host handoff as soon as SM64 health reaches its dead range so COD
+     * cannot respawn while the old native DLL remains in a death action and
+     * immediately kill the new COD life again.
+     */
+    if (gMarioState->health < 0x100) {
+        return bridge_capture_authored_warp_node(WARP_NODE_DEATH, "death");
+    }
+
+    return 0;
+}
+
 static int bridge_capture_painting_warp(void) {
     struct WarpNode *warp_node;
     struct WarpNode warp;
@@ -2001,6 +2074,14 @@ IW4L_SM64_API const struct Iw4lSm64SnapshotView *iw4l_sm64_step(
     gIw4lLevelCommand = level_script_execute(gIw4lLevelCommand);
     gIw4lBridgeButtonDown = 0;
     gIw4lBridgeButtonPressed = 0;
+
+    gBridgeStage = "star_death_warp_probe";
+    if (bridge_capture_star_or_death_exit()) {
+        gGlobalTimer++;
+        gBridgeStage = "star_death_warp_snapshot";
+        return fill_snapshot_view();
+    }
+
     gGlobalTimer++;
     gBridgeStage = "audio_tick";
     bridge_audio_tick();
