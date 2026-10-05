@@ -603,6 +603,33 @@ if (-not $objectProcessorText.Contains($marioUpdateNeedle)) {
     throw "Could not locate bhv_mario_update in $objectProcessorSource"
 }
 $objectProcessorText = $objectProcessorText.Replace($marioUpdateNeedle, $marioUpdateReplacement)
+
+# Capture SM64's authoritative moving-platform displacement instead of trying
+# to infer platform motion from the unordered dynamic-surface array in Rust.
+$platformDisplacementNeedle = @"
+    apply_mario_platform_displacement();
+"@
+$platformDisplacementReplacement = @"
+#ifdef IW4L_SM64_EMBEDDED
+    {
+        extern void iw4l_sm64_platform_displacement_begin(void);
+        extern void iw4l_sm64_platform_displacement_end(void);
+        iw4l_sm64_platform_displacement_begin();
+        apply_mario_platform_displacement();
+        iw4l_sm64_platform_displacement_end();
+    }
+#else
+    apply_mario_platform_displacement();
+#endif
+"@
+if (-not $objectProcessorText.Contains($platformDisplacementNeedle)) {
+    throw "Could not locate apply_mario_platform_displacement in $objectProcessorSource"
+}
+$objectProcessorText = $objectProcessorText.Replace(
+    $platformDisplacementNeedle,
+    $platformDisplacementReplacement
+)
+
 Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
 
 # Native rendering integration -------------------------------------------------
