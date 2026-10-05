@@ -349,6 +349,13 @@ impl Default for HostClassLoadouts {
     }
 }
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Sm64HudView {
+    pub active: bool,
+    pub health: i32,
+    pub coins: i32,
+}
+
 #[derive(Resource, Clone, Debug, Default)]
 pub struct HudInputView {
     pub use_key: Option<String>,
