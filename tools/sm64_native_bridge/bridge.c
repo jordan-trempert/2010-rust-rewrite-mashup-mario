@@ -1242,6 +1242,19 @@ static struct Object *bridge_canonical_boss_target(struct Object *object) {
     return object;
 }
 
+static int bridge_whomp_is_small(const struct Object *object) {
+    /*
+     * Some sm64-port forks do not expose the oBhvParams2ndByte object-field
+     * alias (or WHOMP_BP_SMALL) to pc_main.c. The alias is exactly behavior
+     * parameter byte 2, stored in bits 16..23 of oBehParams.
+     *
+     * Vanilla values:
+     *   0 = small Whomp
+     *   1 = King Whomp
+     */
+    return object != NULL && (((uint32_t)object->oBehParams >> 16) & 0xFFu) == 0u;
+}
+
 static int apply_external_boss_damage(struct Object *object, uint32_t attack_flags) {
     int32_t model;
 
@@ -1285,7 +1298,7 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
              * Their native defeat state is action 8. A COD bullet therefore
              * routes them directly into that same death action.
              */
-            if (object->oBhvParams2ndByte == WHOMP_BP_SMALL) {
+            if (bridge_whomp_is_small(object)) {
                 if (object->oAction != 8 && object->oAction != 9) {
                     object->oNumLootCoins = 5;
                     object->oSubAction = 0;
@@ -1411,7 +1424,7 @@ static void apply_external_attack(const struct Request *request) {
             }
 
             if (whomp != NULL && whomp->oAction == 6) {
-                if (whomp->oBhvParams2ndByte != WHOMP_BP_SMALL) {
+                if (!bridge_whomp_is_small(whomp)) {
                     if (whomp->oSubAction == 0 && whomp->oHealth > 0) {
                         const s32 old_health = whomp->oHealth;
                         whomp->oHealth--;
