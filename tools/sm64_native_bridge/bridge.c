@@ -1707,7 +1707,24 @@ IW4L_SM64_API int iw4l_sm64_init(
     gGlobalTimer++;
     gDebugLevelSelect = FALSE;
 
-    if (gCurrentArea != NULL && warp_node >= 0) {
+    /*
+     * Castle grounds -> castle_inside uses destination nodes 0/1 for the
+     * exterior double doors, but a freshly initialized castle area does not
+     * have a reliable ObjectWarpNode spawn object for those IDs in the PC
+     * decomp. Re-warping the already-loaded area can bind one of those IDs to
+     * an unrelated castle door and place COD in a side painting room.
+     *
+     * The level's authored MARIO_POS is the canonical front-lobby entrance, so
+     * keep that initial spawn for these two exterior-door destinations. Other
+     * incoming nodes (key doors, course exits, etc.) still use native warp
+     * placement normally.
+     */
+    const int use_default_castle_lobby_spawn =
+        strcmp(level_name, "castle_inside") == 0 &&
+        area == 1 &&
+        (warp_node == 0 || warp_node == 1);
+
+    if (gCurrentArea != NULL && warp_node >= 0 && !use_default_castle_lobby_spawn) {
         initiate_warp(level->level, (s16)area, (s16)warp_node, (s32)warp_arg);
         warp_area();
     }
@@ -1734,11 +1751,12 @@ IW4L_SM64_API int iw4l_sm64_init(
     gBridgeStage = "course_ready";
     fprintf(
         stderr,
-        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d action=0x%08X\n",
+        "iw4l-sm64-native: embedded decomp ready: level=%s area=%d act=%d warp_node=%d default_lobby_spawn=%d action=0x%08X\n",
         level_name,
         area,
         act,
         warp_node,
+        use_default_castle_lobby_spawn,
         gMarioState->action
     );
     fflush(stderr);
