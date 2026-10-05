@@ -61,7 +61,9 @@ struct Sm64CodMoveState {
     last_pound_down: bool,
     last_grounded: bool,
     jump_stage: u8,
+    chain_grace_ticks: u8,
     ground_pounding: bool,
+    last_weapon_shot_count: Option<i32>,
 }
 
 fn sm64_static_collision_vertices(
@@ -462,9 +464,11 @@ fn apply_sm64_cod_movement_abilities(
     const BUTTON_PRONE: u32 = 0x100;
     const BUTTON_CROUCH: u32 = 0x200;
     const BUTTON_JUMP: u32 = 0x400;
-    const DOUBLE_JUMP_VELOCITY: f32 = 360.0;
-    const TRIPLE_JUMP_VELOCITY: f32 = 500.0;
+    const DOUBLE_JUMP_VELOCITY: f32 = 390.0;
+    const TRIPLE_JUMP_VELOCITY: f32 = 540.0;
     const GROUND_POUND_VELOCITY: f32 = -900.0;
+    const JUMP_CHAIN_GRACE_TICKS: u8 = 12;
+    const GROUND_POUND_AIM_DEGREES: f32 = 60.0;
     const WING_ASCENT_VELOCITY: f32 = 220.0;
     const WING_GLIDE_FALL_VELOCITY: f32 = -110.0;
 
@@ -499,16 +503,31 @@ fn apply_sm64_cod_movement_abilities(
     let jump_pressed = jump_down && !state.last_jump_down;
     let pound_pressed = pound_down && !state.last_pound_down;
     let grounded = player.ground_entity_num != ENTITYNUM_NONE;
+    let just_landed = !state.last_grounded && grounded;
     let just_left_ground = state.last_grounded && !grounded;
+    let weapon_shot = state
+        .last_weapon_shot_count
+        .is_some_and(|previous| player.weapon_shot_count != previous);
+    let pitch = {
+        let mut pitch = player.viewangles[0] % 360.0;
+        if pitch > 180.0 {
+            pitch -= 360.0;
+        } else if pitch < -180.0 {
+            pitch += 360.0;
+        }
+        pitch
+    };
+    let shoot_down_pound = weapon_shot && pitch >= GROUND_POUND_AIM_DEGREES;
 
-    // Cannons/grabs/etc. truly own native motion. Dialogs, stars and warps do
-    // not block these abilities or ordinary COD movement.
+    // Cannons/grabs/etc. truly own native motion.
     if player.health <= 0 || (output.active && sm64_cod_native_owns_motion(output.action)) {
         state.ground_pounding = false;
         state.jump_stage = 0;
+        state.chain_grace_ticks = 0;
         state.last_jump_down = jump_down;
         state.last_pound_down = pound_down;
         state.last_grounded = grounded;
+        state.last_weapon_shot_count = Some(player.weapon_shot_count);
         return;
     }
 
@@ -519,25 +538,68 @@ fn apply_sm64_cod_movement_abilities(
         }
         state.ground_pounding = false;
 
-        // Let COD's normal pmove perform jump #1. This only arms the chain.
+        if just_landed {
+            if matches!(state.jump_stage, 1 | 2) {
+                state.chain_grace_ticks = JUMP_CHAIN_GRACE_TICKS;
+            } else if state.jump_stage >= 3 {
+                state.jump_stage = 0;
+                state.chain_grace_ticks = 0;
+            }
+        }
+
         if jump_pressed {
-            state.jump_stage = 1;
-        } else if !jump_down {
+            state.jump_stage = if state.chain_grace_ticks > 0 {
+                match state.jump_stage {
+                    1 => 2,
+                    2 => 3,
+                    _ => 1,
+                }
+            } else {
+                1
+            };
+            state.chain_grace_ticks = 0;
+        } else if state.chain_grace_ticks > 0 {
+            state.chain_grace_ticks -= 1;
+        } else if state.last_grounded && !jump_down {
             state.jump_stage = 0;
         }
     } else {
-        if just_left_ground && state.jump_stage == 0 {
-            state.jump_stage = 1;
+        // COD pmove performs the actual takeoff. Once it has left the floor,
+        // upgrade that takeoff if this was the second/third chained jump.
+        if just_left_ground {
+            let boost = match state.jump_stage {
+                2 => Some(DOUBLE_JUMP_VELOCITY),
+                3 => Some(TRIPLE_JUMP_VELOCITY),
+                _ => None,
+            };
+            if let Some(vertical) = boost {
+                let mut velocity = player.velocity;
+                velocity[2] = velocity[2].max(vertical);
+                authority.0.set_velocity(id, velocity);
+                diag::info!(
+                    World,
+                    "SM64 COD {} jump vz={:.1}",
+                    if state.jump_stage == 2 { "double" } else { "triple" },
+                    velocity[2]
+                );
+            }
         }
 
-        if pound_pressed && !state.ground_pounding {
+        let pound_requested = pound_pressed || shoot_down_pound;
+        if pound_requested && !state.ground_pounding {
             let mut velocity = player.velocity;
             velocity[0] *= 0.45;
             velocity[1] *= 0.45;
             velocity[2] = GROUND_POUND_VELOCITY;
             authority.0.set_velocity(id, velocity);
             state.ground_pounding = true;
-            diag::info!(World, "SM64 COD ground pound started");
+            state.jump_stage = 0;
+            state.chain_grace_ticks = 0;
+            diag::info!(
+                World,
+                "SM64 COD ground pound started ({})",
+                if shoot_down_pound { "aim-down fire" } else { "crouch/prone" }
+            );
         } else if state.ground_pounding {
             let mut velocity = player.velocity;
             velocity[0] *= 0.9;
@@ -545,10 +607,6 @@ fn apply_sm64_cod_movement_abilities(
             velocity[2] = velocity[2].min(GROUND_POUND_VELOCITY);
             authority.0.set_velocity(id, velocity);
         } else if output.active && (output.mario_flags & sm64_core::MARIO_WING_CAP) != 0 {
-            // COD owns ordinary locomotion, so translate the active native
-            // Wing Cap into controllable ascent/gliding while preserving COD
-            // air steering. The native timer, music and visual cap still own
-            // the duration and presentation.
             let mut velocity = player.velocity;
             velocity[2] = if jump_down {
                 velocity[2].max(WING_ASCENT_VELOCITY)
@@ -556,30 +614,13 @@ fn apply_sm64_cod_movement_abilities(
                 velocity[2].max(WING_GLIDE_FALL_VELOCITY)
             };
             authority.0.set_velocity(id, velocity);
-        } else if jump_pressed && !just_left_ground {
-            let (next_stage, vertical) = match state.jump_stage {
-                0 | 1 => (2, DOUBLE_JUMP_VELOCITY),
-                2 => (3, TRIPLE_JUMP_VELOCITY),
-                _ => (state.jump_stage, player.velocity[2]),
-            };
-            if next_stage != state.jump_stage {
-                let mut velocity = player.velocity;
-                velocity[2] = vertical.max(velocity[2]);
-                authority.0.set_velocity(id, velocity);
-                state.jump_stage = next_stage;
-                diag::info!(
-                    World,
-                    "SM64 COD {} jump vz={:.1}",
-                    if next_stage == 2 { "double" } else { "triple" },
-                    velocity[2]
-                );
-            }
         }
     }
 
     state.last_jump_down = jump_down;
     state.last_pound_down = pound_down;
     state.last_grounded = grounded;
+    state.last_weapon_shot_count = Some(player.weapon_shot_count);
 }
 
 fn sync_cod_player_into_sm64(
@@ -986,8 +1027,14 @@ fn apply_sm64_native_player_output(
     // first native frame we see, initializing the baseline to that already-
     // damaged value would silently discard the first enemy hit.
     let previous = bridge_state.last_sm64_health.unwrap_or(0x880);
-    if output.health < 0x100 && player.health > 0 {
-        authority.0.damage_from_environment(id, player.health);
+    if output.health < 0x100 {
+        /*
+         * The native bridge hands Mario deaths to the course's authored
+         * WARP_NODE_DEATH. Do not also kill the COD pawn here: that creates a
+         * second independent respawn while the old native death action is still
+         * alive, which is the death loop this mode used to enter.
+         */
+        bridge_state.last_sm64_health = Some(output.health);
     }
     {
         let sm64_delta = output.health - previous;
