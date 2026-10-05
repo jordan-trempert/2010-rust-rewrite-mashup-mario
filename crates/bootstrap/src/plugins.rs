@@ -460,9 +460,30 @@ fn apply_sm64_native_player_output(
     if let Some(previous)=bridge_state.last_sm64_health {
         let sm64_delta=output.health-previous;
         if sm64_delta!=0 {
-            let scaled=((sm64_delta as f32)*(player.max_health.max(1) as f32)/0x880 as f32).round() as i32;
+            let mut scaled=((sm64_delta as f32)
+                *(player.max_health.max(1) as f32)
+                /0x880 as f32)
+                .round() as i32;
+
+            // Never round real native contact damage away completely.
+            if sm64_delta<0 && scaled==0 {
+                scaled=-1;
+            } else if sm64_delta>0 && scaled==0 {
+                scaled=1;
+            }
+
             if scaled!=0 {
-                authority.0.set_health(id,player.health.saturating_add(scaled));
+                let next=player.health.saturating_add(scaled)
+                    .clamp(0,player.max_health.max(1));
+                authority.0.set_health(id,next);
+                diag::info!(
+                    World,
+                    "SM64 native health delta {} -> COD {} ({} -> {})",
+                    sm64_delta,
+                    scaled,
+                    player.health,
+                    next
+                );
             }
         }
     }
