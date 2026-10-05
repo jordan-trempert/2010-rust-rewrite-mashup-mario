@@ -623,11 +623,17 @@ fn launch_requested_sm64_map(
         // sm64cod:* never constructs the old Rust gameplay object world.
         (sm64_assets::ParsedObjectSpawns::default(), HashMap::new())
     };
+    /*
+     * Native COD mode uses act=0 as "auto": bridge.c selects the first
+     * uncollected act from the real SM64 save after save_file_load_all() has
+     * populated gSaveBuffer. Standalone/debug Rust mode keeps the old act-1
+     * default. SM64_ACT still overrides either mode for debugging.
+     */
     let selected_act = std::env::var("SM64_ACT")
         .ok()
         .and_then(|value| value.parse::<u8>().ok())
         .filter(|value| (1..=6).contains(value))
-        .unwrap_or(1);
+        .unwrap_or(if cod_active.is_some() { 0 } else { 1 });
 
     if cod_active.is_some() {
         native.model_symbols =
@@ -648,7 +654,7 @@ fn launch_requested_sm64_map(
                 native.client = Some(client);
                 native.active = true;
                 info!(
-                    "SM64 COD map: EMBEDDED DLL LOADED in-process: {} | level={level} area={area} act={selected_act} warp_node={:?}",
+                    "SM64 COD map: EMBEDDED DLL LOADED in-process: {} | level={level} area={area} act_request={selected_act} warp_node={:?}",
                     loaded_path.display(),
                     request.warp_node
                 );
@@ -777,7 +783,8 @@ fn launch_requested_sm64_map(
     status.loaded = true;
     status.message = if cod_active.is_some() {
         format!(
-            "SM64 {level} area {area} act {selected_act}: native DLL gameplay only; {surface_count} static collision surfaces, {render_triangles} presentation triangles in {render_batches} batches; Rust gameplay objects=0"
+            "SM64 {level} area {area} act {}: native DLL gameplay only; {surface_count} static collision surfaces, {render_triangles} presentation triangles in {render_batches} batches; Rust gameplay objects=0",
+            if selected_act == 0 { "auto".to_owned() } else { selected_act.to_string() }
         )
     } else {
         format!(
