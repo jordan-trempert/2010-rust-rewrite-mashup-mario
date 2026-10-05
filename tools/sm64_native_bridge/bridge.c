@@ -436,6 +436,15 @@ void iw4l_sm64_capture_level_warp(
         return;
     }
 
+    /*
+     * The original game keeps gSaveBuffer alive across level-script changes.
+     * IW4L reloads the embedded DLL for a host-level handoff, so persist any
+     * newly collected star/key/cannon/door state before that reload.
+     */
+    if (gCurrSaveFileNum >= 1 && gCurrSaveFileNum <= NUM_SAVE_FILES) {
+        save_file_do_save(gCurrSaveFileNum - 1);
+    }
+
     strncpy(
         gIw4lPendingTransitionLevel,
         level->name,
