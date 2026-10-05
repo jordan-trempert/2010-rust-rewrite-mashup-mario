@@ -420,7 +420,12 @@ fn launch_requested_sm64_map(
     mut enabled: ResMut<Sm64Enabled>,
     debug_view: Res<Sm64DebugView>,
     mut runtime: ResMut<Sm64Runtime>,
+    mut native_output: ResMut<Sm64NativePlayerOutput>,
+    mut native_transition: ResMut<Sm64NativeTransitionOutput>,
+    mut native_dialog: ResMut<Sm64NativeDialogOutput>,
     mut native_static_collision: ResMut<Sm64NativeStaticCollision>,
+    mut native_collision: ResMut<Sm64NativeDynamicCollision>,
+    mut native_audio: ResMut<Sm64NativeAudioFrame>,
     mut native_render: ResMut<Sm64NativeRenderFrame>,
     mut native_render_cache: ResMut<Sm64NativeRenderCache>,
     mut native: NonSendMut<Sm64NativeRuntime>,
@@ -437,8 +442,21 @@ fn launch_requested_sm64_map(
     native.client = None;
     native.model_symbols.clear();
     native.active = false;
+
+    // A cross-level request is consumed on the Bevy update schedule, while the
+    // previous DLL's last snapshot can still be sitting in these resources.
+    // Never let host systems observe that stale source-level snapshot as if it
+    // belonged to the freshly requested destination.
+    *native_output = Sm64NativePlayerOutput::default();
+    *native_transition = Sm64NativeTransitionOutput::default();
+    native_dialog.id = -1;
+    native_dialog.text.clear();
     native_static_collision.tick = 0;
     native_static_collision.triangles.clear();
+    native_collision.tick = 0;
+    native_collision.triangles.clear();
+    native_audio.tick = 0;
+    native_audio.samples.clear();
     native_render.tick = 0;
     native_render.triangles.clear();
     native_render.texture_updates.clear();
@@ -458,6 +476,12 @@ fn launch_requested_sm64_map(
 
     let level = request.level.clone();
     let area = request.area;
+    if cod_active.is_some() {
+        info!(
+            "SM64 COD map: destination request accepted; stale native snapshot cleared before loading level={level} area={area} warp_node={:?}",
+            request.warp_node
+        );
+    }
     status.source_root = Some(root.clone());
     status.level = level.clone();
     status.area = area;
