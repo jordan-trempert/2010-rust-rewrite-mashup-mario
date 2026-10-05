@@ -1279,13 +1279,31 @@ static int apply_external_boss_damage(struct Object *object, uint32_t attack_fla
             if (gCurrLevelNum != LEVEL_WF) {
                 break;
             }
+
             /*
-             * King Whomp normally loses health only while Mario ground-pounds
-             * his fallen platform. Direct COD shots (and the COD ground-pound
-             * pulse) decrement the same oHealth field; his native action 8
-             * still owns the death animation and star spawn.
+             * Small Whomps do not use the King's three-hit oHealth lifecycle.
+             * Their native defeat state is action 8. A COD bullet therefore
+             * routes them directly into that same death action.
              */
-            if (object->oHealth > 0) {
+            if (object->oBhvParams2ndByte == WHOMP_BP_SMALL) {
+                if (object->oAction != 8 && object->oAction != 9) {
+                    object->oNumLootCoins = 5;
+                    object->oSubAction = 0;
+                    object->oAction = 8;
+                    return 1;
+                }
+                break;
+            }
+
+            /*
+             * King Whomp uses three health points. Direct COD shots decrement
+             * the native health field; his action 8 still owns the death dialog
+             * and star spawn.
+             */
+            if (object->oHealth <= 0 && object->oAction == 0) {
+                object->oHealth = 3;
+            }
+            if (object->oHealth > 0 && object->oAction != 8 && object->oAction != 9) {
                 object->oHealth--;
                 if (object->oHealth <= 0) {
                     object->oSubAction = 0;
