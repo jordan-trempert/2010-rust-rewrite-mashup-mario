@@ -9,6 +9,7 @@ impl Plugin for AudioPlugin {
         crate::backend::register(app);
         crate::minecraft::register(app);
         crate::match_bus::register(app);
+        crate::external_pcm::register(app);
         app.add_plugins(PlayerSoundPlugin);
         crate::match_set::register(app);
         crate::frontend::register_frontend_audio(app);
