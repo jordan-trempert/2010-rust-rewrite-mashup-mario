@@ -1562,7 +1562,7 @@ IW4L_SM64_API void iw4l_sm64_shutdown(void) {
     }
     gIw4lInitialized = 0;
     gIw4lAudioFrameCount = 0;
-    gIw4lAudioFrameRemainder = 0;
+    gIw4lAudioCadence = 0;
     gIw4lRunMarioAction = 0;
     gIw4lUseExternalCamera = 0;
     gIw4lLevelCommand = NULL;
