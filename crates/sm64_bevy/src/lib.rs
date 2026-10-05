@@ -1820,7 +1820,12 @@ fn sync_native_render_frame(
             let a=Vec3::from_array(converted[0]);
             let b=Vec3::from_array(converted[1]);
             let d=Vec3::from_array(converted[2]);
-            let normal=(b-a).cross(d-a).try_normalize().unwrap_or(Vec3::Z).to_array();
+            let raw_normal=(b-a).cross(d-a);
+            let normal=if raw_normal.length_squared()>1.0e-12 {
+                raw_normal.normalize()
+            } else {
+                Vec3::Z
+            }.to_array();
 
             for i in 0..3 {
                 positions.push(converted[i]);
