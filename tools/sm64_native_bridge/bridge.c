@@ -403,12 +403,13 @@ static void bridge_update_headless_dialog(const struct Request *request) {
         gBridgeDialogPendingReset = 0;
     }
 
-    if ((request->attack_flags & BRIDGE_INPUT_USE) != 0 &&
+    if ((request->attack_flags & (BRIDGE_INPUT_USE | BRIDGE_INPUT_ATTACK)) != 0 &&
         get_dialog_id() != DIALOG_NONE) {
         /*
-         * render_dialog_entries() normally performs the close animation and
-         * publishes the response. render_game() is disabled in this headless
-         * bridge, so emit the same gameplay-visible result directly.
+         * render_dialog_entries() normally consumes A/B, performs the close
+         * animation and publishes the response. render_game() is disabled in
+         * this headless bridge, so either COD Use or Fire must emit the same
+         * gameplay-visible result directly.
          *
          * create_dialog_box_with_response() seeds gLastDialogResponse to 1;
          * ordinary dialogs leave it at zero and use NOT_DEFINED.
