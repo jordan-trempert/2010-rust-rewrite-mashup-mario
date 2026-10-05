@@ -858,10 +858,14 @@ static int bridge_capture_painting_warp(void) {
         && gMarioState->pos[1] - gMarioState->floorHeight >= 80.0f) {
         return 0;
     }
-    if (gMarioState->action & ACT_FLAG_INTANGIBLE) {
-        return 0;
-    }
-
+    /*
+     * Do not reject ACT_FLAG_INTANGIBLE here. COD movement is independent of
+     * Mario's action state, so the player can physically enter a painting
+     * while native Mario is still finishing ACT_PUSHING_DOOR (which vanilla
+     * marks intangible). In that hybrid case SM64 would play its painting
+     * eject path instead of warping; IW4L should honor the COD position and
+     * transition immediately.
+     */
     warp_node = &gCurrentArea->paintingWarpNodes[painting_index];
     if (warp_node == NULL || warp_node->id == 0) {
         return 0;
@@ -875,9 +879,10 @@ static int bridge_capture_painting_warp(void) {
 
     fprintf(
         stderr,
-        "iw4l-sm64-native: painting warp intercepted index=%d floor=0x%04X -> level=%d area=%u node=%u\n",
+        "iw4l-sm64-native: painting warp intercepted index=%d floor=0x%04X action=0x%08X -> level=%d area=%u node=%u\n",
         (int)painting_index,
         (unsigned)gMarioState->floor->type,
+        (unsigned)gMarioState->action,
         (int)(warp.destLevel & 0x7F),
         (unsigned)warp.destArea,
         (unsigned)warp.destNode
