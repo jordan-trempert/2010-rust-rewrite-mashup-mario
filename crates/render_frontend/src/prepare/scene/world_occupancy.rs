@@ -33,7 +33,11 @@ pub fn place_external_camera(
                 pitch,
                 speed: 320.0,
             },
-            audio::AmbientListener,
+            /*
+             * External-world modes reuse the existing COD/player audio
+             * listener. Spawning a second AmbientListener here panics in the
+             * audio system before the first frame.
+             */
             Visibility::Inherited,
         ))
         .id();
