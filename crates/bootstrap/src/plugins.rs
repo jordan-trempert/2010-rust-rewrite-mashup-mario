@@ -562,7 +562,7 @@ fn sync_sm64_cod_hud(
     mut commands: Commands,
     active: Option<Res<sm64_bevy::Sm64CodActive>>,
     output: Res<sm64_bevy::Sm64NativePlayerOutput>,
-    cameras: Query<Entity, With<render_scene::FpvLens>>,
+    cameras: Query<Entity, With<render_frontend::prepare::scene::camera::FpvLens>>,
     roots: Query<Entity, With<Sm64CodHudRoot>>,
     mut texts: Query<&mut Text, With<Sm64CodHudText>>,
 ) {
