@@ -52,10 +52,11 @@ fn level_texture_bank(
         if !line.contains("LOAD_MIO0_TEXTURE") || !line.contains("0x09") {
             continue;
         }
-        let Some(start)=line.find('_') else {continue;};
-        let tail=&line[start+1..];
-        let Some(end)=tail.find("_mio0SegmentRomStart") else {continue;};
-        let bank=&tail[..end];
+        let marker="_mio0SegmentRomStart";
+        let Some(end)=line.find(marker) else {continue;};
+        let before=&line[..end];
+        let Some(start)=before.rfind('_') else {continue;};
+        let bank=&line[start+1..end];
         if !bank.is_empty() {
             return Ok(Some(bank.to_owned()));
         }
