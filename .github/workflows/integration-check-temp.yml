@@ -13,3 +13,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Check touched integration crates
         run: cargo check -p bootstrap -p hud -p audio -p render_frontend -p sim -p weapon_iw4 -p sm64_native -p sm64_bevy
+# rerun after HUD frame fix
