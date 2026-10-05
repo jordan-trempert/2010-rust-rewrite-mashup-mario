@@ -746,7 +746,17 @@ fn spawn_hierarchical_object_geometry(
             Name::new(format!("SM64 object part {part_index} mesh {batch_index}")),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(StandardMaterial{
-                base_color:Color::WHITE,
+                base_color:if texture.is_some() {
+                    Color::WHITE
+                } else if let Some([r,g,b])=batch.light_color {
+                    Color::srgb(
+                        r as f32/255.0,
+                        g as f32/255.0,
+                        b as f32/255.0,
+                    )
+                } else {
+                    Color::WHITE
+                },
                 base_color_texture:texture,
                 unlit:true,
                 cull_mode:None,
@@ -820,7 +830,17 @@ fn spawn_flat_object_geometry(
             Name::new(format!("SM64 flat object mesh {batch_index}")),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(StandardMaterial{
-                base_color:Color::WHITE,
+                base_color:if texture.is_some() {
+                    Color::WHITE
+                } else if let Some([r,g,b])=batch.light_color {
+                    Color::srgb(
+                        r as f32/255.0,
+                        g as f32/255.0,
+                        b as f32/255.0,
+                    )
+                } else {
+                    Color::WHITE
+                },
                 base_color_texture:texture,
                 unlit:true,
                 // Many SM64 props (notably BOB's bubbly trees) are authored as
@@ -1613,7 +1633,6 @@ fn sync_sm64_dialog_overlay(
             ..default()
         },
         BackgroundColor(Color::srgba(0.02,0.02,0.03,0.88)),
-        BorderColor::all(Color::srgba(1.0,1.0,1.0,0.8)),
         GlobalZIndex(50_000),
     )).with_children(|parent|{
         parent.spawn((
