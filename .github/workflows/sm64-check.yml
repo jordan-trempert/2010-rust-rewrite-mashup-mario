@@ -7,6 +7,7 @@ on:
       - "crates/sm64_core/**"
       - "crates/sm64_sim/**"
       - "crates/sm64_bevy/**"
+      - "crates/sm64_native/**"
       - "crates/bootstrap/**"
       - "crates/launcher/**"
       - "tools/sm64_native_bridge/**"
@@ -22,4 +23,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Check SM64 integration
-        run: cargo check -p sm64_core -p sm64_assets -p sm64_sim -p sm64_bevy -p bootstrap -p launcher --tests
+        run: cargo check -p sm64_core -p sm64_assets -p sm64_sim -p sm64_native -p sm64_bevy -p bootstrap -p launcher --tests
+      - name: Parse native bridge build script
+        shell: pwsh
+        run: |
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "./tools/sm64_native_bridge/build.ps1"),
+            [ref]$null,
+            [ref]$null
+          )
