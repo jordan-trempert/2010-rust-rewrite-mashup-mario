@@ -443,6 +443,9 @@ fn sm64_cod_native_owns_motion(action: u32) -> bool {
             | sm64_core::ACT_TORNADO_TWIRLING
             | sm64_core::ACT_GRABBED
             | sm64_core::ACT_RIDING_HOOT
+            | sm64_core::ACT_PULLING_DOOR
+            | sm64_core::ACT_PUSHING_DOOR
+            | sm64_core::ACT_WARP_DOOR_SPAWN
             | sm64_core::ACT_EXIT_AIRBORNE
             | sm64_core::ACT_DEATH_EXIT
             | sm64_core::ACT_FALLING_DEATH_EXIT
