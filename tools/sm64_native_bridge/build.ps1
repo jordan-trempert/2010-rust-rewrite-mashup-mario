@@ -27,6 +27,25 @@ if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
     throw "make is not on PATH. Run this from an MSYS2/MinGW environment that can build sm64-port."
 }
 
+# sm64-port's Makefile defaults to PYTHON=python3, but a normal Windows
+# installation often exposes only `python` or the `py` launcher. Resolve it
+# here and pass the exact command into make so asset extraction works from
+# PowerShell/cmd as well as MSYS2.
+$pythonMake = $null
+if (Get-Command python3 -ErrorAction SilentlyContinue) {
+    $pythonMake = "python3"
+}
+elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    $pythonMake = "python"
+}
+elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $pythonMake = "py -3"
+}
+if ([string]::IsNullOrWhiteSpace($pythonMake)) {
+    throw "Python 3 was not found. Install Python 3 or add python/python3/py to PATH."
+}
+Write-Host "Using Python for sm64-port: $pythonMake"
+
 $buildRel = "build/us_bridge"
 $build = Join-Path $root "build\us_bridge"
 $bridgeSource = Join-Path $PSScriptRoot "bridge.c"
@@ -254,6 +273,7 @@ try {
         $makeArgs = @(
             "BUILD_DIR=$buildRel",
             "EXE=$moduleRel",
+            "PYTHON=$pythonMake",
             "ENABLE_DX11=0",
             "ENABLE_DX12=0",
             "ENABLE_OPENGL=0",
