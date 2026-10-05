@@ -164,6 +164,9 @@ struct Sm64ObjectPresentation {
 struct Sm64BillboardPart;
 
 #[derive(Component, Debug, Clone, Copy)]
+struct Sm64BillboardObject;
+
+#[derive(Component, Debug, Clone, Copy)]
 struct Sm64DebugWorld;
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -200,6 +203,7 @@ impl Plugin for Sm64Plugin {
                 advance_sm64_runtime.after(launch_requested_sm64_map),
                 sync_mario_presentation.after(advance_sm64_runtime),
                 sync_object_presentations.after(advance_sm64_runtime),
+                face_sm64_billboard_objects.after(sync_object_presentations),
                 face_sm64_billboards.after(sync_object_presentations),
                 follow_mario_camera.after(advance_sm64_runtime),
             ),
@@ -520,7 +524,7 @@ fn spawn_runtime_object_presentations(
         // Always create the presentation root first. If geometry resolution
         // fails, the root remains as an invisible placeholder so the same
         // missing model is not reparsed and re-warned every frame.
-        let root=commands.spawn((
+        let mut root_entity=commands.spawn((
             Name::new(format!("SM64 object {} {}",object.id.0,object.model)),
             Transform {
                 translation:sm64_render_vec3(object.pos),
@@ -533,7 +537,11 @@ fn spawn_runtime_object_presentations(
                 Visibility::Hidden
             },
             Sm64ObjectPresentation{id:object.id},
-        )).id();
+        ));
+        if (object.render_flags & (1<<2))!=0 {
+            root_entity.insert(Sm64BillboardObject);
+        }
+        let root=root_entity.id();
 
         let Some(source)=registry.get(&object.model) else {
             warn!("SM64 object model {} is not registered",object.model);
@@ -1386,6 +1394,26 @@ fn advance_sm64_runtime(
             });
         }
         steps += 1;
+    }
+}
+
+fn face_sm64_billboard_objects(
+    cameras:Query<&GlobalTransform,With<Camera3d>>,
+    mut billboards:Query<(&GlobalTransform,&mut Transform),With<Sm64BillboardObject>>,
+) {
+    let Some(camera)=cameras.iter().next() else {return;};
+    let camera_pos=camera.translation();
+
+    for (global,mut local) in &mut billboards {
+        let delta=camera_pos-global.translation();
+        let flat=Vec2::new(delta.x,delta.y);
+        if flat.length_squared()<1e-6 {
+            continue;
+        }
+        // Runtime GRAPH_RENDER_BILLBOARD is object-level and replaces the
+        // object's authored facing with a camera-facing yaw.
+        let yaw=flat.y.atan2(flat.x)-core::f32::consts::FRAC_PI_2;
+        local.rotation=Quat::from_rotation_z(yaw);
     }
 }
 
