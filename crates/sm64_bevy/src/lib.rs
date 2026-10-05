@@ -1457,7 +1457,10 @@ fn native_snapshot_to_sm64(
     let objects=native.objects.into_iter().map(|source|{
         let model=model_symbols.get(&source.model_id)
             .cloned()
-            .unwrap_or_else(||if source.model_id==0 {
+            .unwrap_or_else(||if source.model_id<=0 {
+                // Native objects with no shared graph node are logic-only
+                // objects (MODEL_NONE). Do not try to materialize them as
+                // renderable MODEL_NATIVE_FFFFFFFF placeholders.
                 "MODEL_NONE".to_owned()
             } else {
                 format!("MODEL_NATIVE_{:02X}",source.model_id)
