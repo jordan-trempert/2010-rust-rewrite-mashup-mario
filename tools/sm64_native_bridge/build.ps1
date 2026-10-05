@@ -101,6 +101,12 @@ $levelUpdateSource = Join-Path $root "src\game\level_update.c"
 $levelUpdateBackup = Join-Path $root "level_update.iw4l-backup.txt"
 $objectProcessorSource = Join-Path $root "src\game\object_list_processor.c"
 $objectProcessorBackup = Join-Path $root "object_list_processor.iw4l-backup.txt"
+$renderGraphSource = Join-Path $root "src\game\rendering_graph_node.c"
+$renderGraphBackup = Join-Path $root "rendering_graph_node.iw4l-backup.txt"
+$gfxPcSource = Join-Path $root "src\pc\gfx\gfx_pc.c"
+$gfxPcBackup = Join-Path $root "gfx_pc.iw4l-backup.txt"
+$gfxDummySource = Join-Path $root "src\pc\gfx\gfx_dummy.c"
+$gfxDummyBackup = Join-Path $root "gfx_dummy.iw4l-backup.txt"
 $armipsSource = Join-Path $root "tools\armips.cpp"
 if (Test-Path $armipsSource) {
     $armipsText = Get-Content $armipsSource -Raw
@@ -131,6 +137,9 @@ $pcMainObject = Join-Path $build "src\pc\pc_main.o"
 Remove-Item $staleBackupSource -Force -ErrorAction SilentlyContinue
 Remove-Item $staleBackupObject -Force -ErrorAction SilentlyContinue
 Remove-Item $pcMainObject -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\game\rendering_graph_node.o") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\pc\gfx\gfx_pc.o") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $build "src\pc\gfx\gfx_dummy.o") -Force -ErrorAction SilentlyContinue
 Remove-Item $legacyBridgeExe -Force -ErrorAction SilentlyContinue
 
 Write-Host "Building embedded native SM64 gameplay module from $root"
@@ -153,12 +162,38 @@ $renderBlock = @"
 "@
 $headlessBlock = @"
     profiler_log_thread5_time(LEVEL_SCRIPT_EXECUTE);
-    /* IW4L headless gameplay bridge: host renderer consumes object state. */
+    /*
+     * IW4L embedded mode keeps SM64's original scene-graph/display-list
+     * renderer. The dummy PC backend is patched below into a capture backend
+     * that exports world-space native triangles/textures to Rust instead of
+     * opening its own window.
+     */
+    init_rcp();
+    render_game();
+    end_master_display_list();
+    iw4l_sm64_capture_begin_frame();
+    gfx_start_frame();
+    gfx_run((Gfx *) gGfxSPTask->task.t.data_ptr);
+    alloc_display_list(0);
 "@
 if (-not $levelScriptText.Contains($renderBlock)) {
     throw "Could not locate level_script_execute render tail in $levelScriptSource"
 }
 $levelScriptText = $levelScriptText.Replace($renderBlock, $headlessBlock)
+$levelPrototypeNeedle = '#include "surface_load.h"'
+$levelPrototypeReplacement = @"
+#include "surface_load.h"
+
+#ifdef IW4L_SM64_EMBEDDED
+extern void iw4l_sm64_capture_begin_frame(void);
+extern void gfx_start_frame(void);
+extern void gfx_run(Gfx *commands);
+#endif
+"@
+if (-not $levelScriptText.Contains($levelPrototypeNeedle)) {
+    throw "Could not locate level_script include insertion point in $levelScriptSource"
+}
+$levelScriptText = $levelScriptText.Replace($levelPrototypeNeedle, $levelPrototypeReplacement)
 Set-Content -Path $levelScriptSource -Value $levelScriptText -Encoding UTF8
 
 # COD owns level/session transitions. If native SM64 completes a death/star exit
@@ -314,6 +349,358 @@ if (-not $objectProcessorText.Contains($marioUpdateNeedle)) {
 $objectProcessorText = $objectProcessorText.Replace($marioUpdateNeedle, $marioUpdateReplacement)
 Set-Content -Path $objectProcessorSource -Value $objectProcessorText -Encoding UTF8
 
+# Native rendering integration -------------------------------------------------
+# Preserve SM64's own GeoLayout traversal, animation channels, switch cases,
+# billboard decisions, scaling, lighting and Fast3D display-list execution.
+# The temporary patches below only redirect the final native result into an
+# in-memory capture backend suitable for the COD/Bevy camera.
+
+Copy-Item $renderGraphSource $renderGraphBackup -Force
+$renderGraphText = Get-Content $renderGraphSource -Raw
+
+$orthoNeedle = @"
+static void geo_process_ortho_projection(struct GraphNodeOrthoProjection *node) {
+    if (node->node.children != NULL) {
+"@
+$orthoReplacement = @"
+static void geo_process_ortho_projection(struct GraphNodeOrthoProjection *node) {
+#ifdef IW4L_SM64_EMBEDDED
+    /*
+     * Keep the COD skybox/HUD path. Native capture exports the 3D perspective
+     * scene only; SM64's orthographic skybox/HUD/dialog passes would otherwise
+     * become camera-space geometry inside the COD world.
+     */
+    return;
+#endif
+    if (node->node.children != NULL) {
+"@
+if (-not $renderGraphText.Contains($orthoNeedle)) {
+    throw "Could not locate geo_process_ortho_projection in $renderGraphSource"
+}
+$renderGraphText = $renderGraphText.Replace($orthoNeedle, $orthoReplacement)
+
+$cameraNeedle = @"
+    mtxf_lookat(cameraTransform, node->pos, node->focus, node->roll);
+    mtxf_mul(gMatStack[gMatStackIndex + 1], cameraTransform, gMatStack[gMatStackIndex]);
+"@
+$cameraReplacement = @"
+#ifdef IW4L_SM64_EMBEDDED
+    {
+        extern int gIw4lUseExternalCamera;
+        extern float gIw4lRenderCameraPos[3];
+        extern float gIw4lRenderCameraFocus[3];
+        extern float gIw4lNativeCameraMatrix[4][4];
+        if (gIw4lUseExternalCamera) {
+            mtxf_lookat(cameraTransform, gIw4lRenderCameraPos, gIw4lRenderCameraFocus, 0);
+        } else {
+            mtxf_lookat(cameraTransform, node->pos, node->focus, node->roll);
+        }
+        mtxf_copy(gIw4lNativeCameraMatrix, cameraTransform);
+    }
+#else
+    mtxf_lookat(cameraTransform, node->pos, node->focus, node->roll);
+#endif
+    mtxf_mul(gMatStack[gMatStackIndex + 1], cameraTransform, gMatStack[gMatStackIndex]);
+"@
+if (-not $renderGraphText.Contains($cameraNeedle)) {
+    throw "Could not locate native camera transform in $renderGraphSource"
+}
+$renderGraphText = $renderGraphText.Replace($cameraNeedle, $cameraReplacement)
+Set-Content -Path $renderGraphSource -Value $renderGraphText -Encoding UTF8
+
+Copy-Item $gfxPcSource $gfxPcBackup -Force
+$gfxPcText = Get-Content $gfxPcSource -Raw
+
+$loadedVertexNeedle = @"
+struct LoadedVertex {
+    float x, y, z, w;
+    float u, v;
+    struct RGBA color;
+    uint8_t clip_rej;
+};
+"@
+$loadedVertexReplacement = @"
+struct LoadedVertex {
+    float x, y, z, w;
+#ifdef IW4L_SM64_EMBEDDED
+    /* World-space result after native animation/model transforms, with the
+       native camera view transform removed again for COD's Camera3d. */
+    float world_x, world_y, world_z;
+#endif
+    float u, v;
+    struct RGBA color;
+    uint8_t clip_rej;
+};
+"@
+if (-not $gfxPcText.Contains($loadedVertexNeedle)) {
+    throw "Could not locate LoadedVertex in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($loadedVertexNeedle, $loadedVertexReplacement)
+
+$vertexTransformNeedle = @"
+        float x = v->ob[0] * rsp.MP_matrix[0][0] + v->ob[1] * rsp.MP_matrix[1][0] + v->ob[2] * rsp.MP_matrix[2][0] + rsp.MP_matrix[3][0];
+        float y = v->ob[0] * rsp.MP_matrix[0][1] + v->ob[1] * rsp.MP_matrix[1][1] + v->ob[2] * rsp.MP_matrix[2][1] + rsp.MP_matrix[3][1];
+        float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
+        float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
+        
+        x = gfx_adjust_x_for_aspect_ratio(x);
+"@
+$vertexTransformReplacement = @"
+        float x = v->ob[0] * rsp.MP_matrix[0][0] + v->ob[1] * rsp.MP_matrix[1][0] + v->ob[2] * rsp.MP_matrix[2][0] + rsp.MP_matrix[3][0];
+        float y = v->ob[0] * rsp.MP_matrix[0][1] + v->ob[1] * rsp.MP_matrix[1][1] + v->ob[2] * rsp.MP_matrix[2][1] + rsp.MP_matrix[3][1];
+        float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
+        float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
+
+#ifdef IW4L_SM64_EMBEDDED
+        {
+            extern float gIw4lNativeCameraMatrix[4][4];
+            const float (*mv)[4] = rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
+            float vx = v->ob[0] * mv[0][0] + v->ob[1] * mv[1][0] + v->ob[2] * mv[2][0] + mv[3][0];
+            float vy = v->ob[0] * mv[0][1] + v->ob[1] * mv[1][1] + v->ob[2] * mv[2][1] + mv[3][1];
+            float vz = v->ob[0] * mv[0][2] + v->ob[1] * mv[1][2] + v->ob[2] * mv[2][2] + mv[3][2];
+            float camX = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[0][0]
+                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[0][1]
+                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[0][2];
+            float camY = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[1][0]
+                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[1][1]
+                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[1][2];
+            float camZ = gIw4lNativeCameraMatrix[3][0] * gIw4lNativeCameraMatrix[2][0]
+                       + gIw4lNativeCameraMatrix[3][1] * gIw4lNativeCameraMatrix[2][1]
+                       + gIw4lNativeCameraMatrix[3][2] * gIw4lNativeCameraMatrix[2][2];
+
+            d->world_x = vx * gIw4lNativeCameraMatrix[0][0]
+                       + vy * gIw4lNativeCameraMatrix[0][1]
+                       + vz * gIw4lNativeCameraMatrix[0][2] - camX;
+            d->world_y = vx * gIw4lNativeCameraMatrix[1][0]
+                       + vy * gIw4lNativeCameraMatrix[1][1]
+                       + vz * gIw4lNativeCameraMatrix[1][2] - camY;
+            d->world_z = vx * gIw4lNativeCameraMatrix[2][0]
+                       + vy * gIw4lNativeCameraMatrix[2][1]
+                       + vz * gIw4lNativeCameraMatrix[2][2] - camZ;
+        }
+#endif
+        
+        x = gfx_adjust_x_for_aspect_ratio(x);
+"@
+if (-not $gfxPcText.Contains($vertexTransformNeedle)) {
+    throw "Could not locate gfx_sp_vertex transform in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($vertexTransformNeedle, $vertexTransformReplacement)
+
+$shaderInfoNeedle = @"
+    uint8_t num_inputs;
+    bool used_textures[2];
+    gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
+"@
+$shaderInfoReplacement = @"
+    uint8_t num_inputs;
+    bool used_textures[2];
+#ifdef IW4L_SM64_EMBEDDED
+    {
+        struct CCFeatures native_features;
+        gfx_cc_get_features(cc_id, &native_features);
+        num_inputs = (uint8_t) native_features.num_inputs;
+        used_textures[0] = native_features.used_textures[0];
+        used_textures[1] = native_features.used_textures[1];
+    }
+#else
+    gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
+#endif
+"@
+if (-not $gfxPcText.Contains($shaderInfoNeedle)) {
+    throw "Could not locate shader info in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($shaderInfoNeedle, $shaderInfoReplacement)
+
+$captureNeedle = @"
+    bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
+    
+    for (int i = 0; i < 3; i++) {
+"@
+$captureReplacement = @"
+    bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
+
+#ifdef IW4L_SM64_EMBEDDED
+    {
+        extern void iw4l_sm64_capture_triangle(
+            const float *pos9,
+            const float *uv6,
+            const uint8_t *rgba12,
+            uint32_t texture_id,
+            int textured,
+            int alpha
+        );
+        float native_pos[9];
+        float native_uv[6];
+        uint8_t native_rgba[12];
+        uint32_t native_texture_id = 0xFFFFFFFFu;
+        bool linear_filter = (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT;
+
+        if (use_texture && rendering_state.textures[0] != NULL) {
+            native_texture_id = rendering_state.textures[0]->texture_id;
+        }
+
+        for (int native_i = 0; native_i < 3; native_i++) {
+            float u = 0.0f;
+            float v = 0.0f;
+            native_pos[native_i * 3 + 0] = v_arr[native_i]->world_x;
+            native_pos[native_i * 3 + 1] = v_arr[native_i]->world_y;
+            native_pos[native_i * 3 + 2] = v_arr[native_i]->world_z;
+            if (use_texture && tex_width != 0 && tex_height != 0) {
+                u = (v_arr[native_i]->u - rdp.texture_tile.uls * 8) / 32.0f;
+                v = (v_arr[native_i]->v - rdp.texture_tile.ult * 8) / 32.0f;
+                if (linear_filter) {
+                    u += 0.5f;
+                    v += 0.5f;
+                }
+                u /= tex_width;
+                v /= tex_height;
+            }
+            native_uv[native_i * 2 + 0] = u;
+            native_uv[native_i * 2 + 1] = v;
+            native_rgba[native_i * 4 + 0] = v_arr[native_i]->color.r;
+            native_rgba[native_i * 4 + 1] = v_arr[native_i]->color.g;
+            native_rgba[native_i * 4 + 2] = v_arr[native_i]->color.b;
+            native_rgba[native_i * 4 + 3] = use_alpha ? v_arr[native_i]->color.a : 255;
+        }
+
+        iw4l_sm64_capture_triangle(
+            native_pos,
+            native_uv,
+            native_rgba,
+            native_texture_id,
+            use_texture,
+            use_alpha
+        );
+    }
+#endif
+    
+    for (int i = 0; i < 3; i++) {
+"@
+if (-not $gfxPcText.Contains($captureNeedle)) {
+    throw "Could not locate native triangle capture point in $gfxPcSource"
+}
+$gfxPcText = $gfxPcText.Replace($captureNeedle, $captureReplacement)
+Set-Content -Path $gfxPcSource -Value $gfxPcText -Encoding UTF8
+
+Copy-Item $gfxDummySource $gfxDummyBackup -Force
+$gfxDummyText = Get-Content $gfxDummySource -Raw
+
+$dummyIncludeNeedle = '#include "gfx_rendering_api.h"'
+$dummyIncludeReplacement = @"
+#include "gfx_rendering_api.h"
+#include "gfx_cc.h"
+
+struct ShaderProgram {
+    uint32_t shader_id;
+};
+
+static struct ShaderProgram gIw4lShaderPool[128];
+static uint32_t gIw4lShaderCount = 0;
+static uint32_t gIw4lNextTextureId = 1;
+static uint32_t gIw4lSelectedTextures[2] = {0,0};
+static int gIw4lLastSelectedTile = 0;
+
+extern void iw4l_sm64_capture_texture(
+    uint32_t id,
+    const uint8_t *rgba,
+    uint32_t width,
+    uint32_t height
+);
+"@
+if (-not $gfxDummyText.Contains($dummyIncludeNeedle)) {
+    throw "Could not locate dummy renderer include point in $gfxDummySource"
+}
+$gfxDummyText = $gfxDummyText.Replace($dummyIncludeNeedle, $dummyIncludeReplacement)
+
+$createShaderNeedle = @"
+static struct ShaderProgram *gfx_dummy_renderer_create_and_load_new_shader(uint32_t shader_id) {
+    return NULL;
+}
+
+static struct ShaderProgram *gfx_dummy_renderer_lookup_shader(uint32_t shader_id) {
+    return NULL;
+}
+
+static void gfx_dummy_renderer_shader_get_info(struct ShaderProgram *prg, uint8_t *num_inputs, bool used_textures[2]) {
+    *num_inputs = 0;
+    used_textures[0] = false;
+    used_textures[1] = false;
+}
+
+static uint32_t gfx_dummy_renderer_new_texture(void) {
+    return 0;
+}
+
+static void gfx_dummy_renderer_select_texture(int tile, uint32_t texture_id) {
+}
+
+static void gfx_dummy_renderer_upload_texture(const uint8_t *rgba32_buf, int width, int height) {
+}
+"@
+$createShaderReplacement = @"
+static struct ShaderProgram *gfx_dummy_renderer_create_and_load_new_shader(uint32_t shader_id) {
+    uint32_t i;
+    for (i=0;i<gIw4lShaderCount;i++) {
+        if (gIw4lShaderPool[i].shader_id == shader_id) {
+            return &gIw4lShaderPool[i];
+        }
+    }
+    if (gIw4lShaderCount >= 128) {
+        return &gIw4lShaderPool[0];
+    }
+    gIw4lShaderPool[gIw4lShaderCount].shader_id=shader_id;
+    return &gIw4lShaderPool[gIw4lShaderCount++];
+}
+
+static struct ShaderProgram *gfx_dummy_renderer_lookup_shader(uint32_t shader_id) {
+    uint32_t i;
+    for (i=0;i<gIw4lShaderCount;i++) {
+        if (gIw4lShaderPool[i].shader_id == shader_id) {
+            return &gIw4lShaderPool[i];
+        }
+    }
+    return NULL;
+}
+
+static void gfx_dummy_renderer_shader_get_info(struct ShaderProgram *prg, uint8_t *num_inputs, bool used_textures[2]) {
+    struct CCFeatures features;
+    if (prg == NULL) {
+        *num_inputs=0;
+        used_textures[0]=false;
+        used_textures[1]=false;
+        return;
+    }
+    gfx_cc_get_features(prg->shader_id,&features);
+    *num_inputs=(uint8_t)features.num_inputs;
+    used_textures[0]=features.used_textures[0];
+    used_textures[1]=features.used_textures[1];
+}
+
+static uint32_t gfx_dummy_renderer_new_texture(void) {
+    return gIw4lNextTextureId++;
+}
+
+static void gfx_dummy_renderer_select_texture(int tile, uint32_t texture_id) {
+    if (tile >= 0 && tile < 2) {
+        gIw4lSelectedTextures[tile]=texture_id;
+        gIw4lLastSelectedTile=tile;
+    }
+}
+
+static void gfx_dummy_renderer_upload_texture(const uint8_t *rgba32_buf, int width, int height) {
+    uint32_t id=gIw4lSelectedTextures[gIw4lLastSelectedTile];
+    if (id != 0 && rgba32_buf != NULL && width > 0 && height > 0) {
+        iw4l_sm64_capture_texture(id,rgba32_buf,(uint32_t)width,(uint32_t)height);
+    }
+}
+"@
+if (-not $gfxDummyText.Contains($createShaderNeedle)) {
+    throw "Could not locate dummy renderer shader/texture callbacks in $gfxDummySource"
+}
+$gfxDummyText = $gfxDummyText.Replace($createShaderNeedle, $createShaderReplacement)
+Set-Content -Path $gfxDummySource -Value $gfxDummyText -Encoding UTF8
+
 try {
     Push-Location $root
     try {
@@ -389,5 +776,17 @@ finally {
     if (Test-Path $objectProcessorBackup) {
         Copy-Item $objectProcessorBackup $objectProcessorSource -Force
         Remove-Item $objectProcessorBackup -Force
+    }
+    if (Test-Path $renderGraphBackup) {
+        Copy-Item $renderGraphBackup $renderGraphSource -Force
+        Remove-Item $renderGraphBackup -Force
+    }
+    if (Test-Path $gfxPcBackup) {
+        Copy-Item $gfxPcBackup $gfxPcSource -Force
+        Remove-Item $gfxPcBackup -Force
+    }
+    if (Test-Path $gfxDummyBackup) {
+        Copy-Item $gfxDummyBackup $gfxDummySource -Force
+        Remove-Item $gfxDummyBackup -Force
     }
 }
