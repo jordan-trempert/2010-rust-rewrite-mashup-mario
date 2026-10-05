@@ -116,7 +116,23 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     }
 }
 
-fn launch_installed_sm64_cod_map(
+fn arm_sm64_cod_external_presentation(
+    pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
+    active: Option<Res<sm64_bevy::Sm64CodActive>>,
+    external: Option<Res<frame::ExternalWorldPresentation>>,
+    mut commands: Commands,
+) {
+    if pending.is_some() || active.is_some() {
+        if !external.is_some_and(|value|value.0) {
+            // Arm this before MatchInstalled/world-spawn processing so the
+            // donor Rust scene never gets a visible frame ahead of BOB.
+            commands.insert_resource(frame::ExternalWorldPresentation(true));
+        }
+    }
+}
+
+fn arm_sm64_cod_external_presentation,
+                launch_installed_sm64_cod_map(
     mut installed: MessageReader<frame::MatchInstalled>,
     pending: Option<Res<sm64_bevy::Sm64CodMapRequest>>,
     mut authority: Option<ResMut<net::AuthorityWorld>>,
