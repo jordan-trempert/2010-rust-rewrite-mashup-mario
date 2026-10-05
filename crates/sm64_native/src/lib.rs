@@ -1,9 +1,12 @@
 use std::{
+    collections::VecDeque,
     env,
     fmt,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
 };
 
 const REQUEST_MAGIC: u32 = 0x3151_4D53; // "SMQ1"
@@ -110,6 +113,7 @@ pub struct NativeClient {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl NativeClient {
@@ -142,7 +146,7 @@ impl NativeClient {
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| {
                 NativeBridgeError::new(format!("failed to launch {}: {error}", bridge.display()))
@@ -155,10 +159,34 @@ impl NativeClient {
             .stdout
             .take()
             .ok_or_else(|| NativeBridgeError::new("native bridge stdout unavailable"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| NativeBridgeError::new("native bridge stderr unavailable"))?;
+        let stderr_tail=Arc::new(Mutex::new(VecDeque::with_capacity(64)));
+        let stderr_tail_writer=Arc::clone(&stderr_tail);
+        thread::Builder::new()
+            .name("sm64-native-stderr".to_owned())
+            .spawn(move || {
+                let reader=BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("{line}");
+                    if let Ok(mut tail)=stderr_tail_writer.lock() {
+                        if tail.len()>=64 {
+                            tail.pop_front();
+                        }
+                        tail.push_back(line);
+                    }
+                }
+            })
+            .map_err(|error| NativeBridgeError::new(format!(
+                "failed to start native bridge stderr reader: {error}"
+            )))?;
         Ok(Self {
             child,
             stdin,
             stdout,
+            stderr_tail,
         })
     }
 
@@ -176,7 +204,16 @@ impl NativeClient {
                         "; failed to query native bridge process status: {status_error}"
                     ),
                 };
-                Err(NativeBridgeError::new(format!("{error}{child_state}")))
+                let native_tail=self.stderr_tail
+                    .lock()
+                    .ok()
+                    .map(|tail|tail.iter().cloned().collect::<Vec<_>>().join(" | "))
+                    .filter(|tail|!tail.is_empty())
+                    .map(|tail|format!("; native stderr tail: {tail}"))
+                    .unwrap_or_default();
+                Err(NativeBridgeError::new(format!(
+                    "{error}{child_state}{native_tail}"
+                )))
             }
         }
     }
