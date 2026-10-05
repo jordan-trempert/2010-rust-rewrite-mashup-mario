@@ -17,7 +17,6 @@
 #include "behavior_data.h"
 #include "level_commands.h"
 #include "dialog_ids.h"
-#include "course_table.h"
 #include "levels/scripts.h"
 #include "game/area.h"
 #include "game/game_init.h"
@@ -2187,7 +2186,12 @@ IW4L_SM64_API int iw4l_sm64_init(
     if (selected_act < 1 || selected_act > 6) {
         selected_act = 1;
         if (level->course >= COURSE_MIN && level->course <= COURSE_STAGES_MAX) {
-            const s32 course_index = COURSE_NUM_TO_INDEX(level->course);
+            /*
+             * COURSE_NUM_TO_INDEX is simply (course - 1), but some sm64-port
+             * forks do not expose that macro in the pc_main translation unit
+             * after our bridge is injected. Avoid the header-layout dependency.
+             */
+            const s32 course_index = (s32)level->course - 1;
             const u32 star_flags = save_file_get_star_flags(0, course_index);
             int candidate;
             for (candidate = 1; candidate <= 6; ++candidate) {
