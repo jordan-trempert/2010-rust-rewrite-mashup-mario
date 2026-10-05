@@ -166,6 +166,25 @@ impl NativeClient {
         &mut self,
         player: NativePlayerProxy,
     ) -> Result<NativeSnapshot, NativeBridgeError> {
+        match self.step_inner(player) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(error) => {
+                let child_state = match self.child.try_wait() {
+                    Ok(Some(status)) => format!("; native bridge exited with {status}"),
+                    Ok(None) => "; native bridge is still running".to_owned(),
+                    Err(status_error) => format!(
+                        "; failed to query native bridge process status: {status_error}"
+                    ),
+                };
+                Err(NativeBridgeError::new(format!("{error}{child_state}")))
+            }
+        }
+    }
+
+    fn step_inner(
+        &mut self,
+        player: NativePlayerProxy,
+    ) -> Result<NativeSnapshot, NativeBridgeError> {
         write_u32(&mut self.stdin, REQUEST_MAGIC)?;
         write_u32(&mut self.stdin, OP_STEP)?;
         for value in player.pos {
